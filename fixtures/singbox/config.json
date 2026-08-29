@@ -1,0 +1,11 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "unknown-field": { "keep": "中文" },
+  "unknown-field": { "keep": "duplicate is retained" },
+  "outbounds": [
+    { "type": "direct", "tag": "direct" }
+  ]
+}

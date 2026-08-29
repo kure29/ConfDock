@@ -1,0 +1,17 @@
+# Synthetic fixture: no real credentials.
+mixed-port: 7890
+allow-lan: true
+
+# Quotes, anchors, aliases, merge keys and block scalar must survive edits.
+profile: &profile
+  store-selected: true
+  note: 'keep single quotes'
+defaults: *profile
+merged: {<<: *profile, mode: "safe"}
+unicode-note: "家庭网络"
+script: |-
+  line one
+  line two
+unknown-extension: custom-value
+duplicate-key: one
+duplicate-key: two

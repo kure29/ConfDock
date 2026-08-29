@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/confdock-core",
+    "crates/confdock-validator",
+]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+version = "0.1.0"
+rust-version = "1.74"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
