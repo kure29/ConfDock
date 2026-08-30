@@ -50,15 +50,18 @@ pub async fn sign_in(
         .fetch_optional(&state.pool)
         .await
         .map_err(|_| ApiError::internal())?;
-    let valid = if valid_password(&input.password) {
-        match hash {
-            Some(hash) => verify_password_async(input.password, hash)
-                .await
-                .map_err(|_| ApiError::internal())?,
-            None => false,
+    let valid = {
+        let _hash_slot = state.login_throttle.password_hash_slot().await;
+        if valid_password(&input.password) {
+            match hash {
+                Some(hash) => verify_password_async(input.password, hash)
+                    .await
+                    .map_err(|_| ApiError::internal())?,
+                None => false,
+            }
+        } else {
+            false
         }
-    } else {
-        false
     };
     if !valid {
         state.login_throttle.record_failure().await;
@@ -123,9 +126,12 @@ pub async fn change_password(
         .map_err(|_| ApiError::internal())?
         .try_get("password_hash")
         .map_err(|_| ApiError::internal())?;
-    let verified = verify_password_async(input.current_password, hash)
-        .await
-        .map_err(|_| ApiError::internal())?;
+    let verified = {
+        let _hash_slot = state.login_throttle.password_hash_slot().await;
+        verify_password_async(input.current_password.clone(), hash)
+            .await
+            .map_err(|_| ApiError::internal())?
+    };
     if !verified {
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
@@ -133,9 +139,12 @@ pub async fn change_password(
             "当前密码不正确",
         ));
     }
-    let next_hash = hash_password_async(input.next_password)
-        .await
-        .map_err(|_| ApiError::internal())?;
+    let next_hash = {
+        let _hash_slot = state.login_throttle.password_hash_slot().await;
+        hash_password_async(input.next_password)
+            .await
+            .map_err(|_| ApiError::internal())?
+    };
     let mut transaction = state.pool.begin().await.map_err(|_| ApiError::internal())?;
     sqlx::query("UPDATE admins SET password_hash = ?, updated_at = ? WHERE id = 1")
         .bind(next_hash)

@@ -7,7 +7,7 @@ use crate::{
     auth::{random_token, token_hash, unix_timestamp},
     dto::{
         timestamp_to_iso, AccessTokenDto, CreatedAccessTokenDto, ProjectDto, ProjectSummaryDto,
-        SaveResultDto, ValidationResultDto,
+        RevisionDto, RevisionSummaryDto, SaveResultDto, ValidationResultDto,
     },
     error::ApiError,
 };
@@ -16,6 +16,24 @@ const FULL_PROJECT_QUERY: &str =
     "SELECT p.id, p.name, p.target_id, p.file_name, p.current_revision_id, \
      p.served_revision_id, p.last_validation_result, p.updated_at, r.source_bytes \
      FROM projects p JOIN config_revisions r ON r.id = p.served_revision_id WHERE p.id = ?";
+const SUMMARY_PROJECT_QUERY: &str =
+    "SELECT p.id, p.name, p.target_id, p.file_name, p.last_validation_result, \
+     p.updated_at, length(r.source_bytes) AS byte_length \
+     FROM projects p JOIN config_revisions r ON r.id = p.served_revision_id WHERE p.id = ?";
+const REVISION_LIST_QUERY: &str =
+    "SELECT r.id, r.parent_revision_id, r.revision_no, length(r.source_bytes) AS byte_length, \
+     r.content_hash, \
+     r.validation_result, r.validator_version, r.created_at, \
+     p.current_revision_id, p.served_revision_id \
+     FROM config_revisions r JOIN projects p ON p.id = r.project_id \
+     WHERE r.project_id = ? ORDER BY r.revision_no DESC, r.id";
+const REVISION_DETAIL_QUERY: &str =
+    "SELECT r.id, r.parent_revision_id, r.revision_no, r.source_bytes, \
+     length(r.source_bytes) AS byte_length, r.content_hash, \
+     r.validation_result, r.validator_version, r.created_at, \
+     p.current_revision_id, p.served_revision_id \
+     FROM config_revisions r JOIN projects p ON p.id = r.project_id \
+     WHERE r.project_id = ? AND r.id = ?";
 
 pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummaryDto>, ApiError> {
     let rows = sqlx::query(
@@ -140,6 +158,54 @@ pub async fn save_revision(
     finish_transaction(connection, result).await
 }
 
+pub async fn list_revisions(
+    pool: &SqlitePool,
+    project_id: &str,
+) -> Result<Vec<RevisionSummaryDto>, ApiError> {
+    let mut connection = begin_deferred(pool).await?;
+    let result = list_revisions_connection(&mut connection, project_id).await;
+    finish_transaction(connection, result).await
+}
+
+async fn list_revisions_connection(
+    connection: &mut PoolConnection<Sqlite>,
+    project_id: &str,
+) -> Result<Vec<RevisionSummaryDto>, ApiError> {
+    ensure_project_connection(connection, project_id).await?;
+    let rows = sqlx::query(REVISION_LIST_QUERY)
+        .bind(project_id)
+        .fetch_all(&mut **connection)
+        .await
+        .map_err(|_| ApiError::internal())?;
+    rows.iter().map(revision_summary_from_row).collect()
+}
+
+pub async fn get_revision(
+    pool: &SqlitePool,
+    project_id: &str,
+    revision_id: &str,
+) -> Result<RevisionDto, ApiError> {
+    let mut connection = begin_deferred(pool).await?;
+    let result = get_revision_connection(&mut connection, project_id, revision_id).await;
+    finish_transaction(connection, result).await
+}
+
+async fn get_revision_connection(
+    connection: &mut PoolConnection<Sqlite>,
+    project_id: &str,
+    revision_id: &str,
+) -> Result<RevisionDto, ApiError> {
+    ensure_project_connection(connection, project_id).await?;
+    let row = sqlx::query(REVISION_DETAIL_QUERY)
+        .bind(project_id)
+        .bind(revision_id)
+        .fetch_optional(&mut **connection)
+        .await
+        .map_err(|_| ApiError::internal())?
+        .ok_or_else(ApiError::revision_not_found)?;
+    revision_from_row(&row)
+}
+
 async fn save_revision_inner(
     connection: &mut PoolConnection<Sqlite>,
     project_id: &str,
@@ -262,25 +328,31 @@ pub async fn rename_project(
     id: &str,
     name: &str,
 ) -> Result<ProjectSummaryDto, ApiError> {
+    let mut connection = begin_immediate(pool).await?;
+    let result = rename_project_inner(&mut connection, id, name).await;
+    finish_transaction(connection, result).await
+}
+
+async fn rename_project_inner(
+    connection: &mut PoolConnection<Sqlite>,
+    id: &str,
+    name: &str,
+) -> Result<ProjectSummaryDto, ApiError> {
     let result = sqlx::query("UPDATE projects SET name = ?, updated_at = ? WHERE id = ?")
         .bind(name)
         .bind(unix_timestamp())
         .bind(id)
-        .execute(pool)
+        .execute(&mut **connection)
         .await
         .map_err(|_| ApiError::internal())?;
     if result.rows_affected() == 0 {
         return Err(ApiError::not_found("project.not_found", "配置不存在"));
     }
-    let row = sqlx::query(
-        "SELECT p.id, p.name, p.target_id, p.file_name, p.last_validation_result, \
-         p.updated_at, length(r.source_bytes) AS byte_length \
-         FROM projects p JOIN config_revisions r ON r.id = p.served_revision_id WHERE p.id = ?",
-    )
-    .bind(id)
-    .fetch_one(pool)
-    .await
-    .map_err(|_| ApiError::internal())?;
+    let row = sqlx::query(SUMMARY_PROJECT_QUERY)
+        .bind(id)
+        .fetch_one(&mut **connection)
+        .await
+        .map_err(|_| ApiError::internal())?;
     summary_from_row(&row)
 }
 
@@ -300,13 +372,22 @@ pub async fn list_tokens(
     pool: &SqlitePool,
     project_id: &str,
 ) -> Result<Vec<AccessTokenDto>, ApiError> {
-    ensure_project(pool, project_id).await?;
+    let mut connection = begin_deferred(pool).await?;
+    let result = list_tokens_connection(&mut connection, project_id).await;
+    finish_transaction(connection, result).await
+}
+
+async fn list_tokens_connection(
+    connection: &mut PoolConnection<Sqlite>,
+    project_id: &str,
+) -> Result<Vec<AccessTokenDto>, ApiError> {
+    ensure_project_connection(connection, project_id).await?;
     let rows = sqlx::query(
         "SELECT id, token_prefix, token_suffix, created_at, last_used_at \
          FROM access_tokens WHERE project_id = ? AND revoked_at IS NULL ORDER BY created_at DESC, id",
     )
     .bind(project_id)
-    .fetch_all(pool)
+    .fetch_all(&mut **connection)
     .await
     .map_err(|_| ApiError::internal())?;
     rows.iter().map(token_from_row).collect()
@@ -317,7 +398,17 @@ pub async fn create_token(
     project_id: &str,
     public_url: &str,
 ) -> Result<CreatedAccessTokenDto, ApiError> {
-    ensure_project(pool, project_id).await?;
+    let mut connection = begin_immediate(pool).await?;
+    let result = create_token_inner(&mut connection, project_id, public_url).await;
+    finish_transaction(connection, result).await
+}
+
+async fn create_token_inner(
+    connection: &mut PoolConnection<Sqlite>,
+    project_id: &str,
+    public_url: &str,
+) -> Result<CreatedAccessTokenDto, ApiError> {
+    ensure_project_connection(connection, project_id).await?;
     let plaintext = random_token();
     let hash = token_hash(&plaintext);
     let now = unix_timestamp();
@@ -345,7 +436,7 @@ pub async fn create_token(
     .bind(&token.prefix)
     .bind(&token.suffix)
     .bind(now)
-    .execute(pool)
+    .execute(&mut **connection)
     .await
     .map_err(|_| ApiError::internal())?;
     Ok(CreatedAccessTokenDto {
@@ -360,7 +451,17 @@ pub async fn revoke_token(
     project_id: &str,
     token_id: &str,
 ) -> Result<(), ApiError> {
-    ensure_project(pool, project_id).await?;
+    let mut connection = begin_immediate(pool).await?;
+    let result = revoke_token_inner(&mut connection, project_id, token_id).await;
+    finish_transaction(connection, result).await
+}
+
+async fn revoke_token_inner(
+    connection: &mut PoolConnection<Sqlite>,
+    project_id: &str,
+    token_id: &str,
+) -> Result<(), ApiError> {
+    ensure_project_connection(connection, project_id).await?;
     let result = sqlx::query(
         "UPDATE access_tokens SET revoked_at = ? \
          WHERE id = ? AND project_id = ? AND revoked_at IS NULL",
@@ -368,7 +469,7 @@ pub async fn revoke_token(
     .bind(unix_timestamp())
     .bind(token_id)
     .bind(project_id)
-    .execute(pool)
+    .execute(&mut **connection)
     .await
     .map_err(|_| ApiError::internal())?;
     if result.rows_affected() == 0 {
@@ -414,10 +515,13 @@ pub async fn subscription(pool: &SqlitePool, plaintext: &str) -> Result<Subscrip
     Ok(result)
 }
 
-async fn ensure_project(pool: &SqlitePool, id: &str) -> Result<(), ApiError> {
+async fn ensure_project_connection(
+    connection: &mut PoolConnection<Sqlite>,
+    id: &str,
+) -> Result<(), ApiError> {
     let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?)")
         .bind(id)
-        .fetch_one(pool)
+        .fetch_one(&mut **connection)
         .await
         .map_err(|_| ApiError::internal())?;
     if exists {
@@ -495,6 +599,69 @@ fn project_from_row(row: &SqliteRow) -> Result<ProjectDto, ApiError> {
     })
 }
 
+fn revision_summary_from_row(row: &SqliteRow) -> Result<RevisionSummaryDto, ApiError> {
+    let validation_json: String = row
+        .try_get("validation_result")
+        .map_err(|_| ApiError::internal())?;
+    let content_hash: Vec<u8> = row
+        .try_get("content_hash")
+        .map_err(|_| ApiError::internal())?;
+    let current_revision_id: String = row
+        .try_get("current_revision_id")
+        .map_err(|_| ApiError::internal())?;
+    let served_revision_id: String = row
+        .try_get("served_revision_id")
+        .map_err(|_| ApiError::internal())?;
+    let revision_id: String = row.try_get("id").map_err(|_| ApiError::internal())?;
+    let revision_no: i64 = row
+        .try_get("revision_no")
+        .map_err(|_| ApiError::internal())?;
+    let byte_length = usize::try_from(
+        row.try_get::<i64, _>("byte_length")
+            .map_err(|_| ApiError::internal())?,
+    )
+    .map_err(|_| ApiError::internal())?;
+    if revision_no <= 0 || content_hash.len() != 32 {
+        return Err(ApiError::internal());
+    }
+    Ok(RevisionSummaryDto {
+        id: revision_id.clone(),
+        revision_no,
+        parent_revision_id: row
+            .try_get("parent_revision_id")
+            .map_err(|_| ApiError::internal())?,
+        created_at: timestamp_to_iso(
+            row.try_get("created_at")
+                .map_err(|_| ApiError::internal())?,
+        )
+        .ok_or_else(ApiError::internal)?,
+        byte_length,
+        content_hash: hex_encode(&content_hash)?,
+        validation: serde_json::from_str(&validation_json).map_err(|_| ApiError::internal())?,
+        validator_version: row
+            .try_get("validator_version")
+            .map_err(|_| ApiError::internal())?,
+        is_current: current_revision_id == revision_id,
+        is_served: served_revision_id == revision_id,
+    })
+}
+
+fn revision_from_row(row: &SqliteRow) -> Result<RevisionDto, ApiError> {
+    let source: Vec<u8> = row
+        .try_get("source_bytes")
+        .map_err(|_| ApiError::internal())?;
+    let content_hash: Vec<u8> = row
+        .try_get("content_hash")
+        .map_err(|_| ApiError::internal())?;
+    if content_hash.as_slice() != Sha256::digest(&source).as_slice() {
+        return Err(ApiError::internal());
+    }
+    Ok(RevisionDto {
+        summary: revision_summary_from_row(row)?,
+        source: STANDARD.encode(source),
+    })
+}
+
 fn token_from_row(row: &SqliteRow) -> Result<AccessTokenDto, ApiError> {
     let last_used_at = match row
         .try_get::<Option<i64>, _>("last_used_at")
@@ -522,6 +689,28 @@ fn token_from_row(row: &SqliteRow) -> Result<AccessTokenDto, ApiError> {
 
 fn serialize_validation(validation: &ValidationResultDto) -> Result<String, ApiError> {
     serde_json::to_string(validation).map_err(|_| ApiError::internal())
+}
+
+fn hex_encode(bytes: &[u8]) -> Result<String, ApiError> {
+    if bytes.len() != 32 {
+        return Err(ApiError::internal());
+    }
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    Ok(encoded)
+}
+
+async fn begin_deferred(pool: &SqlitePool) -> Result<PoolConnection<Sqlite>, ApiError> {
+    let mut connection = pool.acquire().await.map_err(|_| ApiError::internal())?;
+    sqlx::query("BEGIN")
+        .execute(&mut *connection)
+        .await
+        .map_err(|_| ApiError::internal())?;
+    Ok(connection)
 }
 
 async fn begin_immediate(pool: &SqlitePool) -> Result<PoolConnection<Sqlite>, ApiError> {

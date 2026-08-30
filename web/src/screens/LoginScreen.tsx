@@ -45,7 +45,7 @@ export function LoginScreen() {
       <form className={styles.card} onSubmit={(event) => void onSubmit(event)}>
         <div className={styles.heading}>
           <h1 className={styles.brand}>ConfDock</h1>
-          <p className={styles.subtitle}>自建的代理配置托管</p>
+          <p className={styles.subtitle}>原生配置管理与稳定分发</p>
         </div>
 
         <TextField

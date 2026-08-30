@@ -31,7 +31,11 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/projects/{id}/revisions",
-            post(projects::save_revision),
+            get(projects::list_revisions).post(projects::save_revision),
+        )
+        .route(
+            "/api/projects/{id}/revisions/{revision_id}",
+            get(projects::get_revision),
         )
         .route(
             "/api/projects/{id}/tokens",
@@ -58,7 +62,24 @@ pub fn router(state: AppState) -> Router {
         )
         .merge(protected)
         .layer(DefaultBodyLimit::max(state.config.max_json_body_bytes()))
+        .layer(middleware::from_fn(no_store_api_responses))
         .with_state(state)
+}
+
+/// Management responses contain session and configuration metadata. Browsers
+/// and intermediary caches must never retain them, including error responses
+/// produced by authentication, routing, or body-limit middleware.
+async fn no_store_api_responses(request: Request, next: Next) -> Response {
+    let path = request.uri().path();
+    let is_sensitive_endpoint =
+        path == "/api" || path.starts_with("/api/") || path == "/sub" || path.starts_with("/sub/");
+    let mut response = next.run(request).await;
+    if is_sensitive_endpoint {
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
+    response
 }
 
 async fn require_session(

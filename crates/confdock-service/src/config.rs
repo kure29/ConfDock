@@ -1,4 +1,7 @@
-use std::{env, net::SocketAddr, path::PathBuf};
+use std::{env, fs, net::SocketAddr, path::PathBuf};
+
+#[cfg(unix)]
+use std::{ffi::OsString, os::unix::fs::PermissionsExt, path::Path};
 
 use thiserror::Error;
 use url::Url;
@@ -8,6 +11,8 @@ pub const DEFAULT_DATABASE_URL: &str = "sqlite://data/confdock.db";
 pub const DEFAULT_PUBLIC_URL: &str = "http://127.0.0.1:8787";
 pub const DEFAULT_SESSION_TTL_SECONDS: i64 = 604_800;
 pub const DEFAULT_MAX_CONFIG_BYTES: usize = 8_388_608;
+pub const MAX_SESSION_TTL_SECONDS: i64 = 31_536_000;
+pub const MAX_CONFIG_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_PASSWORD_BYTES: usize = 1_024;
 
 #[derive(Clone, Debug)]
@@ -29,14 +34,18 @@ pub enum ConfigError {
     InvalidDatabaseUrl,
     #[error("CONFDOCK_PUBLIC_URL must be an http(s) URL without credentials, query, or fragment")]
     InvalidPublicUrl,
-    #[error("CONFDOCK_SESSION_TTL_SECONDS must be a positive integer")]
+    #[error("CONFDOCK_SESSION_TTL_SECONDS must be between 1 and 31536000 seconds")]
     InvalidSessionTtl,
     #[error("CONFDOCK_COOKIE_SECURE must be true or false")]
     InvalidCookieSecure,
-    #[error("CONFDOCK_MAX_CONFIG_BYTES must be a positive integer")]
+    #[error("CONFDOCK_MAX_CONFIG_BYTES must be between 1 and 67108864 bytes")]
     InvalidMaxConfigBytes,
     #[error("the SQLite database parent directory could not be created")]
     DatabaseDirectory,
+    #[error(
+        "the SQLite database files must be regular, non-symlink files with private permissions"
+    )]
+    DatabasePermissions,
 }
 
 impl ServiceConfig {
@@ -84,10 +93,10 @@ impl ServiceConfig {
             return Err(ConfigError::InvalidDatabaseUrl);
         }
         let public_url = normalize_public_url(&public_url)?;
-        if session_ttl_seconds <= 0 {
+        if !(1..=MAX_SESSION_TTL_SECONDS).contains(&session_ttl_seconds) {
             return Err(ConfigError::InvalidSessionTtl);
         }
-        if max_config_bytes == 0 {
+        if !(1..=MAX_CONFIG_BYTES).contains(&max_config_bytes) {
             return Err(ConfigError::InvalidMaxConfigBytes);
         }
         Ok(Self {
@@ -109,8 +118,32 @@ impl ServiceConfig {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
         {
-            std::fs::create_dir_all(parent).map_err(|_| ConfigError::DatabaseDirectory)?;
+            fs::create_dir_all(parent).map_err(|_| ConfigError::DatabaseDirectory)?;
         }
+        self.secure_database_permissions()
+    }
+
+    /// Restrict SQLite's primary file and WAL sidecars on Unix. SQLite creates
+    /// these files itself, so this is called both before opening an existing
+    /// database and immediately after opening/migrating a new one.
+    pub fn secure_database_permissions(&self) -> Result<(), ConfigError> {
+        let Some(path) = self.database_path() else {
+            return Ok(());
+        };
+
+        #[cfg(unix)]
+        {
+            secure_file_if_exists(&path)?;
+            for suffix in ["-wal", "-shm"] {
+                let mut sidecar = OsString::from(path.as_os_str());
+                sidecar.push(suffix);
+                secure_file_if_exists(Path::new(&sidecar))?;
+            }
+        }
+
+        #[cfg(not(unix))]
+        let _ = path;
+
         Ok(())
     }
 
@@ -129,6 +162,21 @@ impl ServiceConfig {
             Some(PathBuf::from(raw))
         }
     }
+}
+
+#[cfg(unix)]
+fn secure_file_if_exists(path: &Path) -> Result<(), ConfigError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err(ConfigError::DatabasePermissions),
+    };
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+        return Err(ConfigError::DatabasePermissions);
+    }
+    let mut permissions = metadata.permissions();
+    permissions.set_mode(0o600);
+    fs::set_permissions(path, permissions).map_err(|_| ConfigError::DatabasePermissions)
 }
 
 fn normalize_public_url(value: &str) -> Result<String, ConfigError> {
@@ -189,5 +237,92 @@ mod tests {
         assert!(normalize_public_url("file:///tmp/config").is_err());
         assert!(normalize_public_url("https://user@example.test").is_err());
         assert!(normalize_public_url("https://example.test/?token=secret").is_err());
+    }
+
+    #[test]
+    fn resource_limits_have_explicit_upper_bounds() {
+        let base = |ttl, max_bytes| {
+            ServiceConfig::new(
+                "127.0.0.1:8787".parse().unwrap(),
+                "sqlite://data/test.db".to_owned(),
+                "http://127.0.0.1:8787".to_owned(),
+                None,
+                ttl,
+                false,
+                max_bytes,
+            )
+        };
+        assert!(base(MAX_SESSION_TTL_SECONDS, MAX_CONFIG_BYTES).is_ok());
+        assert!(matches!(
+            base(MAX_SESSION_TTL_SECONDS + 1, MAX_CONFIG_BYTES),
+            Err(ConfigError::InvalidSessionTtl)
+        ));
+        assert!(matches!(
+            base(1, MAX_CONFIG_BYTES + 1),
+            Err(ConfigError::InvalidMaxConfigBytes)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_database_files_are_restricted_to_owner_only() {
+        use std::{fs::OpenOptions, os::unix::fs::PermissionsExt};
+
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("confdock.db");
+        for suffix in ["", "-wal", "-shm"] {
+            let path = directory.path().join(format!("confdock.db{suffix}"));
+            OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(&path)
+                .unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        let config = ServiceConfig::new(
+            "127.0.0.1:8787".parse().unwrap(),
+            format!("sqlite://{}", database.display()),
+            "http://127.0.0.1:8787".to_owned(),
+            None,
+            60,
+            false,
+            1024,
+        )
+        .unwrap();
+        config.secure_database_permissions().unwrap();
+        for suffix in ["", "-wal", "-shm"] {
+            let path = directory.path().join(format!("confdock.db{suffix}"));
+            assert_eq!(
+                fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn database_symlinks_are_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("target.db");
+        fs::write(&target, b"not a database").unwrap();
+        let database = directory.path().join("confdock.db");
+        symlink(&target, &database).unwrap();
+        let config = ServiceConfig::new(
+            "127.0.0.1:8787".parse().unwrap(),
+            format!("sqlite://{}", database.display()),
+            "http://127.0.0.1:8787".to_owned(),
+            None,
+            60,
+            false,
+            1024,
+        )
+        .unwrap();
+        assert!(matches!(
+            config.secure_database_permissions(),
+            Err(ConfigError::DatabasePermissions)
+        ));
     }
 }

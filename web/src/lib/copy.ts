@@ -203,6 +203,32 @@ export const SERVED_POINTER_NOTICE =
   '保存即生效：托管地址总是指向最新一次保存成功的内容，没有单独的发布步骤。'
 
 // ---------------------------------------------------------------------------
+// Revision history (read-only Slice 2)
+// ---------------------------------------------------------------------------
+
+export const REVISION_HISTORY_DESCRIPTION =
+  '每次内容变化都会留下一个不可修改的版本；历史版本只读查看，不会改变当前托管内容。'
+export const REVISION_HISTORY_EMPTY = '还没有可查看的版本。'
+export const REVISION_HISTORY_LOADING = '正在读取版本历史…'
+export const REVISION_HISTORY_SELECT = '选择一个版本查看原始字节。'
+export const REVISION_HISTORY_DETAIL_LOADING = '正在读取这个版本…'
+export const REVISION_HISTORY_RETRY = '重试'
+export const REVISION_HISTORY_SOURCE_NOTICE =
+  '这是历史版本的原始字节，只读查看；它不会替换当前编辑内容。'
+export const REVISION_CURRENT_LABEL = '当前'
+export const REVISION_SERVED_LABEL = '托管中'
+export const REVISION_PARENT_LABEL = '父版本'
+export const REVISION_HASH_LABEL = 'SHA-256'
+export const REVISION_LIST_LABEL = '版本列表'
+export const REVISION_DETAIL_LABEL = '版本详情'
+export const REVISION_NUMBER_PREFIX = '版本 '
+export const REVISION_CREATED_LABEL = '创建时间'
+export const REVISION_BYTES_LABEL = '字节数'
+export const REVISION_NO_PARENT = '无（初始版本）'
+export const REVISION_VALIDATOR_VERSION_LABEL = '校验器版本'
+export const REVISION_SOURCE_TITLE_SUFFIX = ' 的源码'
+
+// ---------------------------------------------------------------------------
 // Access tokens (architecture.md §Security)
 // ---------------------------------------------------------------------------
 

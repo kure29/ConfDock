@@ -123,6 +123,100 @@ describe('HTTP API error boundary', () => {
     if (result.ok) expect(Array.from(result.value.source)).toEqual([0xef, 0xbb, 0xbf, 1])
     expect(JSON.parse(fetchMock.mock.calls[0]![1].body as string).source).toBe('77u/AQ==')
     expect(fetchMock.mock.calls[0]![1].credentials).toBe('same-origin')
+    expect(fetchMock.mock.calls[0]![1].cache).toBe('no-store')
+  })
+
+  it('decodes ordered revision history metadata without loading source bytes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json([
+        {
+          id: 'r2',
+          revisionNo: 2,
+          parentRevisionId: 'r1',
+          createdAt: '2026-08-30T00:00:01Z',
+          byteLength: 4,
+          contentHash: 'a'.repeat(64),
+          validation: { level: 'syntax', diagnostics: [] },
+          validatorVersion: null,
+          isCurrent: true,
+          isServed: true,
+        },
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await createHttpApi().listRevisions('project/1')
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value[0]?.id).toBe('r2')
+      expect(result.value[0]?.parentRevisionId).toBe('r1')
+    }
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/projects/project%2F1/revisions')
+  })
+
+  it('loads one revision source and rejects a byte-length mismatch', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json({
+          id: 'r1',
+          revisionNo: 1,
+          parentRevisionId: null,
+          createdAt: '2026-08-30T00:00:00Z',
+          byteLength: 3,
+          contentHash: 'b'.repeat(64),
+          validation: { level: 'syntax', diagnostics: [] },
+          validatorVersion: null,
+          isCurrent: false,
+          isServed: false,
+          source: 'e30=',
+        }),
+      ),
+    )
+    const result = await createHttpApi().getRevision('p1', 'r1')
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('network.invalid_response')
+  })
+
+  it('decodes a valid revision detail as native bytes', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json({
+          id: 'r1',
+          revisionNo: 1,
+          parentRevisionId: null,
+          createdAt: '2026-08-30T00:00:00Z',
+          byteLength: 3,
+          contentHash: 'b'.repeat(64),
+          validation: { level: 'syntax', diagnostics: [] },
+          validatorVersion: null,
+          isCurrent: true,
+          isServed: true,
+          source: 'e30A',
+        }),
+      ),
+    )
+    const result = await createHttpApi().getRevision('p1', 'r1')
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(Array.from(result.value.source)).toEqual([0x7b, 0x7d, 0x00])
+  })
+
+  it('rejects malformed revision lists at the HTTP boundary', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json([{ id: 'broken' }])))
+    const result = await createHttpApi().listRevisions('p1')
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+    })
+  })
+
+  it('maps a missing revision to a stable revision.not_found error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 404 })))
+    const result = await createHttpApi().getRevision('p1', 'missing')
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'revision.not_found', message: '版本不存在' },
+    })
   })
 
   it('keeps a structured 500 observable without treating it as success', async () => {

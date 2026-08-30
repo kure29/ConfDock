@@ -1,4 +1,4 @@
-# ConfDock architecture (Slice 1)
+# ConfDock architecture (Slice 2)
 
 ## Product boundary
 
@@ -174,6 +174,10 @@ SQLite migrations run automatically at startup and create:
   usage timestamps, and revocation state.
 
 Foreign keys, WAL, and a busy timeout are enabled on every SQLite connection.
+On Unix, the database file and existing WAL/SHM sidecars are kept as regular,
+non-symlink files with owner-only `0600` permissions. Startup rejects an unsafe
+existing database path. Service configuration caps session lifetime at one year
+and decoded configuration bytes at 64 MiB.
 Deleting a project cascades to its revisions and access tokens. Revision rows
 cannot be updated. To back up a live database, stop writes or use SQLite's
 online backup facilities instead of copying only the main file while WAL is
@@ -194,6 +198,19 @@ and served together. This locking order means two writers with the same
 expected revision cannot both succeed. A later Publish workflow can separate
 the pointers without changing the schema.
 
+### Read-only revision history
+
+Slice 2 exposes immutable revision metadata through the authenticated
+`GET /api/projects/:id/revisions` endpoint, newest first. The list contains the
+revision number, parent ID, creation time, exact-byte length and SHA-256,
+validation snapshot, validator version, and explicit `isCurrent`/`isServed`
+flags; it deliberately omits source BLOBs so a history refresh does not copy
+every configuration into memory or across the wire. The detail endpoint
+`GET /api/projects/:id/revisions/:revisionId` returns one selected revision's
+original bytes as Base64 plus the same metadata. Both operations are read-only:
+selecting or inspecting history never changes pointers, creates a revision, or
+publishes anything. The UI does not offer Diff, Rollback, or Publish actions.
+
 ### Administrator and session security
 
 On the first start only, `CONFDOCK_BOOTSTRAP_PASSWORD` is mandatory and must be
@@ -203,11 +220,18 @@ starts never overwrite the database password from the environment. A password
 change keeps the current session and revokes every other session.
 
 Session plaintext is a URL-safe, unpadded encoding of 32 CSPRNG bytes; only its
-SHA-256 hash is stored. The cookie is `HttpOnly`, `SameSite=Strict`, `Path=/`,
+SHA-256 hash is stored. The cookie is `HttpOnly`, `SameSite=Strict`, `Path=/api`,
 has no `Domain`, and gains `Secure` when `CONFDOCK_COOKIE_SECURE=true`. Expired
 sessions are unusable and cleaned at startup or authentication time. Failed
 logins receive the same `auth.invalid_password` response and increasing short
-backoff.
+backoff. At most two Argon2 operations run concurrently per service process.
+
+Management and subscription responses carry `Cache-Control: no-store`,
+including authentication and error responses, so credentials and configuration
+metadata are not retained by browser or intermediary caches. Deployments that
+listen beyond loopback still require HTTPS and `CONFDOCK_COOKIE_SECURE=true`;
+TLS termination, IP rate limiting, and request filtering remain the proxy's
+responsibility.
 
 ### Stable URL security
 
@@ -231,8 +255,10 @@ Internal errors expose only a safe request ID.
 * **WASM web boundary:** `confdock-wasm` and the React shell consume
   the Rust registry and preserve native bytes; no duplicate parser or registry
   exists in TypeScript.
-* **Slice 1 (current):** single-admin Axum service, SQLite persistence,
+* **Slice 1:** single-admin Axum service, SQLite persistence,
   immutable revisions, concurrency protection, stable URLs, and the real Web
   HTTP seam.
-* **Later:** Publish/Rollback/history UX, optional native validators, embedded
-  Web assets, Docker, and individually scoped adapters or conversion tools.
+* **Slice 2 (current):** read-only revision history metadata/detail API and
+  editor inspection UI, while current and served pointers remain coupled.
+* **Later:** Diff, Publish/Rollback, optional native validators, embedded Web
+  assets, Docker, and individually scoped adapters or conversion tools.

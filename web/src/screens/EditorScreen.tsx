@@ -5,6 +5,7 @@ import type { SourceSpan } from '../core'
 import {
   CapabilityNotice,
   DiagnosticList,
+  RevisionHistory,
   ServedUrlDialog,
   SourceEditor,
   StructuredFieldList,
@@ -30,10 +31,11 @@ import type { TabItem } from '../ui/Tabs'
 import page from './page.module.css'
 import styles from './EditorScreen.module.css'
 
-type EditorTab = 'raw' | 'fields' | 'check'
+type EditorTab = 'raw' | 'fields' | 'check' | 'history'
 
 /**
- * The editor. Three views of one document, defaulting to the raw bytes.
+ * The editor. Three editable/check views plus a read-only history view, all
+ * grounded in one native document, defaulting to the raw bytes.
  *
  * Raw comes first because the bytes are the source of truth (ADR-001): the
  * fields view is a convenience over the same bytes, not a separate model, and it
@@ -54,6 +56,7 @@ export function EditorScreen() {
   const [urlOpen, setUrlOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
+  const [historyRefresh, setHistoryRefresh] = useState(0)
   const nonce = useRef(0)
 
   const { project, text, info, bytes, dirty, validation, validating, saving } = editor
@@ -84,6 +87,7 @@ export function EditorScreen() {
   async function save() {
     const result = await editor.save()
     if (result.ok) {
+      setHistoryRefresh((value) => value + 1)
       toast.notify(result.value.unchanged ? '内容没有变化，未创建新版本' : SAVE_SUCCESS)
       return
     }
@@ -159,6 +163,7 @@ export function EditorScreen() {
       label: '检查',
       badge: problems > 0 ? problems : undefined,
     },
+    { id: 'history', label: '历史' },
   ]
 
   return (
@@ -249,6 +254,17 @@ export function EditorScreen() {
                   onReveal={onReveal}
                 />
               )}
+            </Panel>
+          </TabPanel>
+        )}
+
+        {tab === 'history' && (
+          <TabPanel id="history">
+            <Panel flush>
+              <RevisionHistory
+                projectId={project.id}
+                refreshKey={historyRefresh}
+              />
             </Panel>
           </TabPanel>
         )}

@@ -2,7 +2,7 @@
 
 单管理员的 React 前端：导入一份**原生**客户端配置，改它，校验它，把它托管出去。
 
-界面刻意很小 —— **5 屏 + 1 个对话框**：登录 → 配置列表 → 新建 → 编辑器（原始 / 字段 / 检查）→ 设置，加一个「托管地址」。
+界面刻意很小 —— **5 屏 + 1 个对话框**：登录 → 配置列表 → 新建 → 编辑器（原始 / 字段 / 检查 / 历史）→ 设置，加一个「托管地址」。
 
 ---
 
@@ -50,7 +50,7 @@ Rust、`wasm32-unknown-unknown` 和 `wasm-bindgen-cli 0.2.127`。
 - 字重 2 档：400 / 500。**不用 700**
 - 间距 4px 基：`4 8 12 16 24 32 48`
 - 圆角 2 档：`--radius 6px` / `--radius-sm 4px`
-- 颜色近乎单色 + 一个墨绿强调色；语义色只有 `--warn` 和 `--bad`。**「良好」复用 `--accent`，不引入第三种绿**
+- 颜色近乎单色 + 一个深靛蓝强调色；语义色只有 `--warn` 和 `--bad`。**「良好」复用 `--accent`，不引入额外语义色**
 
 **焦点环全局只有一处定义**（`global.css` 的 `:focus-visible`）。需要不同呼吸感的组件只覆盖 `outline-offset`，永远不要 `outline: none`。
 
@@ -64,7 +64,7 @@ Rust、`wasm32-unknown-unknown` 和 `wasm-bindgen-cli 0.2.127`。
 
 | 没有 | 依据 |
 | --- | --- |
-| 版本历史 / Diff / 回滚 / Publish 按钮 | ADR-004：V1 不暴露草稿与发布。「校验并保存」是一个动作，成功后 `current_revision_id` 和 `served_revision_id` 同时前进 |
+| Diff / 回滚 / Publish 按钮 | ADR-004：当前仍不暴露草稿与发布。「校验并保存」是一个动作，成功后 `current_revision_id` 和 `served_revision_id` 同时前进 |
 | 一份配置生成多端输出 | architecture.md：Project = 一个客户端 + 一个原生文档 |
 | 头像菜单 / 成员 / 角色 / 通知中心 | 单管理员 |
 | 指标卡 / 可用性折线 / 请求数 | 一个人管几个配置，这些数字要么是编的，要么没有意义 |
@@ -138,6 +138,8 @@ GET    /api/projects                  → ProjectSummary[]
 POST   /api/projects                  { name, targetId, fileName, source } → Project
 GET    /api/projects/:id              → Project（source 为当前修订的字节）
 POST   /api/projects/:id/revisions    { source, expectedRevisionId } → { project, validation, unchanged }  ← 校验并保存
+GET    /api/projects/:id/revisions    → RevisionSummary[]（最新在前，不含 source）
+GET    /api/projects/:id/revisions/:revisionId → Revision（选中的历史版本，source 为 Base64）
 PATCH  /api/projects/:id              { name } → ProjectSummary
 DELETE /api/projects/:id
 GET    /api/projects/:id/tokens       → AccessToken[]（只含前后缀）
@@ -153,6 +155,8 @@ Session Token 永远不进 URL。Stable Token 只用于公开的 `/sub/:token`�
 失败响应体是 `{ code, message, validation? }`；保存被校验拦下时 `validation` 必须在里面，编辑器要靠它跳到「检查」。
 保存时服务端比较 `expectedRevisionId` 与当前 revision；不一致返回 HTTP `409`
 和稳定错误码 `revision.conflict`，前端保留当前未保存内容，不自动覆盖或刷新。
+「历史」视图只读取不可变版本的元数据；选择一个版本后才加载其原始字节供只读查看，
+不会替换当前编辑内容，也没有 Diff、回滚或 Publish 操作。
 管理 API 的网络错误、401、403、404、409、500 都以 `Result<T, ApiError>` 传播，
 不会静默转换为空列表、`null` 或“删除成功”。
 
@@ -162,10 +166,13 @@ Session Token 永远不进 URL。Stable Token 只用于公开的 `/sub/:token`�
 
 ## Service 边界
 
-管理员密码使用 Argon2id；Session Cookie 为 `HttpOnly`、`SameSite=Strict`、`Path=/`，
+管理员密码使用 Argon2id；Session Cookie 为 `HttpOnly`、`SameSite=Strict`、`Path=/api`，
 HTTPS 部署通过 `CONFDOCK_COOKIE_SECURE=true` 增加 `Secure`。Session 和 Stable Token
 都是至少 32 字节 CSPRNG 数据，SQLite 只存 SHA-256 Hash。Stable Token 明文和完整 URL
 只在创建响应中出现一次。
+管理 API 和订阅响应都带 `Cache-Control: no-store`，HTTP 客户端也显式使用
+`cache: 'no-store'`。Session 最长一年，解码后的配置最多 64 MiB；Unix 上 SQLite
+主文件及已有 WAL/SHM sidecar 使用 owner-only `0600` 权限，符号链接路径会被拒绝。
 
 配置在管理 JSON 中使用标准 Base64；`GET /sub/:token` 直接返回 served Revision 的 SQLite
 BLOB，不转字符串、不重新序列化、不追加换行。保存使用 `expectedRevisionId` 防并发覆盖，
