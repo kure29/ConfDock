@@ -145,7 +145,7 @@ function decodeRevision(value: unknown): Revision {
   return { ...summary, source }
 }
 
-function decodeRevisionPage(value: unknown, isFirstPage: boolean): RevisionPage {
+function decodeRevisionPage(value: unknown, requestCursor?: string): RevisionPage {
   if (!isRecord(value) || !Array.isArray(value.items)) {
     throw new Error('invalid revision page')
   }
@@ -170,13 +170,13 @@ function decodeRevisionPage(value: unknown, isFirstPage: boolean): RevisionPage 
   ) {
     throw new Error('cursor does not point at the last item')
   }
+  if (typeof value.nextCursor === 'string' && value.nextCursor === requestCursor) {
+    throw new Error('cursor repeats the request cursor')
+  }
   const currentCount = items.filter((revision) => revision.isCurrent).length
   const servedCount = items.filter((revision) => revision.isServed).length
   if (currentCount > 1 || servedCount > 1) {
     throw new Error('invalid revision pointers')
-  }
-  if (isFirstPage && (items.length === 0 || currentCount !== 1 || servedCount !== 1)) {
-    throw new Error('invalid first revision page')
   }
   if (items.length === 0 && value.nextCursor !== null) {
     throw new Error('empty revision page has a cursor')
@@ -345,7 +345,7 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
         return result
       }
       try {
-        return ok(decodeRevisionPage(result.value, options?.cursor === undefined))
+        return ok(decodeRevisionPage(result.value, options?.cursor))
       } catch {
         return err(invalidResponse())
       }

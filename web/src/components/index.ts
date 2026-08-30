@@ -6,10 +6,19 @@ export { ProjectRow } from './ProjectRow'
 export {
   RevisionHistory,
   RevisionHistoryView,
+  applyRevisionPage,
+  beginRevisionPageRequest,
+  createRevisionPaginationState,
   isRevisionRequestCurrent,
   mergeRevisionItems,
+  releaseRevisionPageRequest,
 } from './RevisionHistory'
-export type { RevisionHistoryViewProps } from './RevisionHistory'
+export type {
+  RevisionHistoryViewProps,
+  RevisionPaginationState,
+  RevisionPaginationTransition,
+  RevisionRequestTransition,
+} from './RevisionHistory'
 export { ServedUrlDialog } from './ServedUrlDialog'
 export { SourceEditor, diagnosticMarkers } from './SourceEditor'
 export type { EditorMarker, RevealRequest } from './SourceEditor'

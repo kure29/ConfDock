@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
-import type { Revision, RevisionSummary } from '../api'
+import type { Revision, RevisionPage, RevisionSummary } from '../api'
 import { decodeToEditor } from '../lib/bytes'
 import {
   REVISION_BYTES_LABEL,
@@ -14,6 +14,7 @@ import {
   REVISION_HISTORY_LOAD_MORE,
   REVISION_HISTORY_LOADING,
   REVISION_HISTORY_LOADING_MORE,
+  REVISION_HISTORY_PAGINATION_ERROR,
   REVISION_HISTORY_RETRY,
   REVISION_HISTORY_SELECT,
   REVISION_LIST_LABEL,
@@ -74,6 +75,116 @@ export function mergeRevisionItems(
   return additions.length === 0 ? [...current] : [...current, ...additions]
 }
 
+export interface RevisionPaginationState {
+  revisions: RevisionSummary[]
+  nextCursor: string | null
+  /** Every non-null cursor returned by an accepted page in this cycle. */
+  seenCursors: ReadonlySet<string>
+  /** Cursors whose requests have already started in this cycle. */
+  requestedCursors: ReadonlySet<string>
+}
+
+export type RevisionPaginationTransition =
+  | { ok: true; state: RevisionPaginationState }
+  | {
+      ok: false
+      reason: 'same_cursor' | 'cursor_cycle'
+      state: RevisionPaginationState
+    }
+
+export type RevisionRequestTransition =
+  | { ok: true; state: RevisionPaginationState }
+  | {
+      ok: false
+      reason: 'cursor_repeated' | 'cursor_unavailable'
+      state: RevisionPaginationState
+    }
+
+export function createRevisionPaginationState(): RevisionPaginationState {
+  return {
+    revisions: [],
+    nextCursor: null,
+    seenCursors: new Set<string>(),
+    requestedCursors: new Set<string>(),
+  }
+}
+
+/** Reserve a continuation cursor before starting its request. */
+export function beginRevisionPageRequest(
+  state: RevisionPaginationState,
+  cursor: string,
+): RevisionRequestTransition {
+  if (state.nextCursor !== cursor) {
+    return { ok: false, reason: 'cursor_unavailable', state }
+  }
+  if (state.requestedCursors.has(cursor)) {
+    return { ok: false, reason: 'cursor_repeated', state }
+  }
+  const requestedCursors = new Set(state.requestedCursors)
+  requestedCursors.add(cursor)
+  return { ok: true, state: { ...state, requestedCursors } }
+}
+
+/** Allow a failed transport request to be retried without erasing history. */
+export function releaseRevisionPageRequest(
+  state: RevisionPaginationState,
+  cursor: string,
+): RevisionPaginationState {
+  const requestedCursors = new Set(state.requestedCursors)
+  requestedCursors.delete(cursor)
+  return { ...state, requestedCursors }
+}
+
+/**
+ * Apply one page to the immutable history state. A repeated response cursor
+ * terminates continuation while preserving every item already loaded.
+ */
+export function applyRevisionPage(
+  state: RevisionPaginationState,
+  requestCursor: string | null,
+  page: RevisionPage,
+): RevisionPaginationTransition {
+  const seenCursors = new Set(state.seenCursors)
+  const requestedCursors = new Set(state.requestedCursors)
+  if (requestCursor !== null) requestedCursors.add(requestCursor)
+
+  if (page.nextCursor !== null && page.nextCursor === requestCursor) {
+    seenCursors.add(page.nextCursor)
+    return {
+      ok: false,
+      reason: 'same_cursor',
+      state: {
+        ...state,
+        nextCursor: null,
+        seenCursors,
+        requestedCursors,
+      },
+    }
+  }
+  if (page.nextCursor !== null && seenCursors.has(page.nextCursor)) {
+    return {
+      ok: false,
+      reason: 'cursor_cycle',
+      state: {
+        ...state,
+        nextCursor: null,
+        seenCursors,
+        requestedCursors,
+      },
+    }
+  }
+  if (page.nextCursor !== null) seenCursors.add(page.nextCursor)
+  return {
+    ok: true,
+    state: {
+      revisions: mergeRevisionItems(state.revisions, page.items),
+      nextCursor: page.nextCursor,
+      seenCursors,
+      requestedCursors,
+    },
+  }
+}
+
 /** Ignore an async response once a newer request has taken ownership. */
 export function isRevisionRequestCurrent(activeSerial: number, requestSerial: number): boolean {
   return activeSerial === requestSerial
@@ -99,12 +210,16 @@ export function RevisionHistory({
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
   const listSerial = useRef(0)
   const detailSerial = useRef(0)
+  const paginationRef = useRef<RevisionPaginationState>(createRevisionPaginationState())
+  const loadingMoreRef = useRef(false)
   const [retry, setRetry] = useState(0)
 
   useEffect(() => {
     const serial = listSerial.current + 1
     listSerial.current = serial
     detailSerial.current += 1
+    paginationRef.current = createRevisionPaginationState()
+    loadingMoreRef.current = false
     setRevisions(null)
     setListError(null)
     setNextCursor(null)
@@ -119,8 +234,19 @@ export function RevisionHistory({
       const result = await api.listRevisions(projectId, { limit: REVISION_PAGE_SIZE })
       if (!live || !isRevisionRequestCurrent(listSerial.current, serial)) return
       if (result.ok) {
-        setRevisions(result.value.items)
-        setNextCursor(result.value.nextCursor)
+        const transition = applyRevisionPage(
+          createRevisionPaginationState(),
+          null,
+          result.value,
+        )
+        if (!transition.ok) {
+          setRevisions(null)
+          setListError(REVISION_HISTORY_PAGINATION_ERROR)
+          return
+        }
+        paginationRef.current = transition.state
+        setRevisions(transition.state.revisions)
+        setNextCursor(transition.state.nextCursor)
         setListError(null)
         setLoadMoreError(null)
         setSelectedId(null)
@@ -151,8 +277,20 @@ export function RevisionHistory({
   }, [projectId])
 
   const loadMore = useCallback(async () => {
-    const cursor = nextCursor
-    if (cursor === null || loadingMore) return
+    const cursor = paginationRef.current.nextCursor
+    if (cursor === null || loadingMoreRef.current) return
+    const started = beginRevisionPageRequest(paginationRef.current, cursor)
+    if (!started.ok) {
+      paginationRef.current = {
+        ...started.state,
+        nextCursor: null,
+      }
+      setNextCursor(null)
+      setLoadMoreError(REVISION_HISTORY_PAGINATION_ERROR)
+      return
+    }
+    paginationRef.current = started.state
+    loadingMoreRef.current = true
     const serial = listSerial.current + 1
     listSerial.current = serial
     setLoadingMore(true)
@@ -162,16 +300,35 @@ export function RevisionHistory({
       limit: REVISION_PAGE_SIZE,
     })
     if (!isRevisionRequestCurrent(listSerial.current, serial)) return
+    loadingMoreRef.current = false
     setLoadingMore(false)
     if (!result.ok) {
+      if (result.error.code === 'network.invalid_response') {
+        paginationRef.current = {
+          ...paginationRef.current,
+          nextCursor: null,
+        }
+        setNextCursor(null)
+        setLoadMoreError(REVISION_HISTORY_PAGINATION_ERROR)
+        return
+      }
+      paginationRef.current = releaseRevisionPageRequest(paginationRef.current, cursor)
       setLoadMoreError(result.error.message)
       return
     }
-    setRevisions((current) =>
-      current === null ? result.value.items : mergeRevisionItems(current, result.value.items),
-    )
-    setNextCursor(result.value.nextCursor)
-  }, [loadingMore, nextCursor, projectId])
+    const transition = applyRevisionPage(paginationRef.current, cursor, result.value)
+    if (!transition.ok) {
+      paginationRef.current = transition.state
+      setRevisions(transition.state.revisions)
+      setNextCursor(null)
+      setLoadMoreError(REVISION_HISTORY_PAGINATION_ERROR)
+      return
+    }
+    paginationRef.current = transition.state
+    setRevisions(transition.state.revisions)
+    setNextCursor(transition.state.nextCursor)
+    setLoadMoreError(null)
+  }, [projectId])
 
   if (listError !== null) {
     return (
@@ -274,9 +431,11 @@ export function RevisionHistoryView({
               {loadMoreError !== null ? (
                 <div className={styles.messageBlock} role="alert">
                   <p className={styles.message}>{loadMoreError}</p>
-                  <Button variant="ghost" onClick={onLoadMore}>
-                    {REVISION_HISTORY_RETRY}
-                  </Button>
+                  {nextCursor !== null && (
+                    <Button variant="ghost" onClick={onLoadMore}>
+                      {REVISION_HISTORY_RETRY}
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <Button

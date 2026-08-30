@@ -3,6 +3,29 @@ import { createHttpApi } from './httpApi'
 
 afterEach(() => vi.restoreAllMocks())
 
+function revisionWire(
+  id: string,
+  revisionNo: number,
+  flags: { isCurrent?: boolean; isServed?: boolean } = {},
+) {
+  return {
+    id,
+    revisionNo,
+    parentRevisionId: null,
+    createdAt: '2026-08-30T00:00:00Z',
+    byteLength: 1,
+    contentHash: 'a'.repeat(64),
+    validation: { level: 'basic', diagnostics: [] },
+    validatorVersion: null,
+    isCurrent: flags.isCurrent ?? false,
+    isServed: flags.isServed ?? false,
+  }
+}
+
+function stubRevisionPage(items: unknown[], nextCursor: string | null = null) {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ items, nextCursor })))
+}
+
 describe('HTTP API error boundary', () => {
   it('maps a missing current session to signed out', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 404 })))
@@ -187,6 +210,63 @@ describe('HTTP API error boundary', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       '/api/projects/p1/revisions?limit=25&cursor=revision%2F2',
     )
+  })
+
+  it('accepts a first page with only the current pointer', async () => {
+    stubRevisionPage([revisionWire('r2', 2, { isCurrent: true })])
+    const result = await createHttpApi().listRevisions('p1')
+    expect(result.ok).toBe(true)
+  })
+
+  it('accepts a first page with only the served pointer', async () => {
+    stubRevisionPage([revisionWire('r2', 2, { isServed: true })])
+    const result = await createHttpApi().listRevisions('p1')
+    expect(result.ok).toBe(true)
+  })
+
+  it('accepts a subsequent page with no pointer', async () => {
+    stubRevisionPage([revisionWire('r1', 1)], null)
+    const result = await createHttpApi().listRevisions('p1', { cursor: 'r2' })
+    expect(result.ok).toBe(true)
+  })
+
+  it('rejects a page with two current pointers', async () => {
+    stubRevisionPage([
+      revisionWire('r2', 2, { isCurrent: true }),
+      revisionWire('r1', 1, { isCurrent: true }),
+    ])
+    const result = await createHttpApi().listRevisions('p1')
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+    })
+  })
+
+  it('rejects a page with two served pointers', async () => {
+    stubRevisionPage([
+      revisionWire('r2', 2, { isServed: true }),
+      revisionWire('r1', 1, { isServed: true }),
+    ])
+    const result = await createHttpApi().listRevisions('p1')
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+    })
+  })
+
+  it('accepts a subsequent page with its unique served pointer', async () => {
+    stubRevisionPage([revisionWire('r1', 1, { isServed: true })], null)
+    const result = await createHttpApi().listRevisions('p1', { cursor: 'r2' })
+    expect(result.ok).toBe(true)
+  })
+
+  it('rejects a response cursor that repeats the request cursor', async () => {
+    stubRevisionPage([revisionWire('A', 1)], 'A')
+    const result = await createHttpApi().listRevisions('p1', { cursor: 'A' })
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+    })
   })
 
   it('loads one revision source and rejects a byte-length mismatch', async () => {
