@@ -1,13 +1,17 @@
 use axum::{
-    extract::{rejection::JsonRejection, Path, State},
+    extract::{
+        rejection::{JsonRejection, QueryRejection},
+        Path, Query, State,
+    },
     http::StatusCode,
     Json,
 };
+use serde::Deserialize;
 
 use crate::{
     dto::{
         CreateProjectRequest, ProjectDto, ProjectSummaryDto, RenameProjectRequest, RevisionDto,
-        RevisionSummaryDto, SaveResultDto, SaveRevisionRequest,
+        RevisionPageDto, SaveResultDto, SaveRevisionRequest,
     },
     error::ApiError,
     state::AppState,
@@ -16,6 +20,12 @@ use crate::{
 };
 
 use super::json;
+
+#[derive(Debug, Default, Deserialize)]
+pub struct RevisionListQuery {
+    pub cursor: Option<String>,
+    pub limit: Option<usize>,
+}
 
 pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<ProjectSummaryDto>>, ApiError> {
     Ok(Json(storage::list_projects(&state.pool).await?))
@@ -79,8 +89,13 @@ pub async fn save_revision(
 pub async fn list_revisions(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<Vec<RevisionSummaryDto>>, ApiError> {
-    Ok(Json(storage::list_revisions(&state.pool, &id).await?))
+    query: Result<Query<RevisionListQuery>, QueryRejection>,
+) -> Result<Json<RevisionPageDto>, ApiError> {
+    let Query(query) =
+        query.map_err(|_| ApiError::bad_request("request.invalid", "版本查询参数无效"))?;
+    Ok(Json(
+        storage::list_revisions(&state.pool, &id, query.limit, query.cursor.as_deref()).await?,
+    ))
 }
 
 pub async fn get_revision(

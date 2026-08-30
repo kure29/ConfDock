@@ -11,7 +11,9 @@ import {
   REVISION_HISTORY_DESCRIPTION,
   REVISION_HISTORY_DETAIL_LOADING,
   REVISION_HISTORY_EMPTY,
+  REVISION_HISTORY_LOAD_MORE,
   REVISION_HISTORY_LOADING,
+  REVISION_HISTORY_LOADING_MORE,
   REVISION_HISTORY_RETRY,
   REVISION_HISTORY_SELECT,
   REVISION_LIST_LABEL,
@@ -33,10 +35,48 @@ import { SourceEditor } from './SourceEditor'
 import { ValidationLevelBadge } from './ValidationLevelBadge'
 import styles from './RevisionHistory.module.css'
 
+const REVISION_PAGE_SIZE = 50
+
 interface RevisionHistoryProps {
   projectId: string
   /** Increment after a save so unchanged saves refresh validation metadata too. */
   refreshKey: number
+}
+
+export interface RevisionHistoryViewProps {
+  revisions: RevisionSummary[]
+  selectedId: string | null
+  detail: Revision | null
+  detailLoading: boolean
+  detailError: string | null
+  nextCursor: string | null
+  loadingMore: boolean
+  loadMoreError: string | null
+  onSelect: (revisionId: string) => void
+  onLoadMore: () => void
+}
+
+/**
+ * Merge one server page while defending the UI from a repeated cursor or a
+ * duplicate item. The server's immutable IDs are the de-duplication key.
+ */
+export function mergeRevisionItems(
+  current: readonly RevisionSummary[],
+  incoming: readonly RevisionSummary[],
+): RevisionSummary[] {
+  const seen = new Set(current.map((revision) => revision.id))
+  const additions: RevisionSummary[] = []
+  for (const revision of incoming) {
+    if (seen.has(revision.id)) continue
+    seen.add(revision.id)
+    additions.push(revision)
+  }
+  return additions.length === 0 ? [...current] : [...current, ...additions]
+}
+
+/** Ignore an async response once a newer request has taken ownership. */
+export function isRevisionRequestCurrent(activeSerial: number, requestSerial: number): boolean {
+  return activeSerial === requestSerial
 }
 
 /**
@@ -54,24 +94,35 @@ export function RevisionHistory({
   const [detail, setDetail] = useState<Revision | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  const requestSerial = useRef(0)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
+  const listSerial = useRef(0)
+  const detailSerial = useRef(0)
   const [retry, setRetry] = useState(0)
 
   useEffect(() => {
-    requestSerial.current += 1
+    const serial = listSerial.current + 1
+    listSerial.current = serial
+    detailSerial.current += 1
     setRevisions(null)
     setListError(null)
+    setNextCursor(null)
+    setLoadingMore(false)
+    setLoadMoreError(null)
     setSelectedId(null)
     setDetail(null)
     setDetailError(null)
     setDetailLoading(false)
     let live = true
     void (async () => {
-      const result = await api.listRevisions(projectId)
-      if (!live) return
+      const result = await api.listRevisions(projectId, { limit: REVISION_PAGE_SIZE })
+      if (!live || !isRevisionRequestCurrent(listSerial.current, serial)) return
       if (result.ok) {
-        setRevisions(result.value)
+        setRevisions(result.value.items)
+        setNextCursor(result.value.nextCursor)
         setListError(null)
+        setLoadMoreError(null)
         setSelectedId(null)
         setDetail(null)
         setDetailError(null)
@@ -86,18 +137,41 @@ export function RevisionHistory({
   }, [projectId, refreshKey, retry])
 
   const select = useCallback(async (revisionId: string) => {
-    const serial = requestSerial.current + 1
-    requestSerial.current = serial
+    const serial = detailSerial.current + 1
+    detailSerial.current = serial
     setSelectedId(revisionId)
     setDetail(null)
     setDetailError(null)
     setDetailLoading(true)
     const result = await api.getRevision(projectId, revisionId)
-    if (requestSerial.current !== serial) return
+    if (!isRevisionRequestCurrent(detailSerial.current, serial)) return
     setDetailLoading(false)
     if (result.ok) setDetail(result.value)
     else setDetailError(result.error.message)
   }, [projectId])
+
+  const loadMore = useCallback(async () => {
+    const cursor = nextCursor
+    if (cursor === null || loadingMore) return
+    const serial = listSerial.current + 1
+    listSerial.current = serial
+    setLoadingMore(true)
+    setLoadMoreError(null)
+    const result = await api.listRevisions(projectId, {
+      cursor,
+      limit: REVISION_PAGE_SIZE,
+    })
+    if (!isRevisionRequestCurrent(listSerial.current, serial)) return
+    setLoadingMore(false)
+    if (!result.ok) {
+      setLoadMoreError(result.error.message)
+      return
+    }
+    setRevisions((current) =>
+      current === null ? result.value.items : mergeRevisionItems(current, result.value.items),
+    )
+    setNextCursor(result.value.nextCursor)
+  }, [loadingMore, nextCursor, projectId])
 
   if (listError !== null) {
     return (
@@ -117,6 +191,39 @@ export function RevisionHistory({
   }
 
   return (
+    <RevisionHistoryView
+      revisions={revisions}
+      selectedId={selectedId}
+      detail={detail}
+      detailLoading={detailLoading}
+      detailError={detailError}
+      nextCursor={nextCursor}
+      loadingMore={loadingMore}
+      loadMoreError={loadMoreError}
+      onSelect={(revisionId) => void select(revisionId)}
+      onLoadMore={() => void loadMore()}
+    />
+  )
+}
+
+/**
+ * Presentational history surface. Keeping this separate makes loading, retry,
+ * pagination, and read-only states directly renderable in tests without
+ * requiring a browser DOM or coupling them to the HTTP client.
+ */
+export function RevisionHistoryView({
+  revisions,
+  selectedId,
+  detail,
+  detailLoading,
+  detailError,
+  nextCursor,
+  loadingMore,
+  loadMoreError,
+  onSelect,
+  onLoadMore,
+}: RevisionHistoryViewProps) {
+  return (
     <div className={styles.history}>
       <p className={styles.description}>{REVISION_HISTORY_DESCRIPTION}</p>
       <div className={styles.layout}>
@@ -135,7 +242,7 @@ export function RevisionHistory({
                     type="button"
                     className={`${styles.row} ${selected ? styles.selected : ''}`}
                     aria-pressed={selected}
-                    onClick={() => void select(revision.id)}
+                    onClick={() => onSelect(revision.id)}
                   >
                     <span className={styles.rowTop}>
                       <span className={styles.revisionNumber}>
@@ -162,6 +269,27 @@ export function RevisionHistory({
               )
             })}
           </ol>
+          {(nextCursor !== null || loadMoreError !== null) && (
+            <div className={styles.pagination} aria-live="polite">
+              {loadMoreError !== null ? (
+                <div className={styles.messageBlock} role="alert">
+                  <p className={styles.message}>{loadMoreError}</p>
+                  <Button variant="ghost" onClick={onLoadMore}>
+                    {REVISION_HISTORY_RETRY}
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="ghost"
+                  loading={loadingMore}
+                  aria-label={loadingMore ? REVISION_HISTORY_LOADING_MORE : undefined}
+                  onClick={onLoadMore}
+                >
+                  {REVISION_HISTORY_LOAD_MORE}
+                </Button>
+              )}
+            </div>
+          )}
         </section>
 
         <section className={styles.detailSection} aria-labelledby="revision-detail-heading">
@@ -173,16 +301,14 @@ export function RevisionHistory({
           ) : detailError !== null ? (
             <div className={styles.messageBlock} role="alert">
               <p className={styles.message}>{detailError}</p>
-              <Button variant="ghost" onClick={() => void select(selectedId)}>
+              <Button variant="ghost" onClick={() => onSelect(selectedId)}>
                 {REVISION_HISTORY_RETRY}
               </Button>
             </div>
           ) : detail === null ? (
             <p className={styles.message}>{REVISION_HISTORY_SELECT}</p>
           ) : (
-            <RevisionDetail
-              revision={detail}
-            />
+            <RevisionDetail revision={detail} />
           )}
         </section>
       </div>

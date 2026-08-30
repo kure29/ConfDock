@@ -8,7 +8,8 @@ import type {
   Project,
   ProjectSummary,
   Revision,
-  RevisionSummary,
+  RevisionListOptions,
+  RevisionPage,
   SaveResult,
   ServiceInfo,
 } from './types'
@@ -46,8 +47,11 @@ export interface ConfDockApi {
    * exactly what blocked them.
    */
   saveRevision(input: SaveRevisionInput): Promise<Result<SaveResult, ApiError>>
-  /** List immutable revision metadata, newest first; source bytes are omitted. */
-  listRevisions(projectId: string): Promise<Result<RevisionSummary[], ApiError>>
+  /** List one bounded page of immutable revision metadata, newest first. */
+  listRevisions(
+    projectId: string,
+    options?: RevisionListOptions,
+  ): Promise<Result<RevisionPage, ApiError>>
   /** Load one immutable revision's original bytes for read-only inspection. */
   getRevision(projectId: string, revisionId: string): Promise<Result<Revision, ApiError>>
   renameProject(id: string, name: string): Promise<Result<ProjectSummary, ApiError>>
