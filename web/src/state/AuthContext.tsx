@@ -18,8 +18,9 @@ type AuthStatus = 'loading' | 'signedOut' | 'signedIn'
 interface AuthApi {
   status: AuthStatus
   session: AdminSession | null
+  error: ApiError | null
   signIn: (password: string) => Promise<Result<AdminSession, ApiError>>
-  signOut: () => Promise<void>
+  signOut: () => Promise<Result<void, ApiError>>
 }
 
 const AuthContext = createContext<AuthApi | null>(null)
@@ -27,13 +28,21 @@ const AuthContext = createContext<AuthApi | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading')
   const [session, setSession] = useState<AdminSession | null>(null)
+  const [error, setError] = useState<ApiError | null>(null)
 
   useEffect(() => {
     let live = true
-    void api.currentSession().then((restored) => {
+    void api.currentSession().then((result) => {
       if (!live) return
-      setSession(restored)
-      setStatus(restored ? 'signedIn' : 'signedOut')
+      if (!result.ok) {
+        setError(result.error)
+        setSession(null)
+        setStatus('signedOut')
+        return
+      }
+      setError(null)
+      setSession(result.value)
+      setStatus(result.value ? 'signedIn' : 'signedOut')
     })
     return () => {
       live = false
@@ -43,21 +52,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async (password: string) => {
     const result = await api.signIn(password)
     if (result.ok) {
+      setError(null)
       setSession(result.value)
       setStatus('signedIn')
     }
+    else setError(result.error)
     return result
   }, [])
 
   const signOut = useCallback(async () => {
-    await api.signOut()
+    const result = await api.signOut()
+    if (!result.ok) {
+      setError(result.error)
+      return result
+    }
     setSession(null)
     setStatus('signedOut')
+    setError(null)
+    return result
   }, [])
 
   const value = useMemo<AuthApi>(
-    () => ({ status, session, signIn, signOut }),
-    [status, session, signIn, signOut],
+    () => ({ status, session, error, signIn, signOut }),
+    [status, session, error, signIn, signOut],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

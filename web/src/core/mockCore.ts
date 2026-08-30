@@ -33,18 +33,21 @@ import type {
 import { err, ok } from './types'
 
 /**
- * A `ConfigCore` that stands in for the WASM build of `confdock-core`.
+ * Temporary TypeScript behaviour simulation used before the WASM build of
+ * `confdock-core` is available. It duplicates selected Rust algorithms to make
+ * the UI contract walkable, but it is not the authoritative configuration
+ * core and is not guaranteed to behave exactly like Rust.
  *
- * What is a faithful port, line for line, from the Rust source:
+ * The following paths intentionally mirror the current Rust contracts (they
+ * are still only a test double, not a proof of parity):
  *
  * - `parse_ini_like` and `value_edit` (targets/common.rs) — the whole CONF
  *   family. Pure line scanning, so Surge / Loon / Quantumult X / Shadowrocket
- *   behave identically to Rust, including which keys are fields, which sections
+ *   use the same current rules for which keys are fields and which sections
  *   are opaque, and the exact order in which an edit is rejected.
  * - The JSON `Scanner` and `append_pointer` (targets/json.rs) — sing-box. A
- *   complete strict-JSON parser producing one `SourceField` per value with its
- *   RFC 6901 pointer, so duplicate keys become `ambiguousField` exactly as
- *   they do in Rust.
+ *   strict-JSON scanner producing one `SourceField` per value with its RFC 6901
+ *   pointer. It should be replaced by the Rust implementation for production.
  * - `scan_mixed_port` (targets/mihomo.rs) — the line scanner that decides
  *   whether `/mixed-port` has a safely patchable decimal span.
  *
@@ -59,9 +62,10 @@ import { err, ok } from './types'
  *   than from a YAML event stream, so a quoted key (`"mixed-port":`) is
  *   invisible to the mock where Rust would see it.
  *
- * The gap closes entirely when the WASM bindings land. Until then the UI must
- * not claim the browser has validated anything a real client would accept —
- * see the validation-level copy in `lib/copy.ts`.
+ * Mihomo YAML checks are only approximations (tabs, document markers and root
+ * shape); they can miss errors a real parser catches. Production must replace
+ * this file with Rust WASM Core. That Slice must also remove the duplicated
+ * Target Registry data and this mock implementation.
  */
 
 // ---------------------------------------------------------------------------
@@ -809,8 +813,8 @@ function radixInteger(value: string, radix: number): number | null {
 
 /**
  * Conservative substitute for the three YAML failures `parse_yaml_root` can
- * report. Each check only fires on something that is unambiguously invalid, so
- * the mock never invents an error; it does miss errors a real parser catches.
+ * report. Each check is intentionally conservative; it may miss errors a real
+ * parser catches and must not be treated as proof of native validity.
  */
 function yamlStructureDiagnostics(
   text: string,

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import type { Diagnostic, DiagnosticSeverity, DocumentInfo, SourceSpan } from '../core'
-import { spanToEditorRange } from '../lib/bytes'
+import { decodeToEditor, spanToEditorRange } from '../lib/bytes'
 import {
   BOM_NOTICE,
   ENCODING_COPY,
@@ -36,8 +36,9 @@ export interface RevealRequest {
 interface SourceEditorProps {
   text: string
   onChange: (next: string) => void
-  /** Describes the bytes `text` came from: needed for byte-offset conversion
-   * and for the metadata line. */
+  /** Native bytes are required for lossless SourceSpan mapping. */
+  bytes: Uint8Array
+  /** Describes the native bytes for the metadata line and editing policy. */
   info: DocumentInfo
   markers?: readonly EditorMarker[]
   reveal?: RevealRequest | null
@@ -54,7 +55,7 @@ interface SourceEditorProps {
  * occupy several visual rows and every gutter number below it would point at the
  * wrong line.
  */
-export function SourceEditor({ text, onChange, info, markers = [], reveal }: SourceEditorProps) {
+export function SourceEditor({ text, onChange, bytes, info, markers = [], reveal }: SourceEditorProps) {
   const textarea = useRef<HTMLTextAreaElement>(null)
   const gutter = useRef<HTMLDivElement>(null)
 
@@ -86,7 +87,7 @@ export function SourceEditor({ text, onChange, info, markers = [], reveal }: Sou
     if (!reveal) return
     const element = textarea.current
     if (!element) return
-    const range = spanToEditorRange(text, info, reveal.span)
+    const range = spanToEditorRange(bytes, reveal.span)
     element.focus()
     element.setSelectionRange(range.start, range.end)
     // Centre the line rather than relying on the browser's minimal scroll, so a
@@ -97,7 +98,7 @@ export function SourceEditor({ text, onChange, info, markers = [], reveal }: Sou
     onScroll()
     // Deliberately keyed on the nonce alone: `text` and `info` are read here,
     // but a reveal is a one-shot request, not a value to stay in sync with.
-  }, [reveal?.nonce])
+  }, [reveal?.nonce, bytes])
 
   const numbers: number[] = []
   for (let line = 1; line <= total; line += 1) numbers.push(line)
@@ -130,6 +131,7 @@ export function SourceEditor({ text, onChange, info, markers = [], reveal }: Sou
           autoCorrect="off"
           wrap="off"
           aria-label="配置源码"
+          readOnly={info.lineEnding === 'mixed'}
         />
       </div>
       <div className={styles.meta}>
@@ -151,13 +153,13 @@ export function SourceEditor({ text, onChange, info, markers = [], reveal }: Sou
  * byte-span-to-line conversion lives in exactly one place. */
 export function diagnosticMarkers(
   diagnostics: readonly Diagnostic[],
-  text: string,
-  info: DocumentInfo,
+  bytes: Uint8Array,
 ): EditorMarker[] {
+  const text = decodeToEditor(bytes).text
   const markers: EditorMarker[] = []
   for (const diagnostic of diagnostics) {
     if (diagnostic.span === null) continue
-    const range = spanToEditorRange(text, info, diagnostic.span)
+    const range = spanToEditorRange(bytes, diagnostic.span)
     for (const line of linesInRange(text, range)) {
       markers.push({ line, severity: diagnostic.severity })
     }

@@ -106,9 +106,9 @@ export function utf8Length(text: string): number {
 // ---------------------------------------------------------------------------
 
 /**
- * Decode native bytes into the text an editor can hold, plus the metadata
- * needed to encode it back. Newlines are normalized to LF because a textarea
- * would do it anyway; `info.lineEnding` remembers the original style.
+ * Decode native bytes into the text an editor can hold, plus metadata for the
+ * view. Newlines are normalized to LF because a textarea does that too; native
+ * bytes must remain alongside this view for lossless editing.
  */
 export function decodeToEditor(bytes: Uint8Array): {
   text: string
@@ -120,14 +120,21 @@ export function decodeToEditor(bytes: Uint8Array): {
 }
 
 /**
- * Re-apply the original BOM and line-ending style.
- *
- * Lossless for pure-LF and pure-CRLF documents, which is what makes an
- * untouched save byte-identical. A `mixed` document cannot survive a textarea
- * round-trip; it is normalized to LF and the editor warns about it rather than
- * corrupting bytes silently.
+ * Re-apply the original BOM and line-ending style for raw editing. A mixed
+ * document cannot be represented by a textarea, so this function throws unless
+ * unchanged original bytes are supplied.
  */
-export function encodeFromEditor(text: string, info: DocumentInfo): Uint8Array {
+export function encodeFromEditor(
+  text: string,
+  info: DocumentInfo,
+  originalBytes?: Uint8Array,
+): Uint8Array {
+  if (info.lineEnding === 'mixed') {
+    if (originalBytes !== undefined && decodeToEditor(originalBytes).text === text) {
+      return new Uint8Array(originalBytes)
+    }
+    throw new Error('Mixed line endings require native bytes for editing')
+  }
   const body = info.lineEnding === 'crlf' ? text.replace(/\n/g, '\r\n') : text
   const encoded = encodeUtf8(body)
   return info.encoding === 'utf8-bom' ? concatBytes(BOM, encoded) : encoded
@@ -137,35 +144,70 @@ export function encodeFromEditor(text: string, info: DocumentInfo): Uint8Array {
  * Map a `SourceSpan` (absolute UTF-8 byte offsets into the *native* bytes) onto
  * a character range in the LF-normalized editor text.
  *
- * One walk handles all three offsets at once: the BOM prefix, `\n` costing two
- * bytes when the document is CRLF, and multi-byte characters.
+ * The mapping walks actual native bytes, accounting for BOM, multi-byte UTF-8
+ * characters and each individual LF/CRLF sequence (including mixed files).
  */
 export function spanToEditorRange(
-  text: string,
-  info: DocumentInfo,
+  bytes: Uint8Array,
   span: SourceSpan,
 ): { start: number; end: number } {
-  const crlf = info.lineEnding === 'crlf'
-  let bytes = baseOffset(info.encoding)
-  let index = 0
-  let start: number | null = null
-  let end: number | null = null
+  const body = stripBom(bytes)
+  const bodyOffset = bytes.length - body.length
+  const text = decodeLossy(bytes).replace(/\r\n/g, '\n')
 
-  for (;;) {
-    if (start === null && bytes >= span.start) start = index
-    if (start !== null && bytes >= span.end) {
-      end = index
-      break
+  const offsetToIndex = (target: number): number => {
+    if (target <= bodyOffset) return 0
+    let nativeOffset = bodyOffset
+    let byteIndex = 0
+    let charIndex = 0
+    while (byteIndex < body.length && charIndex < text.length) {
+      const first = body[byteIndex] ?? 0
+      let width: number
+      let charWidth: number
+      if (first === 0x0d && body[byteIndex + 1] === 0x0a) {
+        width = 2
+        charWidth = 1
+      } else {
+        const decoded = decodeCodePoint(body, byteIndex)
+        width = decoded.width
+        charWidth = decoded.codePoint > 0xffff ? 2 : 1
+      }
+      if (target <= nativeOffset) return charIndex
+      if (target < nativeOffset + width) return charIndex
+      nativeOffset += width
+      byteIndex += width
+      charIndex += charWidth
     }
-    if (index >= text.length) break
-    const codePoint = text.codePointAt(index)
-    if (codePoint === undefined) break
-    bytes += codePoint === 0x0a && crlf ? 2 : utf8Width(codePoint)
-    index += codePoint > 0xffff ? 2 : 1
+    return text.length
   }
 
-  const resolvedStart = start ?? text.length
-  return { start: resolvedStart, end: Math.max(end ?? text.length, resolvedStart) }
+  const start = offsetToIndex(Math.max(bodyOffset, span.start))
+  const end = offsetToIndex(Math.max(bodyOffset, span.end))
+  return { start, end: Math.max(start, end) }
+}
+
+function decodeCodePoint(bytes: Uint8Array, index: number): { codePoint: number; width: number } {
+  const first = bytes[index] ?? 0
+  if (first < 0x80) return { codePoint: first, width: 1 }
+  if ((first & 0xe0) === 0xc0) {
+    const next = bytes[index + 1] ?? 0
+    return { codePoint: ((first & 0x1f) << 6) | (next & 0x3f), width: 2 }
+  }
+  if ((first & 0xf0) === 0xe0) {
+    const b1 = bytes[index + 1] ?? 0
+    const b2 = bytes[index + 2] ?? 0
+    return {
+      codePoint: ((first & 0x0f) << 12) | ((b1 & 0x3f) << 6) | (b2 & 0x3f),
+      width: 3,
+    }
+  }
+  const b1 = bytes[index + 1] ?? 0
+  const b2 = bytes[index + 2] ?? 0
+  const b3 = bytes[index + 3] ?? 0
+  return {
+    codePoint: ((first & 0x07) << 18) | ((b1 & 0x3f) << 12) | ((b2 & 0x3f) << 6) | (b3 & 0x3f),
+    width: 4,
+  }
 }
 
 function utf8Width(codePoint: number): number {

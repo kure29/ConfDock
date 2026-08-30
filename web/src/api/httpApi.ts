@@ -1,7 +1,7 @@
 import type { Result, ValidationResult } from '../core/types'
 import { err, ok } from '../core/types'
 import { base64ToBytes, bytesToBase64 } from '../lib/bytes'
-import type { ConfDockApi } from './ConfDockApi'
+import type { ConfDockApi, SaveRevisionInput } from './ConfDockApi'
 import { API_ERROR } from './types'
 import type {
   AccessToken,
@@ -64,7 +64,12 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
     if (response.status === 204) return ok(undefined as T)
 
     let payload: unknown = null
-    const text = await response.text()
+    let text: string
+    try {
+      text = await response.text()
+    } catch {
+      return err({ code: 'network.unreachable', message: '无法读取 ConfDock 服务响应' })
+    }
     if (text !== '') {
       try {
         payload = JSON.parse(text)
@@ -76,7 +81,13 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
     if (!response.ok) {
       const problem = payload as Partial<ApiError> | null
       return err({
-        code: problem?.code ?? `http.${response.status}`,
+        code:
+          problem?.code ??
+          (response.status === 409
+            ? API_ERROR.revisionConflict
+            : response.status === 401
+              ? API_ERROR.unauthorized
+              : `http.${response.status}`),
         message: problem?.message ?? `服务返回 ${response.status}`,
         ...(problem?.validation ? { validation: problem.validation } : {}),
       })
@@ -84,25 +95,20 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
     return ok(payload as T)
   }
 
-  /** For endpoints whose failure is not actionable — a rejected promise there
-   * would only produce an unhandled error, so they resolve to a fallback. */
-  async function requestOr<T>(method: string, path: string, fallback: T): Promise<T> {
-    const result = await request<T>(method, path)
-    return result.ok ? result.value : fallback
-  }
-
   return {
-    async currentSession(): Promise<AdminSession | null> {
+    async currentSession(): Promise<Result<AdminSession | null, ApiError>> {
       const result = await request<Wire['session']>('GET', '/api/session')
-      return result.ok ? result.value : null
+      if (result.ok) return ok(result.value)
+      if (result.error.code === 'http.404') return ok(null)
+      return result
     },
 
     async signIn(password: string): Promise<Result<AdminSession, ApiError>> {
       return request<AdminSession>('POST', '/api/session', { password })
     },
 
-    async signOut(): Promise<void> {
-      await request<void>('DELETE', '/api/session')
+    async signOut(): Promise<Result<void, ApiError>> {
+      return request<void>('DELETE', '/api/session')
     },
 
     async changePassword(
@@ -115,16 +121,20 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
       })
     },
 
-    async listProjects(): Promise<ProjectSummary[]> {
-      return requestOr<ProjectSummary[]>('GET', '/api/projects', [])
+    async listProjects(): Promise<Result<ProjectSummary[], ApiError>> {
+      return request<ProjectSummary[]>('GET', '/api/projects')
     },
 
-    async getProject(id: string): Promise<Project | null> {
+    async getProject(id: string): Promise<Result<Project, ApiError>> {
       const result = await request<Wire['project']>(
         'GET',
         `/api/projects/${encodeURIComponent(id)}`,
       )
-      return result.ok ? decodeProject(result.value) : null
+      if (result.ok) return ok(decodeProject(result.value))
+      if (result.error.code === 'http.404') {
+        return err({ code: API_ERROR.notFound, message: '配置不存在' })
+      }
+      return result
     },
 
     async createProject(input: NewProject): Promise<Result<Project, ApiError>> {
@@ -137,14 +147,11 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
       return result.ok ? ok(decodeProject(result.value)) : result
     },
 
-    async saveRevision(
-      id: string,
-      source: Uint8Array,
-    ): Promise<Result<SaveResult, ApiError>> {
+    async saveRevision({ projectId, source, expectedRevisionId }: SaveRevisionInput): Promise<Result<SaveResult, ApiError>> {
       const result = await request<Wire['saveResult']>(
         'POST',
-        `/api/projects/${encodeURIComponent(id)}/revisions`,
-        { source: bytesToBase64(source) },
+        `/api/projects/${encodeURIComponent(projectId)}/revisions`,
+        { source: bytesToBase64(source), expectedRevisionId },
       )
       if (!result.ok) return result
       return ok({
@@ -163,16 +170,12 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
       })
     },
 
-    async deleteProject(id: string): Promise<void> {
-      await request<void>('DELETE', `/api/projects/${encodeURIComponent(id)}`)
+    async deleteProject(id: string): Promise<Result<void, ApiError>> {
+      return request<void>('DELETE', `/api/projects/${encodeURIComponent(id)}`)
     },
 
-    async listTokens(projectId: string): Promise<AccessToken[]> {
-      return requestOr<AccessToken[]>(
-        'GET',
-        `/api/projects/${encodeURIComponent(projectId)}/tokens`,
-        [],
-      )
+    async listTokens(projectId: string): Promise<Result<AccessToken[], ApiError>> {
+      return request<AccessToken[]>('GET', `/api/projects/${encodeURIComponent(projectId)}/tokens`)
     },
 
     async createToken(projectId: string): Promise<Result<CreatedAccessToken, ApiError>> {
@@ -182,20 +185,15 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
       )
     },
 
-    async revokeToken(projectId: string, tokenId: string): Promise<void> {
-      await request<void>(
+    async revokeToken(projectId: string, tokenId: string): Promise<Result<void, ApiError>> {
+      return request<void>(
         'DELETE',
         `/api/projects/${encodeURIComponent(projectId)}/tokens/${encodeURIComponent(tokenId)}`,
       )
     },
 
-    async serviceInfo(): Promise<ServiceInfo> {
-      return requestOr<ServiceInfo>('GET', '/api/service', {
-        version: 'unknown',
-        core: 'wasm',
-        api: 'http',
-        subscriptionBase: `${window.location.origin}/sub`,
-      })
+    async serviceInfo(): Promise<Result<ServiceInfo, ApiError>> {
+      return request<ServiceInfo>('GET', '/api/service')
     },
   }
 }

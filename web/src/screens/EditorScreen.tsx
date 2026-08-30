@@ -73,8 +73,8 @@ export function EditorScreen() {
   }, [dirty])
 
   const markers = useMemo(
-    () => diagnosticMarkers(validation.diagnostics, text, info),
-    [validation, text, info],
+    () => diagnosticMarkers(validation.diagnostics, bytes),
+    [validation, bytes],
   )
 
   const problems = validation.diagnostics.filter(
@@ -87,7 +87,11 @@ export function EditorScreen() {
       toast.notify(result.value.unchanged ? '内容没有变化，未创建新版本' : SAVE_SUCCESS)
       return
     }
-    toast.fail(result.error.message)
+    if (result.error.code === 'revision.conflict') {
+      toast.fail('配置已被其他页面更新；当前未保存内容已保留，请重新加载后手动处理。')
+    } else {
+      toast.fail(result.error.message)
+    }
     if (result.error.validation !== undefined) setTab('check')
   }
 
@@ -122,6 +126,15 @@ export function EditorScreen() {
 
   if (editor.status === 'loading') {
     return <p className={page.quiet}>正在读取…</p>
+  }
+
+  if (editor.status === 'error' && editor.loadError) {
+    return (
+      <>
+        <Link to="/" className={page.back}>← 配置</Link>
+        <Panel title="读取配置失败" description={editor.loadError.message} />
+      </>
+    )
   }
 
   if (editor.status === 'missing' || project === null) {
@@ -186,6 +199,7 @@ export function EditorScreen() {
             <SourceEditor
               text={text}
               onChange={editor.setText}
+              bytes={bytes}
               info={info}
               markers={markers}
               reveal={reveal}
@@ -231,8 +245,7 @@ export function EditorScreen() {
               ) : (
                 <DiagnosticList
                   diagnostics={validation.diagnostics}
-                  text={text}
-                  info={info}
+                  bytes={bytes}
                   onReveal={onReveal}
                 />
               )}
@@ -265,7 +278,11 @@ export function EditorScreen() {
             <Button
               variant="danger"
               onClick={() => {
-                void editor.remove().then(() => {
+                void editor.remove().then((result) => {
+                  if (!result.ok) {
+                    toast.fail(result.error.message)
+                    return
+                  }
                   toast.notify('已删除')
                   void navigate('/')
                 })

@@ -154,8 +154,7 @@ export function NewProjectScreen() {
               decoded !== null && (
                 <DiagnosticList
                   diagnostics={shown.diagnostics}
-                  text={decoded.text}
-                  info={decoded.info}
+                  bytes={bytes!}
                 />
               )
             )}

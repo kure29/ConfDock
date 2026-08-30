@@ -153,7 +153,7 @@ export const LINE_ENDING_COPY: Record<LineEnding, string> = {
 
 /** The one case where a save cannot be byte-exact, so it is stated up front. */
 export const MIXED_LINE_ENDING_WARNING =
-  '这份文档混用了 LF 与 CRLF。在网页里编辑后保存会统一成 LF —— 如果需要逐字节保留，请不要在这里改它。'
+  '该文件混合使用 LF 与 CRLF，为避免破坏原始字节，原始编辑暂不可用。结构化编辑仍会只修改目标字段。'
 
 export const BOM_NOTICE = '保存时会写回文件开头的 BOM。'
 

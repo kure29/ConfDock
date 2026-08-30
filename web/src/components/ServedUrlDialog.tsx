@@ -7,6 +7,7 @@ import { Button } from '../ui/Button'
 import { CopyField } from '../ui/CopyField'
 import { Dialog } from '../ui/Dialog'
 import { EmptyState } from '../ui/EmptyState'
+import { useToast } from '../state/ToastContext'
 import styles from './ServedUrlDialog.module.css'
 
 interface ServedUrlDialogProps {
@@ -27,9 +28,18 @@ export function ServedUrlDialog({ open, onClose, projectId }: ServedUrlDialogPro
   const [tokens, setTokens] = useState<AccessToken[] | null>(null)
   const [created, setCreated] = useState<CreatedAccessToken | null>(null)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const toast = useToast()
 
   const reload = useCallback(async () => {
-    setTokens(await api.listTokens(projectId))
+    const result = await api.listTokens(projectId)
+    if (result.ok) {
+      setTokens(result.value)
+      setError(null)
+    } else {
+      setTokens(null)
+      setError(result.error.message)
+    }
   }, [projectId])
 
   useEffect(() => {
@@ -42,8 +52,12 @@ export function ServedUrlDialog({ open, onClose, projectId }: ServedUrlDialogPro
     setBusy(true)
     try {
       const result = await api.createToken(projectId)
-      if (result.ok) setCreated(result.value)
-      await reload()
+      if (result.ok) {
+        setCreated(result.value)
+        await reload()
+      } else {
+        toast.fail(result.error.message)
+      }
     } finally {
       setBusy(false)
     }
@@ -52,7 +66,11 @@ export function ServedUrlDialog({ open, onClose, projectId }: ServedUrlDialogPro
   async function revoke(tokenId: string) {
     setBusy(true)
     try {
-      await api.revokeToken(projectId, tokenId)
+      const result = await api.revokeToken(projectId, tokenId)
+      if (!result.ok) {
+        toast.fail(result.error.message)
+        return
+      }
       // If the token we just revoked is the one on screen, its plaintext is
       // now worthless — take it off the screen too.
       setCreated((current) => (current?.token.id === tokenId ? null : current))
@@ -88,7 +106,9 @@ export function ServedUrlDialog({ open, onClose, projectId }: ServedUrlDialogPro
         </div>
       )}
 
-      {tokens === null ? (
+      {error !== null ? (
+        <p className={styles.loading} role="alert">{error}</p>
+      ) : tokens === null ? (
         <p className={styles.loading}>正在读取…</p>
       ) : tokens.length === 0 ? (
         <EmptyState

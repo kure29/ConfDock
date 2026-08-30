@@ -129,4 +129,6 @@ export const API_ERROR = {
   validationFailed: 'validation.failed',
   unsupportedEncoding: 'encoding.unsupported',
   invalidName: 'project.invalid_name',
+  revisionConflict: 'revision.conflict',
+  tokenNotFound: 'token.not_found',
 } as const

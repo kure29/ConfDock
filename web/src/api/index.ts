@@ -14,6 +14,6 @@ import { createMockApi } from './mockApi'
  */
 export const api: ConfDockApi = createMockApi(`${window.location.origin}/sub`)
 
-export type { ConfDockApi } from './ConfDockApi'
+export type { ConfDockApi, SaveRevisionInput } from './ConfDockApi'
 export * from './types'
 export { resetMockStore } from './mockApi'

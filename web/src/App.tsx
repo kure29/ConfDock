@@ -2,7 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import { TopBar } from './components'
 import { cx } from './lib/cx'
 import { AuthProvider, useAuth } from './state/AuthContext'
-import { ToastProvider } from './state/ToastContext'
+import { ToastProvider, useToast } from './state/ToastContext'
 import { useTheme } from './state/useTheme'
 import { EditorScreen } from './screens/EditorScreen'
 import { LoginScreen } from './screens/LoginScreen'
@@ -20,6 +20,7 @@ import styles from './App.module.css'
  */
 function Shell() {
   const auth = useAuth()
+  const toast = useToast()
   const theme = useTheme()
   const { pathname } = useLocation()
 
@@ -35,7 +36,14 @@ function Shell() {
 
   return (
     <>
-      <TopBar onSignOut={() => void auth.signOut()} wide={wide} />
+      <TopBar
+        onSignOut={() =>
+          void auth.signOut().then((result) => {
+            if (!result.ok) toast.fail(result.error.message)
+          })
+        }
+        wide={wide}
+      />
       <main className={cx(styles.main, wide && styles.wide)}>
         <Routes>
           <Route path="/" element={<ProjectListScreen />} />

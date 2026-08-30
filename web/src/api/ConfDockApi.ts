@@ -15,8 +15,9 @@ import type {
  * The seam between the React shell and the Axum service.
  *
  * Everything is async — unlike `ConfigCore`, this really is a network boundary.
- * Methods that can fail for a reason the user must see return
- * `Result<T, ApiError>`; methods that can only fail catastrophically reject.
+ * Every management operation that can fail for a reason the user must see
+ * returns `Result<T, ApiError>`; no network or authorization error is converted
+ * into an empty collection or `null`.
  *
  * `mockApi.ts` implements this against `localStorage` today; `httpApi.ts`
  * implements it against the REST shape documented in `web/README.md`.
@@ -24,17 +25,17 @@ import type {
 export interface ConfDockApi {
   // -- session ------------------------------------------------------------
   /** Restore an existing session on boot. `null` means "show the login". */
-  currentSession(): Promise<AdminSession | null>
+  currentSession(): Promise<Result<AdminSession | null, ApiError>>
   signIn(password: string): Promise<Result<AdminSession, ApiError>>
-  signOut(): Promise<void>
+  signOut(): Promise<Result<void, ApiError>>
   changePassword(
     currentPassword: string,
     nextPassword: string,
   ): Promise<Result<void, ApiError>>
 
   // -- projects -----------------------------------------------------------
-  listProjects(): Promise<ProjectSummary[]>
-  getProject(id: string): Promise<Project | null>
+  listProjects(): Promise<Result<ProjectSummary[], ApiError>>
+  getProject(id: string): Promise<Result<Project, ApiError>>
   createProject(input: NewProject): Promise<Result<Project, ApiError>>
   /**
    * Validate, then store — one action, no separate publish (ADR-004). On
@@ -42,16 +43,22 @@ export interface ConfDockApi {
    * Rejected saves come back with `error.validation` so the editor can show
    * exactly what blocked them.
    */
-  saveRevision(id: string, source: Uint8Array): Promise<Result<SaveResult, ApiError>>
+  saveRevision(input: SaveRevisionInput): Promise<Result<SaveResult, ApiError>>
   renameProject(id: string, name: string): Promise<Result<ProjectSummary, ApiError>>
-  deleteProject(id: string): Promise<void>
+  deleteProject(id: string): Promise<Result<void, ApiError>>
 
   // -- access tokens ------------------------------------------------------
-  listTokens(projectId: string): Promise<AccessToken[]>
+  listTokens(projectId: string): Promise<Result<AccessToken[], ApiError>>
   /** The only moment the plaintext and the full URL exist. */
   createToken(projectId: string): Promise<Result<CreatedAccessToken, ApiError>>
-  revokeToken(projectId: string, tokenId: string): Promise<void>
+  revokeToken(projectId: string, tokenId: string): Promise<Result<void, ApiError>>
 
   // -- service ------------------------------------------------------------
-  serviceInfo(): Promise<ServiceInfo>
+  serviceInfo(): Promise<Result<ServiceInfo, ApiError>>
+}
+
+export interface SaveRevisionInput {
+  projectId: string
+  source: Uint8Array
+  expectedRevisionId: string
 }

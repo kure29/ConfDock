@@ -17,24 +17,25 @@ import { bytesEqual, decodeToEditor, encodeFromEditor } from '../lib/bytes'
 /**
  * Editor state for one project.
  *
- * The native bytes are the source of truth (ADR-001), so this hook keeps a
- * single piece of authored state — the editor text — and *derives* the bytes,
- * the dirty flag, the validation and the parse from it. There is no parallel
- * structured model to fall out of sync; the fields view edits the same bytes
- * through `core.applyEdit`.
+ * The native bytes are the source of truth (ADR-001). Text is a decoded view;
+ * raw edits re-encode only uniform LF/CRLF documents, while structured edits
+ * patch `workingBytes` directly. This keeps mixed-line-ending documents
+ * byte-stable until a supported structured edit changes one span.
  */
 
-export type ProjectStatus = 'loading' | 'missing' | 'ready'
+export type ProjectStatus = 'loading' | 'missing' | 'error' | 'ready'
 
 export interface ProjectEditor {
   status: ProjectStatus
   project: Project | null
+  loadError: ApiError | null
   /** LF-normalized text held by the textarea. */
   text: string
   setText: (next: string) => void
   /** Encoding / line ending of the bytes currently in hand. */
   info: DocumentInfo
-  /** `text` re-encoded with the original BOM and line-ending style. */
+  /** Native bytes currently being edited. */
+  workingBytes: Uint8Array
   bytes: Uint8Array
   dirty: boolean
   validation: ValidationResult
@@ -45,38 +46,40 @@ export interface ProjectEditor {
   saving: boolean
   save: () => Promise<Result<SaveResult, ApiError>>
   rename: (name: string) => Promise<Result<ProjectSummary, ApiError>>
-  remove: () => Promise<void>
+  remove: () => Promise<Result<void, ApiError>>
 }
 
 const EMPTY = new Uint8Array()
 
-const EMPTY_INFO: DocumentInfo = {
-  encoding: 'utf8',
-  lineEnding: 'none',
-  hasTrailingNewline: false,
-  byteLength: 0,
-}
-
 export function useProject(id: string): ProjectEditor {
   const [status, setStatus] = useState<ProjectStatus>('loading')
   const [project, setProject] = useState<Project | null>(null)
-  const [text, setText] = useState('')
-  const [info, setInfo] = useState<DocumentInfo>(EMPTY_INFO)
+  const [workingBytes, setWorkingBytes] = useState<Uint8Array>(EMPTY)
+  const [loadError, setLoadError] = useState<ApiError | null>(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     let live = true
     setStatus('loading')
-    void api.getProject(id).then((loaded) => {
+    setProject(null)
+    setWorkingBytes(EMPTY)
+    setLoadError(null)
+    void api.getProject(id).then((result) => {
       if (!live) return
+      if (!result.ok) {
+        setLoadError(result.error)
+        if (result.error.code === 'project.not_found') setStatus('missing')
+        else setStatus('error')
+        return
+      }
+      const loaded = result.value
+      setLoadError(null)
       if (!loaded) {
         setStatus('missing')
         return
       }
-      const decoded = decodeToEditor(loaded.source)
       setProject(loaded)
-      setText(decoded.text)
-      setInfo(decoded.info)
+      setWorkingBytes(new Uint8Array(loaded.source))
       setStatus('ready')
     })
     return () => {
@@ -84,7 +87,23 @@ export function useProject(id: string): ProjectEditor {
     }
   }, [id])
 
-  const bytes = useMemo(() => encodeFromEditor(text, info), [text, info])
+  const info = useMemo<DocumentInfo>(() => core.documentInfo(workingBytes), [workingBytes])
+  const decoded = useMemo(() => decodeToEditor(workingBytes), [workingBytes])
+  const text = decoded.text
+
+  const setText = useCallback(
+    (next: string) => {
+      if (info.lineEnding === 'mixed') return
+      try {
+        setWorkingBytes(encodeFromEditor(next, info, workingBytes))
+      } catch {
+        // Mixed line endings are deliberately read-only in the raw editor.
+      }
+    },
+    [info, workingBytes],
+  )
+
+  const bytes = workingBytes
 
   const dirty = project !== null && !bytesEqual(bytes, project.source)
 
@@ -112,16 +131,12 @@ export function useProject(id: string): ProjectEditor {
       if (!project) {
         return err<EditError, void>({ kind: 'parseFailed', detail: 'project not loaded' })
       }
-      const result = core.applyEdit(project.targetId, bytes, edit)
+      const result = core.applyEdit(project.targetId, workingBytes, edit)
       if (!result.ok) return err<EditError, void>(result.error)
-      // Re-derive both text and metadata from the patched bytes so the header
-      // can never describe an encoding the bytes no longer have.
-      const decoded = decodeToEditor(result.value)
-      setText(decoded.text)
-      setInfo(decoded.info)
+      setWorkingBytes(new Uint8Array(result.value))
       return ok<void, EditError>(undefined)
     },
-    [project, bytes],
+    [project, workingBytes],
   )
 
   const save = useCallback(async (): Promise<Result<SaveResult, ApiError>> => {
@@ -130,17 +145,20 @@ export function useProject(id: string): ProjectEditor {
     }
     setSaving(true)
     try {
-      const result = await api.saveRevision(project.id, bytes)
+      const result = await api.saveRevision({
+        projectId: project.id,
+        source: workingBytes,
+        expectedRevisionId: project.currentRevisionId,
+      })
       if (result.ok) {
         setProject(result.value.project)
-        const decoded = decodeToEditor(result.value.project.source)
-        setInfo(decoded.info)
+        setWorkingBytes(new Uint8Array(result.value.project.source))
       }
       return result
     } finally {
       setSaving(false)
     }
-  }, [project, bytes])
+  }, [project, workingBytes])
 
   const rename = useCallback(
     async (name: string): Promise<Result<ProjectSummary, ApiError>> => {
@@ -155,15 +173,18 @@ export function useProject(id: string): ProjectEditor {
   )
 
   const remove = useCallback(async () => {
-    if (project) await api.deleteProject(project.id)
+    if (!project) return err<ApiError, void>({ code: 'project.not_found', message: '项目不存在' })
+    return api.deleteProject(project.id)
   }, [project])
 
   return {
     status,
     project,
+    loadError,
     text,
     setText,
     info,
+    workingBytes: bytes,
     bytes: project ? bytes : EMPTY,
     dirty,
     validation,

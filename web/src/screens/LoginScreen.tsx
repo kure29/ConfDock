@@ -12,16 +12,19 @@ import styles from './LoginScreen.module.css'
  * "remember me", no sign-up and no password reset flow to speak of.
  */
 export function LoginScreen() {
-  const { signIn } = useAuth()
+  const { signIn, error: sessionError } = useAuth()
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [service, setService] = useState<ServiceInfo | null>(null)
+  const [serviceError, setServiceError] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
-    void api.serviceInfo().then((info) => {
-      if (live) setService(info)
+    void api.serviceInfo().then((result) => {
+      if (!live) return
+      if (result.ok) setService(result.value)
+      else setServiceError(result.error.message)
     })
     return () => {
       live = false
@@ -56,7 +59,7 @@ export function LoginScreen() {
           autoFocus
           value={password}
           onChange={(event) => setPassword(event.target.value)}
-          error={error ?? undefined}
+          error={(error ?? sessionError?.message) ?? undefined}
         />
 
         <Button type="submit" variant="primary" loading={busy}>
@@ -71,6 +74,7 @@ export function LoginScreen() {
             任意密码都能进入，数据只存在这台浏览器的 localStorage 里。
           </p>
         )}
+        {serviceError !== null && <p className={styles.mock}>{serviceError}</p>}
       </form>
     </main>
   )

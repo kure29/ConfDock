@@ -29,6 +29,7 @@ interface SettingsScreenProps {
 export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
   const toast = useToast()
   const [service, setService] = useState<ServiceInfo | null>(null)
+  const [serviceError, setServiceError] = useState<string | null>(null)
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
   const [again, setAgain] = useState('')
@@ -37,8 +38,10 @@ export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
 
   useEffect(() => {
     let live = true
-    void api.serviceInfo().then((info) => {
-      if (live) setService(info)
+    void api.serviceInfo().then((result) => {
+      if (!live) return
+      if (result.ok) setService(result.value)
+      else setServiceError(result.error.message)
     })
     return () => {
       live = false
@@ -135,6 +138,7 @@ export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
         </Panel>
 
         <Panel title="服务信息">
+          {serviceError !== null && <p className={page.quiet}>{serviceError}</p>}
           <dl className={styles.info}>
             <div className={styles.infoRow}>
               <dt className={styles.term}>版本</dt>
@@ -145,7 +149,7 @@ export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
               <dd className={styles.value}>
                 {service?.core === 'wasm'
                   ? 'confdock-core（WASM）'
-                  : '浏览器内的契约 mock —— 不是真正的解析器'}
+                  : '临时 TypeScript Mock Core —— 非权威，不能证明与 Rust 一致'}
               </dd>
             </div>
             <div className={styles.infoRow}>

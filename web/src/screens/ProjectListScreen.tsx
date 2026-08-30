@@ -18,12 +18,20 @@ import page from './page.module.css'
  */
 export function ProjectListScreen() {
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
 
   useEffect(() => {
     let live = true
-    void api.listProjects().then((list) => {
-      if (live) setProjects(list)
+    void api.listProjects().then((result) => {
+      if (!live) return
+      if (result.ok) {
+        setProjects(result.value)
+        setError(null)
+      } else {
+        setProjects(null)
+        setError(result.error.message)
+      }
     })
     return () => {
       live = false
@@ -45,7 +53,11 @@ export function ProjectListScreen() {
       </div>
 
       <Panel flush>
-        {projects === null ? (
+        {error !== null ? (
+          <div className={page.loadingRow} role="alert">
+            {error}
+          </div>
+        ) : projects === null ? (
           <p className={page.loadingRow}>正在读取…</p>
         ) : projects.length === 0 ? (
           <EmptyState

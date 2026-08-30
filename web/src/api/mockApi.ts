@@ -8,7 +8,7 @@ import {
   encodeUtf8,
 } from '../lib/bytes'
 import { nowIso } from '../lib/time'
-import type { ConfDockApi } from './ConfDockApi'
+import type { ConfDockApi, SaveRevisionInput } from './ConfDockApi'
 import { SEED_PROJECTS } from './seed'
 import { API_ERROR } from './types'
 import type {
@@ -221,11 +221,11 @@ export function createMockApi(subscriptionBase: string): ConfDockApi {
   }
 
   return {
-    async currentSession(): Promise<AdminSession | null> {
+    async currentSession(): Promise<Result<AdminSession | null, ApiError>> {
       await delay(READ_DELAY)
       const store = readStore()
-      if (store.sessionId === null) return null
-      return { id: store.sessionId, createdAt: nowIso() }
+      if (store.sessionId === null) return ok(null)
+      return ok({ id: store.sessionId, createdAt: nowIso() })
     },
 
     async signIn(password: string): Promise<Result<AdminSession, ApiError>> {
@@ -243,11 +243,12 @@ export function createMockApi(subscriptionBase: string): ConfDockApi {
       return ok(session)
     },
 
-    async signOut(): Promise<void> {
+    async signOut(): Promise<Result<void, ApiError>> {
       await delay(READ_DELAY)
       const store = readStore()
       store.sessionId = null
       writeStore(store)
+      return ok(undefined)
     },
 
     async changePassword(
@@ -270,17 +271,19 @@ export function createMockApi(subscriptionBase: string): ConfDockApi {
       return ok(undefined)
     },
 
-    async listProjects(): Promise<ProjectSummary[]> {
+    async listProjects(): Promise<Result<ProjectSummary[], ApiError>> {
       await delay(READ_DELAY)
-      return readStore()
+      return ok(readStore()
         .projects.map(toSummary)
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)))
     },
 
-    async getProject(id: string): Promise<Project | null> {
+    async getProject(id: string): Promise<Result<Project, ApiError>> {
       await delay(READ_DELAY)
       const stored = findProject(readStore(), id)
-      return stored === undefined ? null : toProject(stored)
+      return stored === undefined
+        ? err(apiError(API_ERROR.notFound, '配置不存在'))
+        : ok(toProject(stored))
     },
 
     async createProject(input: NewProject): Promise<Result<Project, ApiError>> {
@@ -319,15 +322,20 @@ export function createMockApi(subscriptionBase: string): ConfDockApi {
       return ok(toProject(stored))
     },
 
-    async saveRevision(
-      id: string,
-      source: Uint8Array,
-    ): Promise<Result<SaveResult, ApiError>> {
+    async saveRevision({
+      projectId,
+      source,
+      expectedRevisionId,
+    }: SaveRevisionInput): Promise<Result<SaveResult, ApiError>> {
       await delay(WRITE_DELAY)
       const store = readStore()
-      const stored = findProject(store, id)
+      const stored = findProject(store, projectId)
       if (stored === undefined) {
         return err(apiError(API_ERROR.notFound, '配置不存在'))
+      }
+
+      if (stored.currentRevisionId !== expectedRevisionId) {
+        return err(apiError(API_ERROR.revisionConflict, '配置已被其他页面更新，请重新加载后再保存'))
       }
 
       const validation = core.validate(stored.targetId, source)
@@ -377,17 +385,22 @@ export function createMockApi(subscriptionBase: string): ConfDockApi {
       return ok(toSummary(stored))
     },
 
-    async deleteProject(id: string): Promise<void> {
+    async deleteProject(id: string): Promise<Result<void, ApiError>> {
       await delay(WRITE_DELAY)
       const store = readStore()
+      const before = store.projects.length
       store.projects = store.projects.filter((project) => project.id !== id)
+      if (store.projects.length === before) return err(apiError(API_ERROR.notFound, '配置不存在'))
       writeStore(store)
+      return ok(undefined)
     },
 
-    async listTokens(projectId: string): Promise<AccessToken[]> {
+    async listTokens(projectId: string): Promise<Result<AccessToken[], ApiError>> {
       await delay(READ_DELAY)
       const stored = findProject(readStore(), projectId)
-      return stored === undefined ? [] : stored.tokens.map(toToken)
+      return stored === undefined
+        ? err(apiError(API_ERROR.notFound, '配置不存在'))
+        : ok(stored.tokens.map(toToken))
     },
 
     async createToken(projectId: string): Promise<Result<CreatedAccessToken, ApiError>> {
@@ -425,23 +438,26 @@ export function createMockApi(subscriptionBase: string): ConfDockApi {
       })
     },
 
-    async revokeToken(projectId: string, tokenId: string): Promise<void> {
+    async revokeToken(projectId: string, tokenId: string): Promise<Result<void, ApiError>> {
       await delay(WRITE_DELAY)
       const store = readStore()
       const stored = findProject(store, projectId)
-      if (stored === undefined) return
+      if (stored === undefined) return err(apiError(API_ERROR.notFound, '配置不存在'))
+      const before = stored.tokens.length
       stored.tokens = stored.tokens.filter((token) => token.id !== tokenId)
+      if (stored.tokens.length === before) return err(apiError(API_ERROR.tokenNotFound, '托管地址不存在'))
       writeStore(store)
+      return ok(undefined)
     },
 
-    async serviceInfo(): Promise<ServiceInfo> {
+    async serviceInfo(): Promise<Result<ServiceInfo, ApiError>> {
       await delay(READ_DELAY)
-      return {
+      return ok({
         version: '0.1.0-dev',
         core: 'mock',
         api: 'mock',
         subscriptionBase,
-      }
+      })
     },
   }
 }
