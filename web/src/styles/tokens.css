@@ -31,10 +31,10 @@
   --fg-subtle: #a1a1aa; /* line numbers, placeholders */
 
   /* ---- Accent (single) ---- */
-  --accent: #2f6f64;
+  --accent: #3f5f8a;
   --accent-fg: #ffffff;
-  --accent-subtle: #eef4f2;
-  --accent-border: #b8d3cd;
+  --accent-subtle: #eef2f8;
+  --accent-border: #b9c8dd;
 
   /* ---- Semantic (only two) ---- */
   --warn: #a16207;
@@ -101,10 +101,11 @@
     --fg-muted: #9a9aa2;
     --fg-subtle: #6c6d75;
 
-    --accent: #4fa896;
+    /* Lift the blue for readable controls and focus rings on dark surfaces. */
+    --accent: #7598ca;
     --accent-fg: #0e0f11;
-    --accent-subtle: #14201e;
-    --accent-border: #2c4a44;
+    --accent-subtle: #182130;
+    --accent-border: #354766;
 
     --warn: #d4a72c;
     --warn-subtle: #241f10;
@@ -133,10 +134,10 @@
   --fg-muted: #9a9aa2;
   --fg-subtle: #6c6d75;
 
-  --accent: #4fa896;
+  --accent: #7598ca;
   --accent-fg: #0e0f11;
-  --accent-subtle: #14201e;
-  --accent-border: #2c4a44;
+  --accent-subtle: #182130;
+  --accent-border: #354766;
 
   --warn: #d4a72c;
   --warn-subtle: #241f10;

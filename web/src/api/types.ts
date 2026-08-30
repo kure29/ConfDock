@@ -45,8 +45,8 @@ export interface Project extends ProjectSummary {
   source: Uint8Array
   /**
    * Both pointers exist in the schema and advance together on save (ADR-004).
-   * They are exposed here to keep the model honest, not because V1 shows a
-   * history UI — it deliberately does not.
+   * They are exposed here so the history view can identify the two live
+   * pointers without inventing a second publication state.
    */
   currentRevisionId: string
   servedRevisionId: string
@@ -65,6 +65,26 @@ export interface SaveResult {
   validation: ValidationResult
   /** True when the bytes were identical and no revision was created. */
   unchanged: boolean
+}
+
+/** Read-only metadata for one immutable source revision. */
+export interface RevisionSummary {
+  id: string
+  revisionNo: number
+  parentRevisionId: string | null
+  createdAt: string
+  byteLength: number
+  /** Lower-case SHA-256 of the exact native bytes. */
+  contentHash: string
+  validation: ValidationResult
+  validatorVersion: string | null
+  isCurrent: boolean
+  isServed: boolean
+}
+
+/** A history entry with its original bytes, loaded on explicit selection. */
+export interface Revision extends RevisionSummary {
+  source: Uint8Array
 }
 
 // ---------------------------------------------------------------------------
@@ -128,5 +148,6 @@ export const API_ERROR = {
   invalidName: 'project.invalid_name',
   revisionConflict: 'revision.conflict',
   tokenNotFound: 'token.not_found',
+  revisionNotFound: 'revision.not_found',
   invalidResponse: 'network.invalid_response',
 } as const

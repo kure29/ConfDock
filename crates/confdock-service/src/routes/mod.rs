@@ -31,7 +31,11 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/projects/{id}/revisions",
-            post(projects::save_revision),
+            get(projects::list_revisions).post(projects::save_revision),
+        )
+        .route(
+            "/api/projects/{id}/revisions/{revision_id}",
+            get(projects::get_revision),
         )
         .route(
             "/api/projects/{id}/tokens",

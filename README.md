@@ -82,10 +82,12 @@ token, or database.
   to owner-only `0600` permissions on Unix. Symlinked or non-regular database
   files are rejected at startup.
 - Session lifetimes are limited to one year and decoded configuration bytes to
-  64 MiB to bound request and password-work resource use.
+  64 MiB to bound request and in-process work.
 - Project creation and saves validate native bytes again in `confdock-core`.
 - Revisions are immutable BLOB rows with a SHA-256 content hash. A successful
-  save advances `current_revision_id` and `served_revision_id` together.
+  save advances `current_revision_id` and `served_revision_id` together; the
+  authenticated History view can inspect older revisions without changing
+  either pointer.
 - `expectedRevisionId` is checked inside a write transaction; concurrent saves
   cannot silently overwrite one another.
 - `/sub/:token` returns the served BLOB byte-for-byte with no Base64,
@@ -121,6 +123,6 @@ See [`docs/architecture.md`](docs/architecture.md) and
 
 ## Not implemented yet
 
-Revision-history, diff, Publish, Rollback, and Snapshot UI are intentionally
-deferred. Native validators, additional adapters, embedded Web assets, Docker,
-HTTPS automation, and multi-administrator accounts are also outside this slice.
+Diff, Publish, Rollback, and Snapshot UI are intentionally deferred. Native
+validators, additional adapters, embedded Web assets, Docker, HTTPS automation,
+and multi-administrator accounts are also outside this slice.

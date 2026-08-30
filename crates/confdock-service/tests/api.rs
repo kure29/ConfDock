@@ -222,7 +222,7 @@ async fn health_service_login_cookie_session_and_logout_contract() {
         .to_owned();
     assert!(set_cookie.contains("HttpOnly"));
     assert!(set_cookie.contains("SameSite=Strict"));
-    assert!(set_cookie.contains("Path=/api"));
+    assert!(set_cookie.split(';').any(|part| part.trim() == "Path=/api"));
     assert!(set_cookie.contains("Max-Age=3600"));
     assert!(!set_cookie.contains("Domain="));
     assert!(!set_cookie.contains("Secure"));
@@ -267,7 +267,8 @@ async fn health_service_login_cookie_session_and_logout_contract() {
     assert!(logout.headers()[header::SET_COOKIE]
         .to_str()
         .unwrap()
-        .contains("Path=/api"));
+        .split(';')
+        .any(|part| part.trim() == "Path=/api"));
     assert_eq!(
         request(
             &service.app,
@@ -661,6 +662,127 @@ async fn project_revision_transactions_conflicts_and_persistence_are_real() {
     assert_eq!(persisted, 1);
     restarted.pool.close().await;
     drop(directory);
+}
+
+#[tokio::test]
+async fn revision_history_is_ordered_metadata_and_explicit_byte_preserving_detail() {
+    let service = TestService::new().await;
+    let (cookie, _) = login(&service.app, PASSWORD).await;
+    let first_source = b"{}\n";
+    let project = create_project(
+        &service.app,
+        &cookie,
+        "History",
+        "sing-box",
+        "config.json",
+        first_source,
+    )
+    .await;
+    let project_id = project["id"].as_str().unwrap().to_owned();
+    let first_revision = project["currentRevisionId"].as_str().unwrap().to_owned();
+
+    let history_uri = format!("/api/projects/{project_id}/revisions");
+    let initial = request(&service.app, Method::GET, &history_uri, Some(&cookie), None).await;
+    assert_eq!(initial.status(), StatusCode::OK);
+    assert_eq!(initial.headers()[header::CACHE_CONTROL], "no-store");
+    let initial = response_json(initial).await;
+    assert_eq!(initial.as_array().unwrap().len(), 1);
+    let first = &initial[0];
+    assert_eq!(first["id"], first_revision);
+    assert_eq!(first["revisionNo"], 1);
+    assert_eq!(first["parentRevisionId"], Value::Null);
+    assert_eq!(first["byteLength"], first_source.len());
+    assert_eq!(
+        first["contentHash"],
+        hex_bytes(&Sha256::digest(first_source))
+    );
+    assert_eq!(first["isCurrent"], true);
+    assert_eq!(first["isServed"], true);
+    assert!(first.get("source").is_none());
+
+    let second_source = b"{\"log\":{\"level\":\"warn\"}}\n";
+    let saved = request(
+        &service.app,
+        Method::POST,
+        &history_uri,
+        Some(&cookie),
+        Some(json!({
+            "source": STANDARD.encode(second_source),
+            "expectedRevisionId": first_revision,
+        })),
+    )
+    .await;
+    assert_eq!(saved.status(), StatusCode::OK);
+    let second_revision = response_json(saved).await["project"]["currentRevisionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let history =
+        response_json(request(&service.app, Method::GET, &history_uri, Some(&cookie), None).await)
+            .await;
+    let history = history.as_array().unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0]["id"], second_revision);
+    assert_eq!(history[0]["revisionNo"], 2);
+    assert_eq!(history[0]["parentRevisionId"], first_revision);
+    assert_eq!(history[0]["isCurrent"], true);
+    assert_eq!(history[0]["isServed"], true);
+    assert_eq!(history[1]["id"], first_revision);
+    assert_eq!(history[1]["isCurrent"], false);
+    assert_eq!(history[1]["isServed"], false);
+
+    let detail_uri = format!("/api/projects/{project_id}/revisions/{second_revision}");
+    let detail = request(&service.app, Method::GET, &detail_uri, Some(&cookie), None).await;
+    assert_eq!(detail.status(), StatusCode::OK);
+    assert_eq!(detail.headers()[header::CACHE_CONTROL], "no-store");
+    let detail = response_json(detail).await;
+    assert_eq!(detail["source"], STANDARD.encode(second_source));
+    assert_eq!(
+        detail["contentHash"],
+        hex_bytes(&Sha256::digest(second_source))
+    );
+
+    let missing = request(
+        &service.app,
+        Method::GET,
+        &format!("/api/projects/{project_id}/revisions/missing"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response_json(missing).await["code"], "revision.not_found");
+
+    let other_project = create_project(
+        &service.app,
+        &cookie,
+        "Other",
+        "sing-box",
+        "other.json",
+        b"{}",
+    )
+    .await;
+    let cross_project = request(
+        &service.app,
+        Method::GET,
+        &format!(
+            "/api/projects/{}/revisions/{first_revision}",
+            other_project["id"].as_str().unwrap()
+        ),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(cross_project.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        response_json(cross_project).await["code"],
+        "revision.not_found"
+    );
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[tokio::test]

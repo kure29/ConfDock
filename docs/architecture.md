@@ -1,4 +1,4 @@
-# ConfDock architecture (Slice 1)
+# ConfDock architecture (Slice 2)
 
 ## Product boundary
 
@@ -198,6 +198,19 @@ and served together. This locking order means two writers with the same
 expected revision cannot both succeed. A later Publish workflow can separate
 the pointers without changing the schema.
 
+### Read-only revision history
+
+Slice 2 exposes immutable revision metadata through the authenticated
+`GET /api/projects/:id/revisions` endpoint, newest first. The list contains the
+revision number, parent ID, creation time, exact-byte length and SHA-256,
+validation snapshot, validator version, and explicit `isCurrent`/`isServed`
+flags; it deliberately omits source BLOBs so a history refresh does not copy
+every configuration into memory or across the wire. The detail endpoint
+`GET /api/projects/:id/revisions/:revisionId` returns one selected revision's
+original bytes as Base64 plus the same metadata. Both operations are read-only:
+selecting or inspecting history never changes pointers, creates a revision, or
+publishes anything. The UI does not offer Diff, Rollback, or Publish actions.
+
 ### Administrator and session security
 
 On the first start only, `CONFDOCK_BOOTSTRAP_PASSWORD` is mandatory and must be
@@ -242,8 +255,10 @@ Internal errors expose only a safe request ID.
 * **WASM web boundary:** `confdock-wasm` and the React shell consume
   the Rust registry and preserve native bytes; no duplicate parser or registry
   exists in TypeScript.
-* **Slice 1 (current):** single-admin Axum service, SQLite persistence,
+* **Slice 1:** single-admin Axum service, SQLite persistence,
   immutable revisions, concurrency protection, stable URLs, and the real Web
   HTTP seam.
-* **Later:** Publish/Rollback/history UX, optional native validators, embedded
-  Web assets, Docker, and individually scoped adapters or conversion tools.
+* **Slice 2 (current):** read-only revision history metadata/detail API and
+  editor inspection UI, while current and served pointers remain coupled.
+* **Later:** Diff, Publish/Rollback, optional native validators, embedded Web
+  assets, Docker, and individually scoped adapters or conversion tools.

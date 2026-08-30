@@ -1,4 +1,11 @@
-import type { Result, ValidationResult } from '../core/types'
+import type {
+  Diagnostic,
+  DiagnosticSeverity,
+  Result,
+  SourceSpan,
+  ValidationLevel,
+  ValidationResult,
+} from '../core/types'
 import { err, ok } from '../core/types'
 import { base64ToBytes, bytesToBase64 } from '../lib/bytes'
 import type { ConfDockApi, SaveRevisionInput } from './ConfDockApi'
@@ -11,6 +18,8 @@ import type {
   NewProject,
   Project,
   ProjectSummary,
+  Revision,
+  RevisionSummary,
   SaveResult,
   ServiceInfo,
 } from './types'
@@ -19,7 +28,9 @@ import type {
  * The Axum client. `web/README.md` documents the same REST shape.
  *
  * Wire format: the management API is JSON throughout, with document bytes
- * base64-encoded in a `source` field. Only `GET /sub/:token` returns raw bytes,
+ * base64-encoded in a `source` field. History lists intentionally omit source;
+ * `getRevision()` loads one selected immutable entry when the administrator
+ * asks to inspect it. Only `GET /sub/:token` returns raw bytes directly,
  * because that is the endpoint proxy clients actually fetch.
  *
  * Auth is a session cookie set by `POST /api/session`, so every request goes out
@@ -40,6 +51,96 @@ function decodeProject(wire: Wire['project']): Project {
   }
   const { source, ...rest } = wire
   return { ...rest, source: base64ToBytes(source) }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object'
+}
+
+function isValidationLevel(value: unknown): value is ValidationLevel {
+  return value === 'basic' || value === 'syntax' || value === 'static' || value === 'native'
+}
+
+function isDiagnosticSeverity(value: unknown): value is DiagnosticSeverity {
+  return value === 'info' || value === 'warning' || value === 'error'
+}
+
+function decodeSpan(value: unknown): SourceSpan | null {
+  if (value === null) return null
+  if (!isRecord(value) || !Number.isSafeInteger(value.start) || !Number.isSafeInteger(value.end)) {
+    throw new Error('invalid diagnostic span')
+  }
+  if ((value.start as number) < 0 || (value.end as number) < (value.start as number)) {
+    throw new Error('invalid diagnostic span range')
+  }
+  return { start: value.start as number, end: value.end as number }
+}
+
+function decodeValidation(value: unknown): ValidationResult {
+  if (!isRecord(value) || !isValidationLevel(value.level) || !Array.isArray(value.diagnostics)) {
+    throw new Error('invalid validation result')
+  }
+  const diagnostics: Diagnostic[] = value.diagnostics.map((diagnostic) => {
+    if (
+      !isRecord(diagnostic) ||
+      !isDiagnosticSeverity(diagnostic.severity) ||
+      typeof diagnostic.code !== 'string' ||
+      typeof diagnostic.message !== 'string'
+    ) {
+      throw new Error('invalid diagnostic')
+    }
+    return {
+      severity: diagnostic.severity,
+      code: diagnostic.code,
+      message: diagnostic.message,
+      span: decodeSpan(diagnostic.span),
+    }
+  })
+  return { level: value.level, diagnostics }
+}
+
+function decodeRevisionSummary(value: unknown): RevisionSummary {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    !Number.isSafeInteger(value.revisionNo) ||
+    (value.revisionNo as number) < 1 ||
+    (value.parentRevisionId !== null && typeof value.parentRevisionId !== 'string') ||
+    typeof value.createdAt !== 'string' ||
+    !Number.isSafeInteger(value.byteLength) ||
+    (value.byteLength as number) < 0 ||
+    typeof value.contentHash !== 'string' ||
+    !/^[0-9a-f]{64}$/.test(value.contentHash) ||
+    (value.validatorVersion !== null && typeof value.validatorVersion !== 'string') ||
+    typeof value.isCurrent !== 'boolean' ||
+    typeof value.isServed !== 'boolean'
+  ) {
+    throw new Error('invalid revision summary')
+  }
+  return {
+    id: value.id,
+    revisionNo: value.revisionNo as number,
+    parentRevisionId: value.parentRevisionId as string | null,
+    createdAt: value.createdAt,
+    byteLength: value.byteLength as number,
+    contentHash: value.contentHash,
+    validation: decodeValidation(value.validation),
+    validatorVersion: value.validatorVersion as string | null,
+    isCurrent: value.isCurrent,
+    isServed: value.isServed,
+  }
+}
+
+function decodeRevision(value: unknown): Revision {
+  if (!isRecord(value) || typeof value.source !== 'string') {
+    throw new Error('invalid revision response')
+  }
+  const summary = decodeRevisionSummary(value)
+  const source = base64ToBytes(value.source)
+  if (source.length !== summary.byteLength) {
+    throw new Error('revision byte length mismatch')
+  }
+  return { ...summary, source }
 }
 
 function invalidResponse(): ApiError {
@@ -179,6 +280,54 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
         validation: result.value.validation,
         unchanged: result.value.unchanged,
       })
+    },
+
+    async listRevisions(projectId: string): Promise<Result<RevisionSummary[], ApiError>> {
+      const result = await request<unknown>(
+        'GET',
+        `/api/projects/${encodeURIComponent(projectId)}/revisions`,
+      )
+      if (!result.ok) {
+        if (result.error.code === 'http.404') {
+          return err({ code: API_ERROR.notFound, message: '配置不存在' })
+        }
+        return result
+      }
+      try {
+        if (!Array.isArray(result.value)) throw new Error('invalid revision list')
+        const revisions = result.value.map(decodeRevisionSummary)
+        if (
+          revisions.length === 0 ||
+          revisions.filter((revision) => revision.isCurrent).length !== 1 ||
+          revisions.filter((revision) => revision.isServed).length !== 1
+        ) {
+          throw new Error('invalid revision pointers')
+        }
+        return ok(revisions)
+      } catch {
+        return err(invalidResponse())
+      }
+    },
+
+    async getRevision(
+      projectId: string,
+      revisionId: string,
+    ): Promise<Result<Revision, ApiError>> {
+      const result = await request<unknown>(
+        'GET',
+        `/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}`,
+      )
+      if (!result.ok) {
+        if (result.error.code === 'http.404') {
+          return err({ code: API_ERROR.revisionNotFound, message: '版本不存在' })
+        }
+        return result
+      }
+      try {
+        return ok(decodeRevision(result.value))
+      } catch {
+        return err(invalidResponse())
+      }
     },
 
     async renameProject(

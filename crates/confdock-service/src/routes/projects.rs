@@ -6,8 +6,8 @@ use axum::{
 
 use crate::{
     dto::{
-        CreateProjectRequest, ProjectDto, ProjectSummaryDto, RenameProjectRequest, SaveResultDto,
-        SaveRevisionRequest,
+        CreateProjectRequest, ProjectDto, ProjectSummaryDto, RenameProjectRequest, RevisionDto,
+        RevisionSummaryDto, SaveResultDto, SaveRevisionRequest,
     },
     error::ApiError,
     state::AppState,
@@ -73,6 +73,22 @@ pub async fn save_revision(
             &validation,
         )
         .await?,
+    ))
+}
+
+pub async fn list_revisions(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<RevisionSummaryDto>>, ApiError> {
+    Ok(Json(storage::list_revisions(&state.pool, &id).await?))
+}
+
+pub async fn get_revision(
+    State(state): State<AppState>,
+    Path((id, revision_id)): Path<(String, String)>,
+) -> Result<Json<RevisionDto>, ApiError> {
+    Ok(Json(
+        storage::get_revision(&state.pool, &id, &revision_id).await?,
     ))
 }
 

@@ -20,6 +20,7 @@ export function TopBar({ onSignOut, wide = false }: TopBarProps) {
     <header className={styles.bar}>
       <div className={cx(styles.inner, wide && styles.wide)}>
         <Link to="/" className={styles.brand}>
+          <img className={styles.mark} src="/favicon.svg" alt="" aria-hidden="true" />
           ConfDock
         </Link>
         <nav className={styles.nav}>

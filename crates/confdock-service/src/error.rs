@@ -63,6 +63,10 @@ impl ApiError {
         )
     }
 
+    pub fn revision_not_found() -> Self {
+        Self::not_found("revision.not_found", "版本不存在")
+    }
+
     pub fn validation(validation: ValidationResultDto) -> Self {
         let (status, code, message) = if validation.has_code("encoding.unsupported") {
             (
@@ -128,6 +132,7 @@ mod tests {
     fn stable_errors_map_to_expected_statuses() {
         assert_eq!(ApiError::unauthorized().status, StatusCode::UNAUTHORIZED);
         assert_eq!(ApiError::conflict().status, StatusCode::CONFLICT);
+        assert_eq!(ApiError::revision_not_found().code, "revision.not_found");
         assert_eq!(ApiError::too_large().status, StatusCode::PAYLOAD_TOO_LARGE);
         assert_eq!(ApiError::internal().code, "internal.error");
     }

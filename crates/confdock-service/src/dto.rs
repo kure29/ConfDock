@@ -79,6 +79,34 @@ pub struct SaveResultDto {
     pub unchanged: bool,
 }
 
+/// Metadata for one immutable revision. Source bytes stay out of the history
+/// list so opening a project does not duplicate every stored document over
+/// the management API.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisionSummaryDto {
+    pub id: String,
+    pub revision_no: i64,
+    pub parent_revision_id: Option<String>,
+    pub created_at: String,
+    pub byte_length: usize,
+    pub content_hash: String,
+    pub validation: ValidationResultDto,
+    pub validator_version: Option<String>,
+    pub is_current: bool,
+    pub is_served: bool,
+}
+
+/// One immutable revision with its original bytes, returned only when the
+/// authenticated administrator explicitly opens that history entry.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisionDto {
+    #[serde(flatten)]
+    pub summary: RevisionSummaryDto,
+    pub source: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccessTokenDto {

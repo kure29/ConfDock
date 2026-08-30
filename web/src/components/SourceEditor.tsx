@@ -36,6 +36,8 @@ export interface RevealRequest {
 interface SourceEditorProps {
   text: string
   onChange: (next: string) => void
+  /** History entries use the same byte-aware viewer without enabling edits. */
+  readOnly?: boolean
   /** Native bytes are required for lossless SourceSpan mapping. */
   bytes: Uint8Array
   /** Describes the native bytes for the metadata line and editing policy. */
@@ -55,7 +57,15 @@ interface SourceEditorProps {
  * occupy several visual rows and every gutter number below it would point at the
  * wrong line.
  */
-export function SourceEditor({ text, onChange, bytes, info, markers = [], reveal }: SourceEditorProps) {
+export function SourceEditor({
+  text,
+  onChange,
+  bytes,
+  info,
+  markers = [],
+  reveal,
+  readOnly = false,
+}: SourceEditorProps) {
   const textarea = useRef<HTMLTextAreaElement>(null)
   const gutter = useRef<HTMLDivElement>(null)
 
@@ -130,8 +140,8 @@ export function SourceEditor({ text, onChange, bytes, info, markers = [], reveal
           autoCapitalize="off"
           autoCorrect="off"
           wrap="off"
-          aria-label="配置源码"
-          readOnly={info.lineEnding === 'mixed'}
+          aria-label={readOnly ? '历史版本源码（只读）' : '配置源码'}
+          readOnly={readOnly || info.lineEnding === 'mixed'}
         />
       </div>
       <div className={styles.meta}>
