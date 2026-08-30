@@ -11,8 +11,8 @@ use crate::{
     diff::{build_revision_diff, DiffError, RevisionDiffSource, MAX_DIFF_INPUT_BYTES},
     dto::{
         timestamp_to_iso, AccessTokenDto, CreatedAccessTokenDto, ProjectDto, ProjectSummaryDto,
-        RevisionDiffDto, RevisionDto, RevisionPageDto, RevisionSummaryDto, SaveResultDto,
-        ValidationResultDto,
+        PublishResultDto, RevisionDiffDto, RevisionDto, RevisionPageDto, RevisionSummaryDto,
+        SaveResultDto, ValidationResultDto,
     },
     error::ApiError,
 };
@@ -24,11 +24,12 @@ const MAX_REVISION_CURSOR_BYTES: usize = 128;
 const FULL_PROJECT_QUERY: &str =
     "SELECT p.id, p.name, p.target_id, p.file_name, p.current_revision_id, \
      p.served_revision_id, p.last_validation_result, p.updated_at, r.source_bytes \
-     FROM projects p JOIN config_revisions r ON r.id = p.served_revision_id WHERE p.id = ?";
+     FROM projects p JOIN config_revisions r ON r.id = p.current_revision_id WHERE p.id = ?";
 const SUMMARY_PROJECT_QUERY: &str =
     "SELECT p.id, p.name, p.target_id, p.file_name, p.last_validation_result, \
-     p.updated_at, length(r.source_bytes) AS byte_length \
-     FROM projects p JOIN config_revisions r ON r.id = p.served_revision_id WHERE p.id = ?";
+     p.updated_at, length(r.source_bytes) AS byte_length, \
+     p.current_revision_id, p.served_revision_id \
+     FROM projects p JOIN config_revisions r ON r.id = p.current_revision_id WHERE p.id = ?";
 const REVISION_LIST_QUERY: &str =
     "SELECT r.id, r.parent_revision_id, r.revision_no, length(r.source_bytes) AS byte_length, \
      r.content_hash, \
@@ -55,8 +56,9 @@ const REVISION_DETAIL_QUERY: &str =
 pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummaryDto>, ApiError> {
     let rows = sqlx::query(
         "SELECT p.id, p.name, p.target_id, p.file_name, p.last_validation_result, \
-         p.updated_at, length(r.source_bytes) AS byte_length \
-         FROM projects p JOIN config_revisions r ON r.id = p.served_revision_id \
+         p.updated_at, length(r.source_bytes) AS byte_length, \
+         p.current_revision_id, p.served_revision_id \
+         FROM projects p JOIN config_revisions r ON r.id = p.current_revision_id \
          ORDER BY p.updated_at DESC, p.id",
     )
     .fetch_all(pool)
@@ -173,6 +175,69 @@ pub async fn save_revision(
     )
     .await;
     finish_transaction(connection, result).await
+}
+
+pub async fn publish_project(
+    pool: &SqlitePool,
+    project_id: &str,
+    expected_current_revision_id: &str,
+    expected_served_revision_id: &str,
+) -> Result<PublishResultDto, ApiError> {
+    let mut connection = begin_immediate(pool).await?;
+    let result = publish_project_inner(
+        &mut connection,
+        project_id,
+        expected_current_revision_id,
+        expected_served_revision_id,
+    )
+    .await;
+    finish_transaction(connection, result).await
+}
+
+async fn publish_project_inner(
+    connection: &mut PoolConnection<Sqlite>,
+    project_id: &str,
+    expected_current_revision_id: &str,
+    expected_served_revision_id: &str,
+) -> Result<PublishResultDto, ApiError> {
+    let row =
+        sqlx::query("SELECT current_revision_id, served_revision_id FROM projects WHERE id = ?")
+            .bind(project_id)
+            .fetch_optional(&mut **connection)
+            .await
+            .map_err(|_| ApiError::internal())?
+            .ok_or_else(|| ApiError::not_found("project.not_found", "配置不存在"))?;
+    let current_revision_id: String = row
+        .try_get("current_revision_id")
+        .map_err(|_| ApiError::internal())?;
+    let served_revision_id: String = row
+        .try_get("served_revision_id")
+        .map_err(|_| ApiError::internal())?;
+    if current_revision_id != expected_current_revision_id {
+        return Err(ApiError::conflict());
+    }
+    if current_revision_id != served_revision_id
+        && served_revision_id != expected_served_revision_id
+    {
+        return Err(ApiError::publish_conflict());
+    }
+    if current_revision_id == served_revision_id {
+        return Ok(PublishResultDto {
+            project: fetch_project_connection(connection, project_id).await?,
+            unchanged: true,
+        });
+    }
+    sqlx::query("UPDATE projects SET served_revision_id = ?, updated_at = ? WHERE id = ?")
+        .bind(&current_revision_id)
+        .bind(unix_timestamp())
+        .bind(project_id)
+        .execute(&mut **connection)
+        .await
+        .map_err(|_| ApiError::internal())?;
+    Ok(PublishResultDto {
+        project: fetch_project_connection(connection, project_id).await?,
+        unchanged: false,
+    })
 }
 
 pub async fn list_revisions(
@@ -443,10 +508,9 @@ async fn save_revision_inner(
     )
     .await?;
     sqlx::query(
-        "UPDATE projects SET current_revision_id = ?, served_revision_id = ?, \
+        "UPDATE projects SET current_revision_id = ?, \
          last_validation_level = ?, last_validation_result = ?, updated_at = ? WHERE id = ?",
     )
-    .bind(&revision_id)
     .bind(&revision_id)
     .bind(&validation.level)
     .bind(&validation_json)
@@ -719,6 +783,12 @@ fn summary_from_row(row: &SqliteRow) -> Result<ProjectSummaryDto, ApiError> {
     let validation_json: String = row
         .try_get("last_validation_result")
         .map_err(|_| ApiError::internal())?;
+    let current_revision_id: String = row
+        .try_get("current_revision_id")
+        .map_err(|_| ApiError::internal())?;
+    let served_revision_id: String = row
+        .try_get("served_revision_id")
+        .map_err(|_| ApiError::internal())?;
     Ok(ProjectSummaryDto {
         id: row.try_get("id").map_err(|_| ApiError::internal())?,
         name: row.try_get("name").map_err(|_| ApiError::internal())?,
@@ -736,6 +806,7 @@ fn summary_from_row(row: &SqliteRow) -> Result<ProjectSummaryDto, ApiError> {
         .map_err(|_| ApiError::internal())?,
         last_validation: serde_json::from_str(&validation_json)
             .map_err(|_| ApiError::internal())?,
+        has_unpublished_changes: current_revision_id != served_revision_id,
     })
 }
 
@@ -760,6 +831,12 @@ fn project_from_row(row: &SqliteRow) -> Result<ProjectDto, ApiError> {
             byte_length: source.len(),
             last_validation: serde_json::from_str(&validation_json)
                 .map_err(|_| ApiError::internal())?,
+            has_unpublished_changes: row
+                .try_get::<String, _>("current_revision_id")
+                .map_err(|_| ApiError::internal())?
+                != row
+                    .try_get::<String, _>("served_revision_id")
+                    .map_err(|_| ApiError::internal())?,
         },
         source: STANDARD.encode(source),
         current_revision_id: row

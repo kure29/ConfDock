@@ -1,6 +1,6 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
-import type { ApiError, Project, ProjectSummary, SaveResult } from '../api'
+import type { ApiError, Project, ProjectSummary, PublishResult, SaveResult } from '../api'
 import { core } from '../core'
 import type {
   DocumentInfo,
@@ -46,6 +46,8 @@ export interface ProjectEditor {
   applyEdit: (edit: StructuredEdit) => Result<void, EditError>
   saving: boolean
   save: () => Promise<Result<SaveResult, ApiError>>
+  publishing: boolean
+  publish: () => Promise<Result<PublishResult, ApiError>>
   rename: (name: string) => Promise<Result<ProjectSummary, ApiError>>
   remove: () => Promise<Result<void, ApiError>>
 }
@@ -59,8 +61,14 @@ export function useProject(id: string): ProjectEditor {
   const [rawLineEndingPreference, setRawLineEndingPreference] = useState<Exclude<LineEnding, 'none'>>('lf')
   const [loadError, setLoadError] = useState<ApiError | null>(null)
   const [saving, setSaving] = useState(false)
+  const [publishing, setPublishing] = useState(false)
+  const publishingRef = useRef(false)
+  const activeProjectIdRef = useRef(id)
 
   useEffect(() => {
+    activeProjectIdRef.current = id
+    publishingRef.current = false
+    setPublishing(false)
     let live = true
     setStatus('loading')
     setProject(null)
@@ -169,6 +177,40 @@ export function useProject(id: string): ProjectEditor {
     }
   }, [project, workingBytes])
 
+  const publish = useCallback(async (): Promise<Result<PublishResult, ApiError>> => {
+    if (!project) {
+      return err<ApiError, PublishResult>({ code: 'project.not_found', message: '项目不存在' })
+    }
+    if (dirty) {
+      return err<ApiError, PublishResult>({
+        code: 'publish.dirty',
+        message: '请先保存或撤销当前修改，再发布已保存的草稿',
+      })
+    }
+    if (publishingRef.current) {
+      return err<ApiError, PublishResult>({
+        code: 'publish.busy',
+        message: '正在发布，请稍候',
+      })
+    }
+    publishingRef.current = true
+    setPublishing(true)
+    try {
+      const result = await api.publishProject({
+        projectId: project.id,
+        expectedCurrentRevisionId: project.currentRevisionId,
+        expectedServedRevisionId: project.servedRevisionId,
+      })
+      if (result.ok && activeProjectIdRef.current === project.id) {
+        setProject(result.value.project)
+      }
+      return result
+    } finally {
+      publishingRef.current = false
+      setPublishing(false)
+    }
+  }, [dirty, project])
+
   const rename = useCallback(
     async (name: string): Promise<Result<ProjectSummary, ApiError>> => {
       if (!project) {
@@ -202,6 +244,8 @@ export function useProject(id: string): ProjectEditor {
     applyEdit,
     saving,
     save,
+    publishing,
+    publish,
     rename,
     remove,
   }

@@ -10,8 +10,9 @@ use serde::Deserialize;
 
 use crate::{
     dto::{
-        CreateProjectRequest, ProjectDto, ProjectSummaryDto, RenameProjectRequest, RevisionDiffDto,
-        RevisionDto, RevisionPageDto, SaveResultDto, SaveRevisionRequest,
+        CreateProjectRequest, ProjectDto, ProjectSummaryDto, PublishProjectRequest,
+        PublishResultDto, RenameProjectRequest, RevisionDiffDto, RevisionDto, RevisionPageDto,
+        SaveResultDto, SaveRevisionRequest,
     },
     error::ApiError,
     state::AppState,
@@ -75,12 +76,7 @@ pub async fn save_revision(
     input: Result<Json<SaveRevisionRequest>, JsonRejection>,
 ) -> Result<Json<SaveResultDto>, ApiError> {
     let input = json(input)?;
-    if input.expected_revision_id.is_empty() {
-        return Err(ApiError::bad_request(
-            "request.invalid",
-            "expectedRevisionId 不能为空",
-        ));
-    }
+    validate_revision_id(&input.expected_revision_id)?;
     let target_id = storage::get_target_id(&state.pool, &id).await?;
     let source = source_base64(&input.source, state.config.max_config_bytes)?;
     let validation = validate_source(&state.registry, &target_id, &source)?;
@@ -91,6 +87,25 @@ pub async fn save_revision(
             &input.expected_revision_id,
             &source,
             &validation,
+        )
+        .await?,
+    ))
+}
+
+pub async fn publish(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    input: Result<Json<PublishProjectRequest>, JsonRejection>,
+) -> Result<Json<PublishResultDto>, ApiError> {
+    let input = json(input)?;
+    validate_revision_id(&input.expected_current_revision_id)?;
+    validate_revision_id(&input.expected_served_revision_id)?;
+    Ok(Json(
+        storage::publish_project(
+            &state.pool,
+            &id,
+            &input.expected_current_revision_id,
+            &input.expected_served_revision_id,
         )
         .await?,
     ))

@@ -90,7 +90,7 @@ export function ServedUrlDialog({ open, onClose, projectId }: ServedUrlDialogPro
       open={open}
       onClose={onClose}
       title="托管地址"
-      description="客户端用这个地址拉取最新一次保存成功的配置内容。"
+      description="客户端用这个地址拉取最近一次发布的配置内容。"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>

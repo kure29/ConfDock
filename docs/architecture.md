@@ -1,4 +1,4 @@
-# ConfDock architecture (Slice 3)
+# ConfDock architecture (Slice 4)
 
 ## Product boundary
 
@@ -194,9 +194,9 @@ A save validates bytes first, then enters `BEGIN IMMEDIATE`, re-reads
 HTTP 409 and changes nothing. Identical bytes update only the validation
 snapshot and return `unchanged: true`. New bytes create the next immutable
 revision, point its parent at the former current revision, and advance current
-and served together. This locking order means two writers with the same
-expected revision cannot both succeed. A later Publish workflow can separate
-the pointers without changing the schema.
+and advances current only; served remains on the last published revision. This
+locking order means two writers with the same expected revision cannot both
+succeed. Publish is a separate transaction described below.
 
 ### Read-only revision history
 
@@ -212,8 +212,8 @@ wire. The detail endpoint `GET /api/projects/:id/revisions/:revisionId` returns
 one selected revision's original bytes as Base64 plus the same metadata. Both
 operations are read-only: selecting or inspecting history never changes
 pointers, creates a revision, or publishes anything. The UI now offers a
-read-only comparison from the selected revision to its parent; it does not
-offer Rollback or Publish actions.
+read-only comparison from the selected revision to its parent; Rollback remains
+unavailable, while Publish is exposed only by the editor for a saved draft.
 
 ### Read-only revision diff
 
@@ -277,6 +277,22 @@ name is header-sanitized. No request layer logs the complete `/sub/:token` URI,
 token prefix/suffix/hash, configuration contents, password, or session token.
 Internal errors expose only a safe request ID.
 
+### Draft and Publish pointers
+
+Each project keeps two immutable revision pointers. `current_revision_id` is the
+saved draft shown by authenticated management Project/List reads; `served_revision_id`
+is the revision returned by stable subscription URLs. A successful Save creates a
+revision only when bytes change, advances `current_revision_id`, and leaves
+`served_revision_id` untouched. Responses expose `has_unpublished_changes` when
+the pointers differ.
+
+`POST /api/projects/:id/publish` accepts both expected pointer IDs. Inside a
+`BEGIN IMMEDIATE` transaction it rejects a stale current pointer with
+`revision.conflict`, and a stale served pointer with `publish.conflict` while a
+draft is pending. Publishing only updates `served_revision_id`; it does not
+create a revision, rewrite BLOBs, or rotate tokens. Repeating Publish after the
+pointers already match is an idempotent success with `unchanged: true`.
+
 ## Slice plan
 
 * **Slice 0.1:** hardened core contracts, strict read-only
@@ -290,9 +306,11 @@ Internal errors expose only a safe request ID.
   HTTP seam.
 * **Slice 2:** read-only revision history metadata/detail API and editor
   inspection UI, while current and served pointers remain coupled.
-* **Slice 3 (current):** bounded, read-only parent revision Diff in the Rust
-  Service and the history detail view. The UI currently compares only the
-  selected revision with its parent; `current_revision_id` and
-  `served_revision_id` remain coupled.
-* **Later:** Publish/Rollback, optional native validators, embedded Web assets,
+* **Slice 3:** bounded, read-only parent revision Diff in the Rust Service and
+  the history detail view. The UI compares only the selected revision with its
+  parent; `current_revision_id` and `served_revision_id` remain coupled.
+* **Slice 4:** Draft/Publish pointer separation. Management Project reads current
+  bytes, `has_unpublished_changes` reports pointer divergence, and Publish moves
+  only `served_revision_id` transactionally with optimistic pointer checks.
+* **Later:** Rollback, optional native validators, embedded Web assets,
   Docker, and individually scoped adapters or conversion tools.

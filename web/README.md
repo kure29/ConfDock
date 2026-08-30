@@ -64,7 +64,7 @@ Rust、`wasm32-unknown-unknown` 和 `wasm-bindgen-cli 0.2.127`。
 
 | 没有 | 依据 |
 | --- | --- |
-| 回滚 / Publish 按钮 | ADR-004：当前仍不暴露草稿与发布。「校验并保存」是一个动作，成功后 `current_revision_id` 和 `served_revision_id` 同时前进；历史 Diff 仍是只读查看 |
+| 回滚按钮 | Slice 4 仍不提供回滚；草稿通过显式 Publish 推进 served 指针 |
 | 一份配置生成多端输出 | architecture.md：Project = 一个客户端 + 一个原生文档 |
 | 头像菜单 / 成员 / 角色 / 通知中心 | 单管理员 |
 | 指标卡 / 可用性折线 / 请求数 | 一个人管几个配置，这些数字要么是编的，要么没有意义 |
@@ -136,8 +136,9 @@ DELETE /api/session
 POST   /api/admin/password            { currentPassword, nextPassword }
 GET    /api/projects                  → ProjectSummary[]
 POST   /api/projects                  { name, targetId, fileName, source } → Project
-GET    /api/projects/:id              → Project（source 为当前修订的字节）
-POST   /api/projects/:id/revisions    { source, expectedRevisionId } → { project, validation, unchanged }  ← 校验并保存
+GET    /api/projects/:id              → Project（source 为 current 修订的字节）
+POST   /api/projects/:id/revisions    { source, expectedRevisionId } → { project, validation, unchanged }  ← 校验并保存草稿
+POST   /api/projects/:id/publish      { expectedCurrentRevisionId, expectedServedRevisionId } → { project, unchanged }
 GET    /api/projects/:id/revisions    → { items, nextCursor }（默认最近 50 条，最多 100 条；不含 source）
 GET    /api/projects/:id/revisions/:revisionId → Revision（选中的历史版本，source 为 Base64）
 GET    /api/projects/:id/revisions/diff?fromRevisionId=…&toRevisionId=… → RevisionDiff（只含结构化 Diff，不含 source）
@@ -154,11 +155,13 @@ GET    /sub/:token                    → served 修订的原生字节（唯一�
 认证是 `POST /api/session` 下发的会话 cookie，所有请求带 `credentials: 'same-origin'`，
 Session Token 永远不进 URL。Stable Token 只用于公开的 `/sub/:token`。
 失败响应体是 `{ code, message, validation? }`；保存被校验拦下时 `validation` 必须在里面，编辑器要靠它跳到「检查」。
-保存时服务端比较 `expectedRevisionId` 与当前 revision；不一致返回 HTTP `409`
+保存时服务端比较 `expectedRevisionId` 与 current revision；不一致返回 HTTP `409`
 和稳定错误码 `revision.conflict`，前端保留当前未保存内容，不自动覆盖或刷新。
+保存只推进 current，`hasUnpublishedChanges` 表示是否存在未发布草稿；Publish 只推进 served，支持幂等调用并以双指针乐观校验避免覆盖其他页面的发布。稳定 URL 始终读取 served。
+Publish 使用 `expectedCurrentRevisionId` 和 `expectedServedRevisionId`；前者过期返回 `revision.conflict`，后者在草稿待发布时过期返回 `publish.conflict`。
 「历史」视图只读取不可变版本的元数据；默认先显示最近 50 条，使用游标加载更早版本。
 选择一个版本后才加载其原始字节供只读查看，不会替换当前编辑内容。选中版本有父版本时，
-详情里可以请求只读的 `父版本 → 当前版本` Diff；没有回滚或 Publish 操作。
+详情里可以请求只读的 `父版本 → 当前版本` Diff；没有回滚操作，Publish 只推进 served 指针。
 管理 API 的网络错误、401、403、404、409、500 都以 `Result<T, ApiError>` 传播，
 不会静默转换为空列表、`null` 或“删除成功”。
 
@@ -178,7 +181,7 @@ HTTPS 部署通过 `CONFDOCK_COOKIE_SECURE=true` 增加 `Secure`。Session 和 S
 
 配置在管理 JSON 中使用标准 Base64；`GET /sub/:token` 直接返回 served Revision 的 SQLite
 BLOB，不转字符串、不重新序列化、不追加换行。保存使用 `expectedRevisionId` 防并发覆盖，
-本轮成功保存时 current/served 两个指针仍同步前进。
+保存草稿时只推进 current；Publish 成功后 served 才切换。
 
 ### Native Bytes V1 边界
 
@@ -193,7 +196,7 @@ Diff 位于 Rust Service 业务边界，不属于 WASM Config Core，也不做 Y
 元数据中展示 BOM、行尾风格、尾部换行、字节数和 SHA-256。两份输入合计最多 8 MiB、
 200,000 行，响应最多 10,000 行；超过限制返回 `revision.diff_too_large`，不会截断。
 同一 revision 或相同 content hash 直接返回 `identical` 空 Diff。当前 UI 只比较选中
-revision 与其 parent，`current` / `served` 仍同步。本 Slice 不包含 Rollback、Publish、
+revision 与其 parent，`current` / `served` 独立展示。本 Slice 不包含 Rollback、
 Token repointing 或 Native Validator。
 
 ---

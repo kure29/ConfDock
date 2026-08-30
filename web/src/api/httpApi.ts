@@ -8,7 +8,7 @@ import type {
 } from '../core/types'
 import { err, ok } from '../core/types'
 import { base64ToBytes, bytesToBase64 } from '../lib/bytes'
-import type { ConfDockApi, SaveRevisionInput } from './ConfDockApi'
+import type { ConfDockApi, PublishProjectInput, SaveRevisionInput } from './ConfDockApi'
 import { API_ERROR } from './types'
 import type {
   AccessToken,
@@ -28,6 +28,7 @@ import type {
   RevisionListOptions,
   RevisionPage,
   RevisionSummary,
+  PublishResult,
   SaveResult,
   ServiceInfo,
 } from './types'
@@ -50,15 +51,34 @@ interface Wire {
   projectSummary: Omit<ProjectSummary, 'byteLength'> & { byteLength: number }
   project: Omit<Project, 'source'> & { source: string }
   saveResult: { project: Wire['project']; validation: ValidationResult; unchanged: boolean }
+  publishResult: { project: Wire['project']; unchanged: boolean }
   createdToken: { token: AccessToken; plaintext: string; url: string }
 }
 
 function decodeProject(wire: Wire['project']): Project {
-  if (wire === null || typeof wire !== 'object' || typeof wire.source !== 'string') {
+  if (
+    wire === null ||
+    typeof wire !== 'object' ||
+    typeof wire.source !== 'string' ||
+    !isRevisionId(wire.currentRevisionId) ||
+    !isRevisionId(wire.servedRevisionId) ||
+    typeof wire.hasUnpublishedChanges !== 'boolean'
+  ) {
     throw new Error('invalid project response')
   }
   const { source, ...rest } = wire
-  return { ...rest, source: base64ToBytes(source) }
+  const bytes = base64ToBytes(source)
+  if (typeof rest.byteLength !== 'number' || rest.byteLength !== bytes.length) {
+    throw new Error('project byte length mismatch')
+  }
+  if (wire.hasUnpublishedChanges !== (wire.currentRevisionId !== wire.servedRevisionId)) {
+    throw new Error('invalid project pointers')
+  }
+  return {
+    ...rest,
+    source: bytes,
+    hasUnpublishedChanges: wire.hasUnpublishedChanges,
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -105,6 +125,32 @@ function decodeValidation(value: unknown): ValidationResult {
     }
   })
   return { level: value.level, diagnostics }
+}
+
+function decodeProjectSummary(value: unknown): ProjectSummary {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.name !== 'string' ||
+    typeof value.targetId !== 'string' ||
+    typeof value.fileName !== 'string' ||
+    typeof value.updatedAt !== 'string' ||
+    !Number.isSafeInteger(value.byteLength) ||
+    (value.byteLength as number) < 0 ||
+    typeof value.hasUnpublishedChanges !== 'boolean'
+  ) {
+    throw new Error('invalid project summary')
+  }
+  return {
+    id: value.id,
+    name: value.name,
+    targetId: value.targetId as ProjectSummary['targetId'],
+    fileName: value.fileName,
+    updatedAt: value.updatedAt,
+    byteLength: value.byteLength as number,
+    lastValidation: decodeValidation(value.lastValidation),
+    hasUnpublishedChanges: value.hasUnpublishedChanges,
+  }
 }
 
 function decodeRevisionSummary(value: unknown): RevisionSummary {
@@ -511,7 +557,14 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
     },
 
     async listProjects(): Promise<Result<ProjectSummary[], ApiError>> {
-      return request<ProjectSummary[]>('GET', '/api/projects')
+      const result = await request<unknown>('GET', '/api/projects')
+      if (!result.ok) return result
+      try {
+        if (!Array.isArray(result.value)) throw new Error('invalid project list')
+        return ok(result.value.map(decodeProjectSummary))
+      } catch {
+        return err(invalidResponse())
+      }
     },
 
     async getProject(id: string): Promise<Result<Project, ApiError>> {
@@ -543,13 +596,43 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
         { source: bytesToBase64(source), expectedRevisionId },
       )
       if (!result.ok) return result
-      const project = decodeProjectResult(result.value.project)
-      if (!project.ok) return project
-      return ok({
-        project: project.value,
-        validation: result.value.validation,
-        unchanged: result.value.unchanged,
-      })
+      try {
+        if (!isRecord(result.value) || typeof result.value.unchanged !== 'boolean') {
+          throw new Error('invalid save response')
+        }
+        const project = decodeProjectResult(result.value.project as Wire['project'])
+        if (!project.ok) return project
+        return ok({
+          project: project.value,
+          validation: decodeValidation(result.value.validation),
+          unchanged: result.value.unchanged,
+        })
+      } catch {
+        return err(invalidResponse())
+      }
+    },
+
+    async publishProject({
+      projectId,
+      expectedCurrentRevisionId,
+      expectedServedRevisionId,
+    }: PublishProjectInput): Promise<Result<PublishResult, ApiError>> {
+      const result = await request<Wire['publishResult']>(
+        'POST',
+        `/api/projects/${encodeURIComponent(projectId)}/publish`,
+        { expectedCurrentRevisionId, expectedServedRevisionId },
+      )
+      if (!result.ok) return result
+      try {
+        if (!isRecord(result.value) || typeof result.value.unchanged !== 'boolean') {
+          throw new Error('invalid publish response')
+        }
+        const project = decodeProjectResult(result.value.project as Wire['project'])
+        if (!project.ok) return project
+        return ok({ project: project.value, unchanged: result.value.unchanged })
+      } catch {
+        return err(invalidResponse())
+      }
     },
 
     async listRevisions(
