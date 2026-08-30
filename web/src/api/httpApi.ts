@@ -88,7 +88,9 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
             : response.status === 401
               ? API_ERROR.unauthorized
               : `http.${response.status}`),
-        message: problem?.message ?? `服务返回 ${response.status}`,
+        message:
+          problem?.message ??
+          (response.status === 401 ? '登录已失效，请重新登录' : `服务返回 ${response.status}`),
         ...(problem?.validation ? { validation: problem.validation } : {}),
       })
     }

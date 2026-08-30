@@ -5,6 +5,7 @@ import { core } from '../core'
 import type {
   DocumentInfo,
   EditError,
+  LineEnding,
   ParseError,
   ParsedDocument,
   Result,
@@ -55,6 +56,7 @@ export function useProject(id: string): ProjectEditor {
   const [status, setStatus] = useState<ProjectStatus>('loading')
   const [project, setProject] = useState<Project | null>(null)
   const [workingBytes, setWorkingBytes] = useState<Uint8Array>(EMPTY)
+  const [rawLineEndingPreference, setRawLineEndingPreference] = useState<Exclude<LineEnding, 'none'>>('lf')
   const [loadError, setLoadError] = useState<ApiError | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -63,6 +65,7 @@ export function useProject(id: string): ProjectEditor {
     setStatus('loading')
     setProject(null)
     setWorkingBytes(EMPTY)
+    setRawLineEndingPreference('lf')
     setLoadError(null)
     void api.getProject(id).then((result) => {
       if (!live) return
@@ -80,6 +83,10 @@ export function useProject(id: string): ProjectEditor {
       }
       setProject(loaded)
       setWorkingBytes(new Uint8Array(loaded.source))
+      const loadedLineEnding = core.documentInfo(loaded.source).lineEnding
+      setRawLineEndingPreference(
+        loadedLineEnding === 'crlf' ? 'crlf' : loadedLineEnding === 'mixed' ? 'mixed' : 'lf',
+      )
       setStatus('ready')
     })
     return () => {
@@ -93,14 +100,16 @@ export function useProject(id: string): ProjectEditor {
 
   const setText = useCallback(
     (next: string) => {
-      if (info.lineEnding === 'mixed') return
+      if (rawLineEndingPreference === 'mixed') return
       try {
-        setWorkingBytes(encodeFromEditor(next, info, workingBytes))
+        setWorkingBytes(
+          encodeFromEditor(next, { ...info, lineEnding: rawLineEndingPreference }, workingBytes),
+        )
       } catch {
         // Mixed line endings are deliberately read-only in the raw editor.
       }
     },
-    [info, workingBytes],
+    [info, rawLineEndingPreference, workingBytes],
   )
 
   const bytes = workingBytes

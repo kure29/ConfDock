@@ -17,7 +17,20 @@ describe('HTTP API error boundary', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })))
     const result = await createHttpApi().listProjects()
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error.code).toBe('auth.unauthorized')
+    if (!result.ok) {
+      expect(result.error.code).toBe('auth.unauthorized')
+      expect(result.error.message).toContain('重新登录')
+    }
+  })
+
+  it('returns 401 from signOut so AuthContext can clear the local session', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })))
+    const result = await createHttpApi().signOut()
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('auth.unauthorized')
+      expect(result.error.message).toContain('重新登录')
+    }
   })
 
   it('distinguishes an explicit 404 project from transport failure', async () => {
@@ -52,5 +65,6 @@ describe('HTTP API error boundary', () => {
     const revoked = await api.revokeToken('p1', 't1')
     expect(deleted.ok).toBe(false)
     expect(revoked.ok).toBe(false)
+    if (!deleted.ok) expect(deleted.error.code).not.toBe('auth.unauthorized')
   })
 })

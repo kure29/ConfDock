@@ -28,6 +28,18 @@ describe('native byte views', () => {
     expect(bytesEqual(encodeFromEditor(decoded.text, decoded.info), bytes)).toBe(true)
   })
 
+  it('retains a CRLF raw-edit preference across a temporary single line', () => {
+    const original = encodeUtf8('first\r\nsecond\r\n')
+    const info = documentInfo(original)
+    const singleLine = encodeFromEditor('single line', { ...info, lineEnding: 'crlf' })
+    expect(new TextDecoder().decode(singleLine)).toBe('single line')
+    const withNewline = encodeFromEditor('single line\nthird', {
+      ...documentInfo(singleLine),
+      lineEnding: 'crlf',
+    })
+    expect(new TextDecoder().decode(withNewline)).toBe('single line\r\nthird')
+  })
+
   it('keeps mixed line endings untouched and refuses lossy text encoding', () => {
     const bytes = encodeUtf8('first\r\nsecond\nthird\r\n')
     const decoded = decodeToEditor(bytes)

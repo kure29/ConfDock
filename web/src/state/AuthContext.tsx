@@ -64,6 +64,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const result = await api.signOut()
     if (!result.ok) {
       setError(result.error)
+      if (result.error.code === 'auth.unauthorized') {
+        // The server has already told us this cookie is invalid. Do not leave
+        // the shell in a signed-in state just because DELETE returned 401.
+        setSession(null)
+        setStatus('signedOut')
+      }
       return result
     }
     setSession(null)
