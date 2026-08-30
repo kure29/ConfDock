@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api } from '../api'
-import type { ServiceInfo } from '../api'
 import { useAuth } from '../state/AuthContext'
 import { Button } from '../ui/Button'
 import { TextField } from '../ui/TextField'
@@ -16,15 +15,13 @@ export function LoginScreen() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [service, setService] = useState<ServiceInfo | null>(null)
   const [serviceError, setServiceError] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
     void api.serviceInfo().then((result) => {
       if (!live) return
-      if (result.ok) setService(result.value)
-      else setServiceError(result.error.message)
+      setServiceError(result.ok ? null : result.error.message)
     })
     return () => {
       live = false
@@ -66,15 +63,7 @@ export function LoginScreen() {
           进入
         </Button>
 
-        {service?.api === 'mock' && (
-          // Said out loud rather than hidden: a login box that accepts anything
-          // while looking like a real one is the least honest screen possible.
-          <p className={styles.mock}>
-            当前运行在本地演示数据上，还没有接后端服务。在「设置」里设过密码之前，
-            任意密码都能进入，数据只存在这台浏览器的 localStorage 里。
-          </p>
-        )}
-        {serviceError !== null && <p className={styles.mock}>{serviceError}</p>}
+        {serviceError !== null && <p className={styles.serviceError}>{serviceError}</p>}
       </form>
     </main>
   )

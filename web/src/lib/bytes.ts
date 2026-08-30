@@ -218,7 +218,7 @@ function utf8Width(codePoint: number): number {
 }
 
 /** UTF-8 byte offset within a decoded string -> UTF-16 index. Used by the
- * mock core's ports of the Rust line scanners, which count bytes. */
+ * Rust core's line scanners, which count bytes. */
 export function byteOffsetToCharIndex(text: string, byteOffset: number): number {
   if (byteOffset <= 0) return 0
   let bytes = 0
@@ -287,7 +287,7 @@ export function sliceText(source: Uint8Array, span: SourceSpan): string {
 }
 
 // ---------------------------------------------------------------------------
-// Persistence (the mock API stores bytes in localStorage, which is text-only)
+// HTTP persistence (management JSON carries native bytes as standard Base64)
 // ---------------------------------------------------------------------------
 
 export function bytesToBase64(bytes: Uint8Array): string {

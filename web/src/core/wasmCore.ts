@@ -43,7 +43,7 @@ interface WasmConfigCoreBinding {
  * This is intentionally the only implementation of the TypeScript core seam:
  * no YAML/JSON/CONF parsing or target registry data lives here. If loading or
  * decoding fails, the error is thrown to the bootstrapper; callers must not
- * silently fall back to the old mock core.
+ * silently fall back to a second TypeScript core.
  */
 export async function createWasmCore(): Promise<ConfigCore> {
   const module = (await import('./wasm-generated/confdock_wasm.js')) as WasmConfigCoreModule

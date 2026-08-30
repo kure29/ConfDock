@@ -16,11 +16,7 @@ import type {
 } from './types'
 
 /**
- * The Axum client. Not wired up yet — Slice 1 builds the service this talks to.
- *
- * It is written now, and kept next to `mockApi.ts`, so the REST contract is a
- * concrete artifact rather than a paragraph of prose that drifts. `web/README.md`
- * documents the same shape.
+ * The Axum client. `web/README.md` documents the same REST shape.
  *
  * Wire format: the management API is JSON throughout, with document bytes
  * base64-encoded in a `source` field. Only `GET /sub/:token` returns raw bytes,
@@ -39,8 +35,26 @@ interface Wire {
 }
 
 function decodeProject(wire: Wire['project']): Project {
+  if (wire === null || typeof wire !== 'object' || typeof wire.source !== 'string') {
+    throw new Error('invalid project response')
+  }
   const { source, ...rest } = wire
   return { ...rest, source: base64ToBytes(source) }
+}
+
+function invalidResponse(): ApiError {
+  return { code: API_ERROR.invalidResponse, message: 'ConfDock 服务返回了无效响应' }
+}
+
+function decodeProjectResult(wire: Wire['project']): Result<Project, ApiError> {
+  try {
+    return ok(decodeProject(wire))
+  } catch {
+    // A successful HTTP status does not make malformed JSON or Base64 safe to
+    // consume. Keep the transport boundary total so screens never crash while
+    // trying to render a broken server response.
+    return err(invalidResponse())
+  }
 }
 
 export function createHttpApi(baseUrl = ''): ConfDockApi {
@@ -94,6 +108,7 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
         ...(problem?.validation ? { validation: problem.validation } : {}),
       })
     }
+    if (payload === null) return err(invalidResponse())
     return ok(payload as T)
   }
 
@@ -132,7 +147,7 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
         'GET',
         `/api/projects/${encodeURIComponent(id)}`,
       )
-      if (result.ok) return ok(decodeProject(result.value))
+      if (result.ok) return decodeProjectResult(result.value)
       if (result.error.code === 'http.404') {
         return err({ code: API_ERROR.notFound, message: '配置不存在' })
       }
@@ -146,7 +161,7 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
         fileName: input.fileName,
         source: bytesToBase64(input.source),
       })
-      return result.ok ? ok(decodeProject(result.value)) : result
+      return result.ok ? decodeProjectResult(result.value) : result
     },
 
     async saveRevision({ projectId, source, expectedRevisionId }: SaveRevisionInput): Promise<Result<SaveResult, ApiError>> {
@@ -156,8 +171,10 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
         { source: bytesToBase64(source), expectedRevisionId },
       )
       if (!result.ok) return result
+      const project = decodeProjectResult(result.value.project)
+      if (!project.ok) return project
       return ok({
-        project: decodeProject(result.value.project),
+        project: project.value,
         validation: result.value.validation,
         unchanged: result.value.unchanged,
       })

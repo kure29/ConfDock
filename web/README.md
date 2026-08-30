@@ -8,14 +8,23 @@
 
 ## 跑起来
 
+先启动 Axum API（首次启动必须提供 8～1024 字节的管理员密码）：
+
 ```bash
-cd web
-npm install
-npm run wasm:build # requires stable Rust, wasm32-unknown-unknown and wasm-bindgen 0.2.127
-npm run dev        # http://localhost:5173
-npm run typecheck  # tsc --noEmit
-npm run build      # typecheck + vite build
+CONFDOCK_BOOTSTRAP_PASSWORD='local-development-password' \
+CONFDOCK_DATABASE_URL='sqlite://data/confdock-dev.db' \
+cargo run -p confdock-service --bin confdock
 ```
+
+另一个终端启动 Web：
+
+```bash
+npm ci --prefix web
+npm run dev --prefix web # http://127.0.0.1:5173
+```
+
+Vite 把 `/api` 和 `/sub` 同源代理到 `127.0.0.1:8787`。WASM 构建需要 stable
+Rust、`wasm32-unknown-unknown` 和 `wasm-bindgen-cli 0.2.127`。
 
 运行时依赖为 `react` `react-dom` `react-router-dom`；开发依赖包括 `vite`
 `@vitejs/plugin-react` `typescript` 与 `vitest`。
@@ -24,12 +33,8 @@ npm run build      # typecheck + vite build
 生成目录是 `src/core/wasm-generated/`，其中 JS/WASM 产物不提交，只有声明文件保留在仓库。
 没有 UI 库、CSS 框架、状态库、图标库，也没有 CodeMirror / Monaco —— 字体全部走系统栈，**零网络请求**。
 
-首次进入时 mock 后端会用 `fixtures/` 里的真实内容播种 3 个项目（家庭网络 / Mihomo、旅行 / sing-box、备用 / Surge），存在 `localStorage`。想回到初始状态：
-
-```js
-// 浏览器控制台
-localStorage.removeItem('confdock.mock.v1')
-```
+首次进入数据库为空；使用 Bootstrap Password 登录后导入配置。项目、Revision、Session
+和 Stable Token 元数据都由 SQLite 持久化。localStorage 只用于主题偏好。
 
 ---
 
@@ -86,8 +91,9 @@ src/
 ```
 
 `web/src/core` 与 `web/src/api` 都是边界层：前者已经使用真实 Rust
-`confdock-wasm`（其唯一能力来源是 `confdock-core::TargetRegistry`），后者仍使用
-localStorage Mock API。Mock API 只服务于交互走查，不能替代未来的 Axum/SQLite 服务。
+`confdock-wasm`（其唯一能力来源是 `confdock-core::TargetRegistry`），后者使用
+`createHttpApi()` 连接真实 Axum/SQLite Service。服务端在创建与保存时再次直接调用
+`confdock-core`，不会信任浏览器校验结果。
 
 `lib/copy.ts` 是**所有面向用户的文案**的唯一出处，包括 4 个校验层级的定义和 `EditError` 的人话翻译。改文案改这一个文件。适配器返回的英文 `detail` / `safetyNotes` 一律**原文照登**（等宽字体），不翻译、不改写 —— 那是 Rust 侧的准确措辞。
 
@@ -112,7 +118,7 @@ root.render(<App />)
 明确的启动错误，不会静默回退到 TypeScript 解析器。`isStrictJsonLiteral` 也不再存在于前端，
 最终值安全判断由 Rust adapter 执行。
 
-### `api/` → Axum（Slice 1）
+### `api/` → Axum
 
 ```ts
 // src/api/index.ts
@@ -120,7 +126,8 @@ import { createHttpApi } from './httpApi'
 export const api: ConfDockApi = createHttpApi()
 ```
 
-然后删掉 `mockApi.ts` 和 `seed.ts`。`httpApi.ts` 已经按下面的形状写好，屏幕代码不动。`vite.config.ts` 里 `/api` 和 `/sub` 已经代理到 `http://127.0.0.1:8787`。
+API 接缝只保留 `httpApi.ts`。`vite.config.ts` 里的 `/api` 和 `/sub` 代理到
+`http://127.0.0.1:8787`。
 
 ```
 GET    /api/session                   → { id, createdAt }，未登录时非 2xx
@@ -137,10 +144,12 @@ GET    /api/projects/:id/tokens       → AccessToken[]（只含前后缀）
 POST   /api/projects/:id/tokens       → { token, plaintext, url }   ← 明文仅此一次返回
 DELETE /api/projects/:id/tokens/:tid
 GET    /api/service                   → ServiceInfo
+GET    /healthz                       → { status: "ok" }
 GET    /sub/:token                    → served 修订的原生字节（唯一返回裸字节的端点）
 ```
 
-认证是 `POST /api/session` 下发的会话 cookie，所有请求带 `credentials: 'same-origin'`，**token 永远不进 URL**。
+认证是 `POST /api/session` 下发的会话 cookie，所有请求带 `credentials: 'same-origin'`，
+Session Token 永远不进 URL。Stable Token 只用于公开的 `/sub/:token`。
 失败响应体是 `{ code, message, validation? }`；保存被校验拦下时 `validation` 必须在里面，编辑器要靠它跳到「检查」。
 保存时服务端比较 `expectedRevisionId` 与当前 revision；不一致返回 HTTP `409`
 和稳定错误码 `revision.conflict`，前端保留当前未保存内容，不自动覆盖或刷新。
@@ -151,12 +160,16 @@ GET    /sub/:token                    → served 修订的原生字节（唯一�
 
 ---
 
-## 临时 API 的诚实边界
+## Service 边界
 
-`mockApi.ts` 仍是不带服务器的 localStorage 后端，只用于交互走查和测试。它不提供真实
-认证、并发持久化或跨设备数据，也不替代未来的 Axum/SQLite 服务；`httpApi.ts` 已按同一
-契约实现，后续服务 Slice 可直接切换。配置解析、校验、检测和结构化编辑不在 Mock API
-中，而是全部由 `confdock-core` 经 `confdock-wasm` 执行。
+管理员密码使用 Argon2id；Session Cookie 为 `HttpOnly`、`SameSite=Strict`、`Path=/`，
+HTTPS 部署通过 `CONFDOCK_COOKIE_SECURE=true` 增加 `Secure`。Session 和 Stable Token
+都是至少 32 字节 CSPRNG 数据，SQLite 只存 SHA-256 Hash。Stable Token 明文和完整 URL
+只在创建响应中出现一次。
+
+配置在管理 JSON 中使用标准 Base64；`GET /sub/:token` 直接返回 served Revision 的 SQLite
+BLOB，不转字符串、不重新序列化、不追加换行。保存使用 `expectedRevisionId` 防并发覆盖，
+本轮成功保存时 current/served 两个指针仍同步前进。
 
 ### Native Bytes V1 边界
 
@@ -186,7 +199,7 @@ GET    /sub/:token                    → served 修订的原生字节（唯一�
 来自 `docs/architecture.md`，在前端同样成立：
 
 - access token 明文和完整订阅 URL **只在生成后显示一次**。列表里只有 `abc1…f9x2` 形式的前后缀
-- 服务端只存 token 的哈希（mock 也只存 SHA-256）。关掉对话框就再也取不回来
+- 服务端只存 token 的 SHA-256 哈希。关掉对话框就再也取不回来
 - 代理密码、UUID、订阅 URL 是敏感数据：**不要**把配置源码或 token 写进 `console.log`、错误提示或 toast
 
 ---

@@ -1,4 +1,4 @@
-# ConfDock architecture (Slice 0.1)
+# ConfDock architecture (Slice 1)
 
 ## Product boundary
 
@@ -130,13 +130,13 @@ exhaustive, so Rust Core types do not need browser-oriented serde derives.
 
 The web app initializes this module before rendering React. A load or decode
 failure shows a startup error and never falls back to a second TypeScript
-parser. `web/src/api/mockApi.ts` remains a temporary localStorage backend only;
-it does not participate in configuration semantics. `npm run wasm:build
+parser. The Web API seam uses `createHttpApi()`; no localStorage-backed API or
+duplicate configuration parser remains. `npm run wasm:build
 --prefix web` uses the pinned `wasm-bindgen-cli` version and writes generated
 glue under `web/src/core/wasm-generated/` (ignored except for its declaration
 file). CI generates these artifacts before typecheck, tests, and Vite build.
 
-## Future service architecture
+## Service architecture
 
 ```text
 React + TypeScript + Vite
@@ -150,36 +150,89 @@ SQLite + SQLx
 Revision Storage / Stable URL
 ```
 
-The core remains independent of the server. A future database should include:
+`crates/confdock-service` is the Axum/SQLx boundary and produces the `confdock`
+binary. It directly calls `confdock-core` for every project creation and save;
+it never calls the WASM crate and never reimplements a YAML, JSON, or CONF
+parser. Browser validation is immediate feedback only, while server validation
+is authoritative for persistence.
 
-* `admins`
-* `sessions`
-* `projects`
-* `config_revisions`
-* `access_tokens`
+HTTP DTOs are defined inside the service and map core diagnostics explicitly.
+Core types do not gain transport-oriented serde derives. Configuration bytes
+cross the management JSON boundary as standard Base64 and are stored as SQLite
+BLOBs. The public subscription endpoint is the only route that returns raw
+configuration bytes.
 
-`projects` reserves `current_revision_id` and `served_revision_id`.
-`config_revisions` reserves `parent_revision_id`, `revision_no`,
-`source_bytes`, `content_hash`, `validation_level`, `validation_result`, and
-`validator_version`. In V1, successful “validate and save” advances both
-project pointers to the new revision. A later Publish workflow can advance
-only `served_revision_id` without changing the data model.
+SQLite migrations run automatically at startup and create:
+
+* `admins`: exactly one Argon2id password hash;
+* `sessions`: random-token SHA-256 hashes and expiry/last-seen timestamps;
+* `projects`: target, display metadata, validation snapshot, and two revision
+  pointers;
+* `config_revisions`: immutable native BLOBs, SHA-256 content hashes,
+  validation snapshots, parent IDs, and project-local revision numbers;
+* `access_tokens`: random-token SHA-256 hashes, display-only prefix/suffix,
+  usage timestamps, and revocation state.
+
+Foreign keys, WAL, and a busy timeout are enabled on every SQLite connection.
+Deleting a project cascades to its revisions and access tokens. Revision rows
+cannot be updated. To back up a live database, stop writes or use SQLite's
+online backup facilities instead of copying only the main file while WAL is
+active.
+
+### Project and revision transaction
+
+Project creation validates all inputs and bytes before opening a write
+transaction, then inserts the project, Revision No. 1, and both valid pointers
+atomically. Validation failure writes nothing.
+
+A save validates bytes first, then enters `BEGIN IMMEDIATE`, re-reads
+`current_revision_id`, and compares it with `expectedRevisionId`. A mismatch is
+HTTP 409 and changes nothing. Identical bytes update only the validation
+snapshot and return `unchanged: true`. New bytes create the next immutable
+revision, point its parent at the former current revision, and advance current
+and served together. This locking order means two writers with the same
+expected revision cannot both succeed. A later Publish workflow can separate
+the pointers without changing the schema.
+
+### Administrator and session security
+
+On the first start only, `CONFDOCK_BOOTSTRAP_PASSWORD` is mandatory and must be
+8–1024 bytes. It is never trimmed. The password is stored as an Argon2id PHC
+string using a random salt, 19 MiB memory, two iterations, and one lane. Later
+starts never overwrite the database password from the environment. A password
+change keeps the current session and revokes every other session.
+
+Session plaintext is a URL-safe, unpadded encoding of 32 CSPRNG bytes; only its
+SHA-256 hash is stored. The cookie is `HttpOnly`, `SameSite=Strict`, `Path=/`,
+has no `Domain`, and gains `Secure` when `CONFDOCK_COOKIE_SECURE=true`. Expired
+sessions are unusable and cleaned at startup or authentication time. Failed
+logins receive the same `auth.invalid_password` response and increasing short
+backoff.
+
+### Stable URL security
 
 Stable URLs use high-entropy random tokens. Only a hash of an access token is
-stored in the database. Proxy passwords, UUIDs, and subscription URLs are
-sensitive: never put full configs or tokens in ordinary logs or error
-messages. Management APIs require single-admin authentication.
+stored in the database; prefix and suffix exist only for UI identification.
+Plaintext and the full URL appear once in the creation response. Revoked,
+unknown, malformed, or project-deleted tokens all return the same 404.
+
+`GET /sub/:token` hashes the token, reads `served_revision_id`, and returns the
+original BLOB byte-for-byte with `application/octet-stream`, `no-store`, and
+`nosniff`. It never decodes Base64, reserializes, or appends a newline. The file
+name is header-sanitized. No request layer logs the complete `/sub/:token` URI,
+token prefix/suffix/hash, configuration contents, password, or session token.
+Internal errors expose only a safe request ID.
 
 ## Slice plan
 
-* **Slice 0.1 (this repository):** hardened core contracts, strict read-only
+* **Slice 0.1:** hardened core contracts, strict read-only
   YAML/JSON validation, source-preserving patches, truthful capabilities,
   fixtures, validator boundary, and CI.
-* **WASM web boundary (current):** `confdock-wasm` and the React shell consume
+* **WASM web boundary:** `confdock-wasm` and the React shell consume
   the Rust registry and preserve native bytes; no duplicate parser or registry
   exists in TypeScript.
-* **Slice 1:** persistence/revision service and authenticated API; keep the
-  served pointer behavior defined above. This is the next independent backend
-  slice and is not part of the WASM boundary.
-* **Later:** optional native validators, publish/revision UX, and individually
-  scoped adapters or conversion tools.
+* **Slice 1 (current):** single-admin Axum service, SQLite persistence,
+  immutable revisions, concurrency protection, stable URLs, and the real Web
+  HTTP seam.
+* **Later:** Publish/Rollback/history UX, optional native validators, embedded
+  Web assets, Docker, and individually scoped adapters or conversion tools.

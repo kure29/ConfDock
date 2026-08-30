@@ -33,7 +33,7 @@
   color: var(--fg-muted);
 }
 
-.mock {
+.serviceError {
   padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);

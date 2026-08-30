@@ -43,7 +43,12 @@ export function ServedUrlDialog({ open, onClose, projectId }: ServedUrlDialogPro
   }, [projectId])
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      // The full URL is deliberately ephemeral. Do not keep it in component
+      // state after the dialog closes; the server cannot recreate it either.
+      setCreated(null)
+      return
+    }
     setCreated(null)
     void reload()
   }, [open, reload])
