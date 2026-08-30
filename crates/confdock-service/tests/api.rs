@@ -686,8 +686,9 @@ async fn revision_history_is_ordered_metadata_and_explicit_byte_preserving_detai
     assert_eq!(initial.status(), StatusCode::OK);
     assert_eq!(initial.headers()[header::CACHE_CONTROL], "no-store");
     let initial = response_json(initial).await;
-    assert_eq!(initial.as_array().unwrap().len(), 1);
-    let first = &initial[0];
+    assert_eq!(initial["nextCursor"], Value::Null);
+    assert_eq!(initial["items"].as_array().unwrap().len(), 1);
+    let first = &initial["items"][0];
     assert_eq!(first["id"], first_revision);
     assert_eq!(first["revisionNo"], 1);
     assert_eq!(first["parentRevisionId"], Value::Null);
@@ -718,19 +719,83 @@ async fn revision_history_is_ordered_metadata_and_explicit_byte_preserving_detai
         .unwrap()
         .to_owned();
 
-    let history =
-        response_json(request(&service.app, Method::GET, &history_uri, Some(&cookie), None).await)
-            .await;
-    let history = history.as_array().unwrap();
-    assert_eq!(history.len(), 2);
-    assert_eq!(history[0]["id"], second_revision);
-    assert_eq!(history[0]["revisionNo"], 2);
-    assert_eq!(history[0]["parentRevisionId"], first_revision);
-    assert_eq!(history[0]["isCurrent"], true);
-    assert_eq!(history[0]["isServed"], true);
-    assert_eq!(history[1]["id"], first_revision);
-    assert_eq!(history[1]["isCurrent"], false);
-    assert_eq!(history[1]["isServed"], false);
+    let history = response_json(
+        request(
+            &service.app,
+            Method::GET,
+            &format!("{history_uri}?limit=1"),
+            Some(&cookie),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(history["items"].as_array().unwrap().len(), 1);
+    assert_eq!(history["items"][0]["id"], second_revision);
+    assert_eq!(history["items"][0]["revisionNo"], 2);
+    assert_eq!(history["items"][0]["parentRevisionId"], first_revision);
+    assert_eq!(history["items"][0]["isCurrent"], true);
+    assert_eq!(history["items"][0]["isServed"], true);
+    assert_eq!(history["nextCursor"], second_revision);
+
+    let older = response_json(
+        request(
+            &service.app,
+            Method::GET,
+            &format!("{history_uri}?limit=1&cursor={second_revision}"),
+            Some(&cookie),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(older["items"].as_array().unwrap().len(), 1);
+    assert_eq!(older["items"][0]["id"], first_revision);
+    assert_eq!(older["items"][0]["isCurrent"], false);
+    assert_eq!(older["items"][0]["isServed"], false);
+    assert_eq!(older["nextCursor"], Value::Null);
+
+    let invalid_limit = request(
+        &service.app,
+        Method::GET,
+        &format!("{history_uri}?limit=101"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(invalid_limit.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_json(invalid_limit).await["code"],
+        "request.invalid"
+    );
+
+    let malformed_limit = request(
+        &service.app,
+        Method::GET,
+        &format!("{history_uri}?limit=not-a-number"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(malformed_limit.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_json(malformed_limit).await["code"],
+        "request.invalid"
+    );
+
+    let invalid_cursor = request(
+        &service.app,
+        Method::GET,
+        &format!("{history_uri}?cursor=missing"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(invalid_cursor.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_json(invalid_cursor).await["code"],
+        "revision.invalid_cursor"
+    );
 
     let detail_uri = format!("/api/projects/{project_id}/revisions/{second_revision}");
     let detail = request(&service.app, Method::GET, &detail_uri, Some(&cookie), None).await;
@@ -763,6 +828,20 @@ async fn revision_history_is_ordered_metadata_and_explicit_byte_preserving_detai
         b"{}",
     )
     .await;
+    let other_revision = other_project["currentRevisionId"].as_str().unwrap();
+    let cross_project_cursor = request(
+        &service.app,
+        Method::GET,
+        &format!("{history_uri}?cursor={other_revision}"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(cross_project_cursor.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_json(cross_project_cursor).await["code"],
+        "revision.invalid_cursor"
+    );
     let cross_project = request(
         &service.app,
         Method::GET,

@@ -67,6 +67,10 @@ impl ApiError {
         Self::not_found("revision.not_found", "版本不存在")
     }
 
+    pub fn revision_invalid_cursor() -> Self {
+        Self::bad_request("revision.invalid_cursor", "版本游标无效")
+    }
+
     pub fn validation(validation: ValidationResultDto) -> Self {
         let (status, code, message) = if validation.has_code("encoding.unsupported") {
             (
@@ -133,6 +137,10 @@ mod tests {
         assert_eq!(ApiError::unauthorized().status, StatusCode::UNAUTHORIZED);
         assert_eq!(ApiError::conflict().status, StatusCode::CONFLICT);
         assert_eq!(ApiError::revision_not_found().code, "revision.not_found");
+        assert_eq!(
+            ApiError::revision_invalid_cursor().code,
+            "revision.invalid_cursor"
+        );
         assert_eq!(ApiError::too_large().status, StatusCode::PAYLOAD_TOO_LARGE);
         assert_eq!(ApiError::internal().code, "internal.error");
     }

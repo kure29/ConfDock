@@ -3,6 +3,29 @@ import { createHttpApi } from './httpApi'
 
 afterEach(() => vi.restoreAllMocks())
 
+function revisionWire(
+  id: string,
+  revisionNo: number,
+  flags: { isCurrent?: boolean; isServed?: boolean } = {},
+) {
+  return {
+    id,
+    revisionNo,
+    parentRevisionId: null,
+    createdAt: '2026-08-30T00:00:00Z',
+    byteLength: 1,
+    contentHash: 'a'.repeat(64),
+    validation: { level: 'basic', diagnostics: [] },
+    validatorVersion: null,
+    isCurrent: flags.isCurrent ?? false,
+    isServed: flags.isServed ?? false,
+  }
+}
+
+function stubRevisionPage(items: unknown[], nextCursor: string | null = null) {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ items, nextCursor })))
+}
+
 describe('HTTP API error boundary', () => {
   it('maps a missing current session to signed out', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 404 })))
@@ -128,29 +151,122 @@ describe('HTTP API error boundary', () => {
 
   it('decodes ordered revision history metadata without loading source bytes', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      Response.json([
-        {
-          id: 'r2',
-          revisionNo: 2,
-          parentRevisionId: 'r1',
-          createdAt: '2026-08-30T00:00:01Z',
-          byteLength: 4,
-          contentHash: 'a'.repeat(64),
-          validation: { level: 'syntax', diagnostics: [] },
-          validatorVersion: null,
-          isCurrent: true,
-          isServed: true,
-        },
-      ]),
+      Response.json({
+        items: [
+          {
+            id: 'r2',
+            revisionNo: 2,
+            parentRevisionId: 'r1',
+            createdAt: '2026-08-30T00:00:01Z',
+            byteLength: 4,
+            contentHash: 'a'.repeat(64),
+            validation: { level: 'syntax', diagnostics: [] },
+            validatorVersion: null,
+            isCurrent: true,
+            isServed: true,
+          },
+        ],
+        nextCursor: null,
+      }),
     )
     vi.stubGlobal('fetch', fetchMock)
     const result = await createHttpApi().listRevisions('project/1')
     expect(result.ok).toBe(true)
     if (result.ok) {
-      expect(result.value[0]?.id).toBe('r2')
-      expect(result.value[0]?.parentRevisionId).toBe('r1')
+      expect(result.value.items[0]?.id).toBe('r2')
+      expect(result.value.items[0]?.parentRevisionId).toBe('r1')
+      expect(result.value.nextCursor).toBe(null)
     }
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/projects/project%2F1/revisions')
+  })
+
+  it('encodes a bounded revision page cursor and limit', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        items: [
+          {
+            id: 'revision/3',
+            revisionNo: 3,
+            parentRevisionId: 'revision/4',
+            createdAt: '2026-08-29T00:00:00Z',
+            byteLength: 2,
+            contentHash: 'c'.repeat(64),
+            validation: { level: 'basic', diagnostics: [] },
+            validatorVersion: null,
+            isCurrent: false,
+            isServed: false,
+          },
+        ],
+        nextCursor: 'revision/3',
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await createHttpApi().listRevisions('p1', {
+      limit: 25,
+      cursor: 'revision/2',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.value.nextCursor).toBe('revision/3')
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/projects/p1/revisions?limit=25&cursor=revision%2F2',
+    )
+  })
+
+  it('accepts a first page with only the current pointer', async () => {
+    stubRevisionPage([revisionWire('r2', 2, { isCurrent: true })])
+    const result = await createHttpApi().listRevisions('p1')
+    expect(result.ok).toBe(true)
+  })
+
+  it('accepts a first page with only the served pointer', async () => {
+    stubRevisionPage([revisionWire('r2', 2, { isServed: true })])
+    const result = await createHttpApi().listRevisions('p1')
+    expect(result.ok).toBe(true)
+  })
+
+  it('accepts a subsequent page with no pointer', async () => {
+    stubRevisionPage([revisionWire('r1', 1)], null)
+    const result = await createHttpApi().listRevisions('p1', { cursor: 'r2' })
+    expect(result.ok).toBe(true)
+  })
+
+  it('rejects a page with two current pointers', async () => {
+    stubRevisionPage([
+      revisionWire('r2', 2, { isCurrent: true }),
+      revisionWire('r1', 1, { isCurrent: true }),
+    ])
+    const result = await createHttpApi().listRevisions('p1')
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+    })
+  })
+
+  it('rejects a page with two served pointers', async () => {
+    stubRevisionPage([
+      revisionWire('r2', 2, { isServed: true }),
+      revisionWire('r1', 1, { isServed: true }),
+    ])
+    const result = await createHttpApi().listRevisions('p1')
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+    })
+  })
+
+  it('accepts a subsequent page with its unique served pointer', async () => {
+    stubRevisionPage([revisionWire('r1', 1, { isServed: true })], null)
+    const result = await createHttpApi().listRevisions('p1', { cursor: 'r2' })
+    expect(result.ok).toBe(true)
+  })
+
+  it('rejects a response cursor that repeats the request cursor', async () => {
+    stubRevisionPage([revisionWire('A', 1)], 'A')
+    const result = await createHttpApi().listRevisions('p1', { cursor: 'A' })
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+    })
   })
 
   it('loads one revision source and rejects a byte-length mismatch', async () => {
@@ -202,12 +318,43 @@ describe('HTTP API error boundary', () => {
   })
 
   it('rejects malformed revision lists at the HTTP boundary', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json([{ id: 'broken' }])))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(Response.json({ items: [{ id: 'broken' }], nextCursor: null })),
+    )
     const result = await createHttpApi().listRevisions('p1')
     expect(result).toEqual({
       ok: false,
       error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
     })
+  })
+
+  it('rejects a page cursor that does not identify its last item', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json({
+          items: [
+            {
+              id: 'r1',
+              revisionNo: 1,
+              parentRevisionId: null,
+              createdAt: '2026-08-30T00:00:00Z',
+              byteLength: 2,
+              contentHash: 'd'.repeat(64),
+              validation: { level: 'basic', diagnostics: [] },
+              validatorVersion: null,
+              isCurrent: false,
+              isServed: false,
+            },
+          ],
+          nextCursor: 'r0',
+        }),
+      ),
+    )
+    const result = await createHttpApi().listRevisions('p1', { cursor: 'r2' })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('network.invalid_response')
   })
 
   it('maps a missing revision to a stable revision.not_found error', async () => {

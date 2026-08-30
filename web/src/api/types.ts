@@ -87,6 +87,19 @@ export interface Revision extends RevisionSummary {
   source: Uint8Array
 }
 
+/** A bounded page of revision metadata. `nextCursor` is null at the end. */
+export interface RevisionPage {
+  items: RevisionSummary[]
+  nextCursor: string | null
+}
+
+export interface RevisionListOptions {
+  /** Number of entries to request; the service defaults to 50 and caps it. */
+  limit?: number
+  /** Revision ID returned as the previous page's `nextCursor`. */
+  cursor?: string
+}
+
 // ---------------------------------------------------------------------------
 // Access tokens
 // ---------------------------------------------------------------------------

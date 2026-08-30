@@ -138,7 +138,7 @@ GET    /api/projects                  → ProjectSummary[]
 POST   /api/projects                  { name, targetId, fileName, source } → Project
 GET    /api/projects/:id              → Project（source 为当前修订的字节）
 POST   /api/projects/:id/revisions    { source, expectedRevisionId } → { project, validation, unchanged }  ← 校验并保存
-GET    /api/projects/:id/revisions    → RevisionSummary[]（最新在前，不含 source）
+GET    /api/projects/:id/revisions    → { items, nextCursor }（默认最近 50 条，最多 100 条；不含 source）
 GET    /api/projects/:id/revisions/:revisionId → Revision（选中的历史版本，source 为 Base64）
 PATCH  /api/projects/:id              { name } → ProjectSummary
 DELETE /api/projects/:id
@@ -155,8 +155,9 @@ Session Token 永远不进 URL。Stable Token 只用于公开的 `/sub/:token`�
 失败响应体是 `{ code, message, validation? }`；保存被校验拦下时 `validation` 必须在里面，编辑器要靠它跳到「检查」。
 保存时服务端比较 `expectedRevisionId` 与当前 revision；不一致返回 HTTP `409`
 和稳定错误码 `revision.conflict`，前端保留当前未保存内容，不自动覆盖或刷新。
-「历史」视图只读取不可变版本的元数据；选择一个版本后才加载其原始字节供只读查看，
-不会替换当前编辑内容，也没有 Diff、回滚或 Publish 操作。
+「历史」视图只读取不可变版本的元数据；默认先显示最近 50 条，使用游标加载更早版本。
+选择一个版本后才加载其原始字节供只读查看，不会替换当前编辑内容，也没有 Diff、回滚或
+Publish 操作。
 管理 API 的网络错误、401、403、404、409、500 都以 `Result<T, ApiError>` 传播，
 不会静默转换为空列表、`null` 或“删除成功”。
 

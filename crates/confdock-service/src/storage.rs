@@ -7,10 +7,14 @@ use crate::{
     auth::{random_token, token_hash, unix_timestamp},
     dto::{
         timestamp_to_iso, AccessTokenDto, CreatedAccessTokenDto, ProjectDto, ProjectSummaryDto,
-        RevisionDto, RevisionSummaryDto, SaveResultDto, ValidationResultDto,
+        RevisionDto, RevisionPageDto, RevisionSummaryDto, SaveResultDto, ValidationResultDto,
     },
     error::ApiError,
 };
+
+pub const DEFAULT_REVISION_PAGE_SIZE: usize = 50;
+pub const MAX_REVISION_PAGE_SIZE: usize = 100;
+const MAX_REVISION_CURSOR_BYTES: usize = 128;
 
 const FULL_PROJECT_QUERY: &str =
     "SELECT p.id, p.name, p.target_id, p.file_name, p.current_revision_id, \
@@ -26,7 +30,15 @@ const REVISION_LIST_QUERY: &str =
      r.validation_result, r.validator_version, r.created_at, \
      p.current_revision_id, p.served_revision_id \
      FROM config_revisions r JOIN projects p ON p.id = r.project_id \
-     WHERE r.project_id = ? ORDER BY r.revision_no DESC, r.id";
+     WHERE r.project_id = ? ORDER BY r.revision_no DESC, r.id LIMIT ?";
+const REVISION_LIST_AFTER_QUERY: &str =
+    "SELECT r.id, r.parent_revision_id, r.revision_no, length(r.source_bytes) AS byte_length, \
+     r.content_hash, \
+     r.validation_result, r.validator_version, r.created_at, \
+     p.current_revision_id, p.served_revision_id \
+     FROM config_revisions r JOIN projects p ON p.id = r.project_id \
+     WHERE r.project_id = ? AND r.revision_no < ? \
+     ORDER BY r.revision_no DESC, r.id LIMIT ?";
 const REVISION_DETAIL_QUERY: &str =
     "SELECT r.id, r.parent_revision_id, r.revision_no, r.source_bytes, \
      length(r.source_bytes) AS byte_length, r.content_hash, \
@@ -161,23 +173,73 @@ pub async fn save_revision(
 pub async fn list_revisions(
     pool: &SqlitePool,
     project_id: &str,
-) -> Result<Vec<RevisionSummaryDto>, ApiError> {
+    limit: Option<usize>,
+    cursor: Option<&str>,
+) -> Result<RevisionPageDto, ApiError> {
+    let limit = limit.unwrap_or(DEFAULT_REVISION_PAGE_SIZE);
+    if !(1..=MAX_REVISION_PAGE_SIZE).contains(&limit) {
+        return Err(ApiError::bad_request(
+            "request.invalid",
+            "版本数量必须在 1 到 100 之间",
+        ));
+    }
     let mut connection = begin_deferred(pool).await?;
-    let result = list_revisions_connection(&mut connection, project_id).await;
+    let result = list_revisions_connection(&mut connection, project_id, limit, cursor).await;
     finish_transaction(connection, result).await
 }
 
 async fn list_revisions_connection(
     connection: &mut PoolConnection<Sqlite>,
     project_id: &str,
-) -> Result<Vec<RevisionSummaryDto>, ApiError> {
+    limit: usize,
+    cursor: Option<&str>,
+) -> Result<RevisionPageDto, ApiError> {
     ensure_project_connection(connection, project_id).await?;
-    let rows = sqlx::query(REVISION_LIST_QUERY)
-        .bind(project_id)
-        .fetch_all(&mut **connection)
-        .await
-        .map_err(|_| ApiError::internal())?;
-    rows.iter().map(revision_summary_from_row).collect()
+    let cursor_revision_no = match cursor {
+        None => None,
+        Some(cursor) if cursor.is_empty() || cursor.len() > MAX_REVISION_CURSOR_BYTES => {
+            return Err(ApiError::revision_invalid_cursor())
+        }
+        Some(cursor) => Some(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT revision_no FROM config_revisions WHERE project_id = ? AND id = ?",
+            )
+            .bind(project_id)
+            .bind(cursor)
+            .fetch_optional(&mut **connection)
+            .await
+            .map_err(|_| ApiError::internal())?
+            .ok_or_else(ApiError::revision_invalid_cursor)?,
+        ),
+    };
+    let fetch_limit = i64::try_from(limit + 1).map_err(|_| ApiError::internal())?;
+    let rows = match cursor_revision_no {
+        Some(revision_no) => sqlx::query(REVISION_LIST_AFTER_QUERY)
+            .bind(project_id)
+            .bind(revision_no)
+            .bind(fetch_limit)
+            .fetch_all(&mut **connection)
+            .await
+            .map_err(|_| ApiError::internal())?,
+        None => sqlx::query(REVISION_LIST_QUERY)
+            .bind(project_id)
+            .bind(fetch_limit)
+            .fetch_all(&mut **connection)
+            .await
+            .map_err(|_| ApiError::internal())?,
+    };
+    let has_more = rows.len() > limit;
+    let items = rows
+        .iter()
+        .take(limit)
+        .map(revision_summary_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+    let next_cursor = if has_more {
+        items.last().map(|item| item.id.clone())
+    } else {
+        None
+    };
+    Ok(RevisionPageDto { items, next_cursor })
 }
 
 pub async fn get_revision(

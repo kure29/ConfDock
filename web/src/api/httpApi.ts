@@ -19,6 +19,8 @@ import type {
   Project,
   ProjectSummary,
   Revision,
+  RevisionListOptions,
+  RevisionPage,
   RevisionSummary,
   SaveResult,
   ServiceInfo,
@@ -28,9 +30,9 @@ import type {
  * The Axum client. `web/README.md` documents the same REST shape.
  *
  * Wire format: the management API is JSON throughout, with document bytes
- * base64-encoded in a `source` field. History lists intentionally omit source;
- * `getRevision()` loads one selected immutable entry when the administrator
- * asks to inspect it. Only `GET /sub/:token` returns raw bytes directly,
+ * base64-encoded in a `source` field. History lists are bounded pages and
+ * intentionally omit source; `getRevision()` loads one selected immutable
+ * entry when the administrator asks to inspect it. Only `GET /sub/:token` returns raw bytes directly,
  * because that is the endpoint proxy clients actually fetch.
  *
  * Auth is a session cookie set by `POST /api/session`, so every request goes out
@@ -141,6 +143,48 @@ function decodeRevision(value: unknown): Revision {
     throw new Error('revision byte length mismatch')
   }
   return { ...summary, source }
+}
+
+function decodeRevisionPage(value: unknown, requestCursor?: string): RevisionPage {
+  if (!isRecord(value) || !Array.isArray(value.items)) {
+    throw new Error('invalid revision page')
+  }
+  if (value.nextCursor !== null && typeof value.nextCursor !== 'string') {
+    throw new Error('invalid revision cursor')
+  }
+  if (
+    typeof value.nextCursor === 'string' &&
+    (value.nextCursor.length === 0 || value.nextCursor.length > 128)
+  ) {
+    throw new Error('invalid revision cursor')
+  }
+  const items = value.items.map(decodeRevisionSummary)
+  const ids = new Set<string>()
+  for (const item of items) {
+    if (ids.has(item.id)) throw new Error('duplicate revision')
+    ids.add(item.id)
+  }
+  if (
+    typeof value.nextCursor === 'string' &&
+    value.nextCursor !== items[items.length - 1]?.id
+  ) {
+    throw new Error('cursor does not point at the last item')
+  }
+  if (typeof value.nextCursor === 'string' && value.nextCursor === requestCursor) {
+    throw new Error('cursor repeats the request cursor')
+  }
+  const currentCount = items.filter((revision) => revision.isCurrent).length
+  const servedCount = items.filter((revision) => revision.isServed).length
+  if (currentCount > 1 || servedCount > 1) {
+    throw new Error('invalid revision pointers')
+  }
+  if (items.length === 0 && value.nextCursor !== null) {
+    throw new Error('empty revision page has a cursor')
+  }
+  return {
+    items,
+    nextCursor: value.nextCursor as string | null,
+  }
 }
 
 function invalidResponse(): ApiError {
@@ -282,10 +326,17 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
       })
     },
 
-    async listRevisions(projectId: string): Promise<Result<RevisionSummary[], ApiError>> {
+    async listRevisions(
+      projectId: string,
+      options?: RevisionListOptions,
+    ): Promise<Result<RevisionPage, ApiError>> {
+      const params = new URLSearchParams()
+      if (options?.limit !== undefined) params.set('limit', String(options.limit))
+      if (options?.cursor !== undefined) params.set('cursor', options.cursor)
+      const query = params.toString()
       const result = await request<unknown>(
         'GET',
-        `/api/projects/${encodeURIComponent(projectId)}/revisions`,
+        `/api/projects/${encodeURIComponent(projectId)}/revisions${query ? `?${query}` : ''}`,
       )
       if (!result.ok) {
         if (result.error.code === 'http.404') {
@@ -294,16 +345,7 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
         return result
       }
       try {
-        if (!Array.isArray(result.value)) throw new Error('invalid revision list')
-        const revisions = result.value.map(decodeRevisionSummary)
-        if (
-          revisions.length === 0 ||
-          revisions.filter((revision) => revision.isCurrent).length !== 1 ||
-          revisions.filter((revision) => revision.isServed).length !== 1
-        ) {
-          throw new Error('invalid revision pointers')
-        }
-        return ok(revisions)
+        return ok(decodeRevisionPage(result.value, options?.cursor))
       } catch {
         return err(invalidResponse())
       }

@@ -207,9 +207,13 @@ export const SERVED_POINTER_NOTICE =
 // ---------------------------------------------------------------------------
 
 export const REVISION_HISTORY_DESCRIPTION =
-  '每次内容变化都会留下一个不可修改的版本；历史版本只读查看，不会改变当前托管内容。'
+  '每次内容变化都会留下一个不可修改的版本；历史版本只读查看，不会改变当前托管内容。默认显示最近 50 条。'
 export const REVISION_HISTORY_EMPTY = '还没有可查看的版本。'
 export const REVISION_HISTORY_LOADING = '正在读取版本历史…'
+export const REVISION_HISTORY_LOAD_MORE = '加载更早版本'
+export const REVISION_HISTORY_LOADING_MORE = '正在加载更早版本…'
+export const REVISION_HISTORY_PAGINATION_ERROR =
+  '版本历史返回了重复或循环的分页游标，已停止加载更早版本。'
 export const REVISION_HISTORY_SELECT = '选择一个版本查看原始字节。'
 export const REVISION_HISTORY_DETAIL_LOADING = '正在读取这个版本…'
 export const REVISION_HISTORY_RETRY = '重试'

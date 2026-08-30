@@ -201,15 +201,18 @@ the pointers without changing the schema.
 ### Read-only revision history
 
 Slice 2 exposes immutable revision metadata through the authenticated
-`GET /api/projects/:id/revisions` endpoint, newest first. The list contains the
-revision number, parent ID, creation time, exact-byte length and SHA-256,
-validation snapshot, validator version, and explicit `isCurrent`/`isServed`
-flags; it deliberately omits source BLOBs so a history refresh does not copy
-every configuration into memory or across the wire. The detail endpoint
-`GET /api/projects/:id/revisions/:revisionId` returns one selected revision's
-original bytes as Base64 plus the same metadata. Both operations are read-only:
-selecting or inspecting history never changes pointers, creates a revision, or
-publishes anything. The UI does not offer Diff, Rollback, or Publish actions.
+`GET /api/projects/:id/revisions` endpoint, newest first. The endpoint returns a
+bounded page (`50` by default, `100` maximum) with `items` and an optional
+`nextCursor`; the cursor is the ID of the last item and is scoped to the same
+project. Each item contains the revision number, parent ID, creation time,
+exact-byte length and SHA-256, validation snapshot, validator version, and
+explicit `isCurrent`/`isServed` flags. Source BLOBs are deliberately omitted so
+a history refresh does not copy every configuration into memory or across the
+wire. The detail endpoint `GET /api/projects/:id/revisions/:revisionId` returns
+one selected revision's original bytes as Base64 plus the same metadata. Both
+operations are read-only: selecting or inspecting history never changes
+pointers, creates a revision, or publishes anything. The UI does not offer Diff,
+Rollback, or Publish actions.
 
 ### Administrator and session security
 

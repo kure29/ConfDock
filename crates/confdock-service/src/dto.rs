@@ -107,6 +107,15 @@ pub struct RevisionDto {
     pub source: String,
 }
 
+/// One bounded page of immutable revision metadata. The cursor is the ID of
+/// the last item in this page and is only meaningful for the same project.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisionPageDto {
+    pub items: Vec<RevisionSummaryDto>,
+    pub next_cursor: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccessTokenDto {
