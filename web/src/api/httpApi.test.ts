@@ -336,6 +336,48 @@ describe('HTTP API error boundary', () => {
     }
   })
 
+  it('rejects publish success responses that do not prove the requested revision was served', async () => {
+    const baseProject = {
+      id: 'p1',
+      name: 'Draft',
+      targetId: 'sing-box',
+      fileName: 'config.json',
+      updatedAt: '2026-08-30T00:00:00Z',
+      byteLength: 1,
+      lastValidation: { level: 'syntax', diagnostics: [] },
+      source: 'AQ==',
+    }
+    const responses = [
+      {
+        ...baseProject,
+        hasUnpublishedChanges: false,
+        currentRevisionId: 'r3',
+        servedRevisionId: 'r3',
+      },
+      {
+        ...baseProject,
+        hasUnpublishedChanges: true,
+        currentRevisionId: 'r2',
+        servedRevisionId: 'r1',
+      },
+    ]
+    for (const project of responses) {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(Response.json({ project, unchanged: false })),
+      )
+      const result = await createHttpApi().publishProject({
+        projectId: 'p1',
+        expectedCurrentRevisionId: 'r2',
+        expectedServedRevisionId: 'r1',
+      })
+      expect(result).toEqual({
+        ok: false,
+        error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+      })
+    }
+  })
+
   it('maps malformed successful publish responses to network.invalid_response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(null)))
     const result = await createHttpApi().publishProject({

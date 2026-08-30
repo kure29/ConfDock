@@ -127,12 +127,12 @@ export function EditorScreen() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key !== 's') return
       event.preventDefault()
-      if (!saving) void save()
+      if (!saving && !publishing) void save()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
     // `save` closes over the current bytes; re-bind whenever they change.
-  }, [bytes, saving])
+  }, [bytes, publishing, saving])
 
   function onReveal(span: SourceSpan) {
     nonce.current += 1
@@ -215,14 +215,19 @@ export function EditorScreen() {
           <Button variant="secondary" onClick={() => setUrlOpen(true)}>
             托管地址
           </Button>
-          <Button variant="primary" loading={saving} onClick={() => void save()}>
+          <Button
+            variant="primary"
+            loading={saving}
+            disabled={publishing}
+            onClick={() => void save()}
+          >
             {SAVE_ACTION}
           </Button>
           {project.hasUnpublishedChanges && (
             <Button
               variant="secondary"
               loading={publishing}
-              disabled={dirty || saving}
+              disabled={dirty || saving || publishing}
               title={dirty ? PUBLISH_DIRTY_NOTICE : undefined}
               onClick={() => void publish()}
             >

@@ -52,6 +52,50 @@ export interface ProjectEditor {
   remove: () => Promise<Result<void, ApiError>>
 }
 
+type MutationKind = 'save' | 'publish'
+
+export interface MutationToken {
+  kind: MutationKind
+  generation: number
+  projectId: string
+}
+
+export interface MutationGate {
+  invalidate: () => void
+  begin: (kind: MutationKind, projectId: string) => MutationToken | null
+  isCurrent: (token: MutationToken) => boolean
+  finish: (token: MutationToken) => boolean
+}
+
+/**
+ * A synchronous single-flight gate for all project writes. React state is only
+ * presentation; admission and stale-response checks happen against this gate.
+ */
+export function createMutationGate(): MutationGate {
+  let generation = 0
+  let active: MutationToken | null = null
+  return {
+    invalidate() {
+      generation += 1
+      active = null
+    },
+    begin(kind, projectId) {
+      if (active !== null) return null
+      const token = { kind, projectId, generation }
+      active = token
+      return token
+    },
+    isCurrent(token) {
+      return active === token && token.generation === generation
+    },
+    finish(token) {
+      if (active !== token || token.generation !== generation) return false
+      active = null
+      return true
+    },
+  }
+}
+
 const EMPTY = new Uint8Array()
 
 export function useProject(id: string): ProjectEditor {
@@ -62,12 +106,13 @@ export function useProject(id: string): ProjectEditor {
   const [loadError, setLoadError] = useState<ApiError | null>(null)
   const [saving, setSaving] = useState(false)
   const [publishing, setPublishing] = useState(false)
-  const publishingRef = useRef(false)
+  const mutationGateRef = useRef<MutationGate>(createMutationGate())
   const activeProjectIdRef = useRef(id)
 
   useEffect(() => {
     activeProjectIdRef.current = id
-    publishingRef.current = false
+    mutationGateRef.current.invalidate()
+    setSaving(false)
     setPublishing(false)
     let live = true
     setStatus('loading')
@@ -156,10 +201,21 @@ export function useProject(id: string): ProjectEditor {
     [project, workingBytes],
   )
 
+  const mutationBusy = useCallback(
+    (): Result<never, ApiError> =>
+      err<ApiError, never>({
+        code: 'mutation.busy',
+        message: '已有保存或发布正在进行，请稍候',
+      }),
+    [],
+  )
+
   const save = useCallback(async (): Promise<Result<SaveResult, ApiError>> => {
     if (!project) {
       return err<ApiError, SaveResult>({ code: 'project.not_found', message: '项目不存在' })
     }
+    const token = mutationGateRef.current.begin('save', project.id)
+    if (token === null) return mutationBusy()
     setSaving(true)
     try {
       const result = await api.saveRevision({
@@ -167,15 +223,22 @@ export function useProject(id: string): ProjectEditor {
         source: workingBytes,
         expectedRevisionId: project.currentRevisionId,
       })
-      if (result.ok) {
+      if (
+        result.ok &&
+        mutationGateRef.current.isCurrent(token) &&
+        activeProjectIdRef.current === project.id &&
+        token.projectId === project.id
+      ) {
         setProject(result.value.project)
         setWorkingBytes(new Uint8Array(result.value.project.source))
       }
       return result
     } finally {
-      setSaving(false)
+      if (mutationGateRef.current.finish(token)) {
+        setSaving(false)
+      }
     }
-  }, [project, workingBytes])
+  }, [mutationBusy, project, workingBytes])
 
   const publish = useCallback(async (): Promise<Result<PublishResult, ApiError>> => {
     if (!project) {
@@ -187,13 +250,8 @@ export function useProject(id: string): ProjectEditor {
         message: '请先保存或撤销当前修改，再发布已保存的草稿',
       })
     }
-    if (publishingRef.current) {
-      return err<ApiError, PublishResult>({
-        code: 'publish.busy',
-        message: '正在发布，请稍候',
-      })
-    }
-    publishingRef.current = true
+    const token = mutationGateRef.current.begin('publish', project.id)
+    if (token === null) return mutationBusy()
     setPublishing(true)
     try {
       const result = await api.publishProject({
@@ -201,15 +259,21 @@ export function useProject(id: string): ProjectEditor {
         expectedCurrentRevisionId: project.currentRevisionId,
         expectedServedRevisionId: project.servedRevisionId,
       })
-      if (result.ok && activeProjectIdRef.current === project.id) {
+      if (
+        result.ok &&
+        mutationGateRef.current.isCurrent(token) &&
+        activeProjectIdRef.current === project.id &&
+        token.projectId === project.id
+      ) {
         setProject(result.value.project)
       }
       return result
     } finally {
-      publishingRef.current = false
-      setPublishing(false)
+      if (mutationGateRef.current.finish(token)) {
+        setPublishing(false)
+      }
     }
-  }, [dirty, project])
+  }, [dirty, mutationBusy, project])
 
   const rename = useCallback(
     async (name: string): Promise<Result<ProjectSummary, ApiError>> => {

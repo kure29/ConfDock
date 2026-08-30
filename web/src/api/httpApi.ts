@@ -622,13 +622,25 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
         `/api/projects/${encodeURIComponent(projectId)}/publish`,
         { expectedCurrentRevisionId, expectedServedRevisionId },
       )
-      if (!result.ok) return result
+      if (!result.ok) {
+        if (result.error.code === 'http.404') {
+          return err({ code: API_ERROR.notFound, message: '配置不存在' })
+        }
+        return result
+      }
       try {
         if (!isRecord(result.value) || typeof result.value.unchanged !== 'boolean') {
           throw new Error('invalid publish response')
         }
         const project = decodeProjectResult(result.value.project as Wire['project'])
         if (!project.ok) return project
+        if (
+          project.value.currentRevisionId !== expectedCurrentRevisionId ||
+          project.value.servedRevisionId !== project.value.currentRevisionId ||
+          project.value.hasUnpublishedChanges !== false
+        ) {
+          return err(invalidResponse())
+        }
         return ok({ project: project.value, unchanged: result.value.unchanged })
       } catch {
         return err(invalidResponse())
