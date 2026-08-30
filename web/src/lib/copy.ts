@@ -233,6 +233,37 @@ export const REVISION_VALIDATOR_VERSION_LABEL = '校验器版本'
 export const REVISION_SOURCE_TITLE_SUFFIX = ' 的源码'
 
 // ---------------------------------------------------------------------------
+// Read-only revision diff (Slice 3)
+// ---------------------------------------------------------------------------
+
+export const REVISION_DIFF_COMPARE = '与上一版本比较'
+export const REVISION_DIFF_SHOW_SOURCE = '查看源码'
+export const REVISION_DIFF_SHOW_DIFF = '查看差异'
+export const REVISION_DIFF_INITIAL = '这是初始版本，没有上一版本可比较。'
+export const REVISION_DIFF_LOADING = '正在读取版本差异…'
+export const REVISION_DIFF_RETRY = '重试差异读取'
+export const REVISION_DIFF_IDENTICAL = '两个版本的原始字节完全一致。'
+export const REVISION_DIFF_NO_LINE_CHANGES = '只有 BOM 或元数据不同，没有行内容差异。'
+export const REVISION_DIFF_ADDITIONS = '新增行'
+export const REVISION_DIFF_DELETIONS = '删除行'
+export const REVISION_DIFF_FROM = '从'
+export const REVISION_DIFF_TO = '到'
+export const REVISION_DIFF_METADATA = '原始字节摘要'
+export const REVISION_DIFF_VIEW_MODE = '版本查看方式'
+export const REVISION_DIFF_BOM = 'BOM'
+export const REVISION_DIFF_LINE_ENDING = '行尾'
+export const REVISION_DIFF_TRAILING_NEWLINE = '尾部换行'
+export const REVISION_DIFF_YES = '有'
+export const REVISION_DIFF_NO = '无'
+export const REVISION_DIFF_HUNK_PREFIX = '差异块'
+export const REVISION_DIFF_OLD_LINE = '旧行'
+export const REVISION_DIFF_NEW_LINE = '新行'
+export const REVISION_DIFF_EOF = 'EOF'
+export const REVISION_DIFF_LF = 'LF'
+export const REVISION_DIFF_CRLF = 'CRLF'
+export const REVISION_DIFF_NONE = '无换行'
+
+// ---------------------------------------------------------------------------
 // Access tokens (architecture.md §Security)
 // ---------------------------------------------------------------------------
 

@@ -64,7 +64,7 @@ Rust、`wasm32-unknown-unknown` 和 `wasm-bindgen-cli 0.2.127`。
 
 | 没有 | 依据 |
 | --- | --- |
-| Diff / 回滚 / Publish 按钮 | ADR-004：当前仍不暴露草稿与发布。「校验并保存」是一个动作，成功后 `current_revision_id` 和 `served_revision_id` 同时前进 |
+| 回滚 / Publish 按钮 | ADR-004：当前仍不暴露草稿与发布。「校验并保存」是一个动作，成功后 `current_revision_id` 和 `served_revision_id` 同时前进；历史 Diff 仍是只读查看 |
 | 一份配置生成多端输出 | architecture.md：Project = 一个客户端 + 一个原生文档 |
 | 头像菜单 / 成员 / 角色 / 通知中心 | 单管理员 |
 | 指标卡 / 可用性折线 / 请求数 | 一个人管几个配置，这些数字要么是编的，要么没有意义 |
@@ -140,6 +140,7 @@ GET    /api/projects/:id              → Project（source 为当前修订的字
 POST   /api/projects/:id/revisions    { source, expectedRevisionId } → { project, validation, unchanged }  ← 校验并保存
 GET    /api/projects/:id/revisions    → { items, nextCursor }（默认最近 50 条，最多 100 条；不含 source）
 GET    /api/projects/:id/revisions/:revisionId → Revision（选中的历史版本，source 为 Base64）
+GET    /api/projects/:id/revisions/diff?fromRevisionId=…&toRevisionId=… → RevisionDiff（只含结构化 Diff，不含 source）
 PATCH  /api/projects/:id              { name } → ProjectSummary
 DELETE /api/projects/:id
 GET    /api/projects/:id/tokens       → AccessToken[]（只含前后缀）
@@ -156,8 +157,8 @@ Session Token 永远不进 URL。Stable Token 只用于公开的 `/sub/:token`�
 保存时服务端比较 `expectedRevisionId` 与当前 revision；不一致返回 HTTP `409`
 和稳定错误码 `revision.conflict`，前端保留当前未保存内容，不自动覆盖或刷新。
 「历史」视图只读取不可变版本的元数据；默认先显示最近 50 条，使用游标加载更早版本。
-选择一个版本后才加载其原始字节供只读查看，不会替换当前编辑内容，也没有 Diff、回滚或
-Publish 操作。
+选择一个版本后才加载其原始字节供只读查看，不会替换当前编辑内容。选中版本有父版本时，
+详情里可以请求只读的 `父版本 → 当前版本` Diff；没有回滚或 Publish 操作。
 管理 API 的网络错误、401、403、404、409、500 都以 `Result<T, ApiError>` 传播，
 不会静默转换为空列表、`null` 或“删除成功”。
 
@@ -184,6 +185,16 @@ BLOB，不转字符串、不重新序列化、不追加换行。保存使用 `ex
 编辑器以 `Uint8Array` 原生字节为唯一状态，BOM、Unicode、纯 LF/CRLF 和尾换行均可
 无损往返。混合 LF/CRLF 文件初次加载不会变脏；原始编辑暂时只读并明确提示，结构化
 编辑直接做 Source Span 局部 Patch，不会静默把整份文件归一化。
+
+### Revision Diff V1
+
+Diff 位于 Rust Service 业务边界，不属于 WASM Config Core，也不做 YAML、JSON 或 CONF
+语义比较。服务按原始字节切分行，保留每行的 `LF`、`CRLF` 或 `EOF` 标记，并在两侧
+元数据中展示 BOM、行尾风格、尾部换行、字节数和 SHA-256。两份输入合计最多 8 MiB、
+200,000 行，响应最多 10,000 行；超过限制返回 `revision.diff_too_large`，不会截断。
+同一 revision 或相同 content hash 直接返回 `identical` 空 Diff。当前 UI 只比较选中
+revision 与其 parent，`current` / `served` 仍同步。本 Slice 不包含 Rollback、Publish、
+Token repointing 或 Native Validator。
 
 ---
 

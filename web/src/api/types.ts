@@ -100,6 +100,42 @@ export interface RevisionListOptions {
   cursor?: string
 }
 
+export type RevisionDiffLineEnding = 'none' | 'lf' | 'crlf' | 'mixed'
+export type RevisionDiffLineKind = 'context' | 'delete' | 'insert'
+
+/** Metadata for one side of a read-only diff.  Source bytes are never sent. */
+export interface RevisionDiffDocument extends RevisionSummary {
+  hasUtf8Bom: boolean
+  lineEnding: RevisionDiffLineEnding
+  trailingNewline: boolean
+}
+
+export interface RevisionDiffLine {
+  kind: RevisionDiffLineKind
+  oldLineNo: number | null
+  newLineNo: number | null
+  /** Text without its line-ending bytes. */
+  text: string
+  lineEnding: Exclude<RevisionDiffLineEnding, 'mixed'>
+}
+
+export interface RevisionDiffHunk {
+  oldStart: number
+  oldCount: number
+  newStart: number
+  newCount: number
+  lines: RevisionDiffLine[]
+}
+
+export interface RevisionDiff {
+  from: RevisionDiffDocument
+  to: RevisionDiffDocument
+  identical: boolean
+  additions: number
+  deletions: number
+  hunks: RevisionDiffHunk[]
+}
+
 // ---------------------------------------------------------------------------
 // Access tokens
 // ---------------------------------------------------------------------------
@@ -162,5 +198,6 @@ export const API_ERROR = {
   revisionConflict: 'revision.conflict',
   tokenNotFound: 'token.not_found',
   revisionNotFound: 'revision.not_found',
+  revisionDiffTooLarge: 'revision.diff_too_large',
   invalidResponse: 'network.invalid_response',
 } as const

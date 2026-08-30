@@ -19,6 +19,12 @@ import type {
   Project,
   ProjectSummary,
   Revision,
+  RevisionDiff,
+  RevisionDiffDocument,
+  RevisionDiffHunk,
+  RevisionDiffLine,
+  RevisionDiffLineEnding,
+  RevisionDiffLineKind,
   RevisionListOptions,
   RevisionPage,
   RevisionSummary,
@@ -104,10 +110,10 @@ function decodeValidation(value: unknown): ValidationResult {
 function decodeRevisionSummary(value: unknown): RevisionSummary {
   if (
     !isRecord(value) ||
-    typeof value.id !== 'string' ||
+    !isRevisionId(value.id) ||
     !Number.isSafeInteger(value.revisionNo) ||
     (value.revisionNo as number) < 1 ||
-    (value.parentRevisionId !== null && typeof value.parentRevisionId !== 'string') ||
+    (value.parentRevisionId !== null && !isRevisionId(value.parentRevisionId)) ||
     typeof value.createdAt !== 'string' ||
     !Number.isSafeInteger(value.byteLength) ||
     (value.byteLength as number) < 0 ||
@@ -143,6 +149,214 @@ function decodeRevision(value: unknown): Revision {
     throw new Error('revision byte length mismatch')
   }
   return { ...summary, source }
+}
+
+const MAX_REVISION_ID_BYTES = 128
+const MAX_DIFF_INPUT_BYTES = 8 * 1024 * 1024
+const MAX_DIFF_OUTPUT_LINES = 10_000
+
+function isRevisionDiffLineEnding(value: unknown): value is RevisionDiffLineEnding {
+  return value === 'none' || value === 'lf' || value === 'crlf' || value === 'mixed'
+}
+
+function isRevisionDiffLineKind(value: unknown): value is RevisionDiffLineKind {
+  return value === 'context' || value === 'delete' || value === 'insert'
+}
+
+function isSafeNonNegativeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0
+}
+
+function isRevisionId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= MAX_REVISION_ID_BYTES &&
+    ![...value].some((character) => character < ' ' || character === '\u007f')
+  )
+}
+
+function decodeRevisionDiffDocument(
+  value: unknown,
+  expectedId: string,
+): RevisionDiffDocument {
+  if (
+    !isRecord(value) ||
+    'source' in value ||
+    typeof value.hasUtf8Bom !== 'boolean' ||
+    !isRevisionDiffLineEnding(value.lineEnding) ||
+    typeof value.trailingNewline !== 'boolean'
+  ) {
+    throw new Error('invalid revision diff document')
+  }
+  const summary = decodeRevisionSummary(value)
+  if (!isRevisionId(summary.id) || summary.id !== expectedId) {
+    throw new Error('revision diff direction mismatch')
+  }
+  return {
+    ...summary,
+    hasUtf8Bom: value.hasUtf8Bom,
+    lineEnding: value.lineEnding,
+    trailingNewline: value.trailingNewline,
+  }
+}
+
+function decodeDiffLine(value: unknown): RevisionDiffLine {
+  if (
+    !isRecord(value) ||
+    !isRevisionDiffLineKind(value.kind) ||
+    !isSafeNonNegativeInteger(value.oldLineNo === null ? 0 : value.oldLineNo) ||
+    !isSafeNonNegativeInteger(value.newLineNo === null ? 0 : value.newLineNo) ||
+    (value.oldLineNo !== null && !Number.isSafeInteger(value.oldLineNo)) ||
+    (value.newLineNo !== null && !Number.isSafeInteger(value.newLineNo)) ||
+    typeof value.text !== 'string' ||
+    value.text.includes('\n') ||
+    !isRevisionDiffLineEnding(value.lineEnding) ||
+    value.lineEnding === 'mixed'
+  ) {
+    throw new Error('invalid revision diff line')
+  }
+  const oldLineNo = value.oldLineNo as number | null
+  const newLineNo = value.newLineNo as number | null
+  if (
+    (oldLineNo !== null && oldLineNo < 1) ||
+    (newLineNo !== null && newLineNo < 1) ||
+    (value.kind === 'context' && (oldLineNo === null || newLineNo === null)) ||
+    (value.kind === 'delete' && (oldLineNo === null || newLineNo !== null)) ||
+    (value.kind === 'insert' && (oldLineNo !== null || newLineNo === null))
+  ) {
+    throw new Error('invalid revision diff line numbers')
+  }
+  return {
+    kind: value.kind,
+    oldLineNo,
+    newLineNo,
+    text: value.text,
+    lineEnding: value.lineEnding,
+  }
+}
+
+function decodeDiffHunk(value: unknown): RevisionDiffHunk {
+  if (
+    !isRecord(value) ||
+    !isSafeNonNegativeInteger(value.oldStart) ||
+    !isSafeNonNegativeInteger(value.oldCount) ||
+    !isSafeNonNegativeInteger(value.newStart) ||
+    !isSafeNonNegativeInteger(value.newCount) ||
+    !Array.isArray(value.lines) ||
+    value.lines.length === 0 ||
+    value.lines.length > MAX_DIFF_OUTPUT_LINES
+  ) {
+    throw new Error('invalid revision diff hunk')
+  }
+  const oldStart = value.oldStart as number
+  const oldCount = value.oldCount as number
+  const newStart = value.newStart as number
+  const newCount = value.newCount as number
+  if (oldStart < 1 || newStart < 1) {
+    throw new Error('invalid revision diff hunk range')
+  }
+  const lines = value.lines.map(decodeDiffLine)
+  let expectedOld = oldStart
+  let expectedNew = newStart
+  let consumedOld = 0
+  let consumedNew = 0
+  let changed = false
+  for (const line of lines) {
+    if (line.kind === 'context') {
+      if (line.oldLineNo !== expectedOld || line.newLineNo !== expectedNew) {
+        throw new Error('invalid context line range')
+      }
+      expectedOld += 1
+      expectedNew += 1
+      consumedOld += 1
+      consumedNew += 1
+    } else if (line.kind === 'delete') {
+      if (line.oldLineNo !== expectedOld) throw new Error('invalid delete line range')
+      expectedOld += 1
+      consumedOld += 1
+      changed = true
+    } else {
+      if (line.newLineNo !== expectedNew) throw new Error('invalid insert line range')
+      expectedNew += 1
+      consumedNew += 1
+      changed = true
+    }
+  }
+  if (!changed || consumedOld !== oldCount || consumedNew !== newCount) {
+    throw new Error('hunk count does not match lines')
+  }
+  return { oldStart, oldCount, newStart, newCount, lines }
+}
+
+function decodeRevisionDiff(
+  value: unknown,
+  fromRevisionId: string,
+  toRevisionId: string,
+): RevisionDiff {
+  if (
+    !isRecord(value) ||
+    'source' in value ||
+    typeof value.identical !== 'boolean' ||
+    !isSafeNonNegativeInteger(value.additions) ||
+    !isSafeNonNegativeInteger(value.deletions) ||
+    !Array.isArray(value.hunks)
+  ) {
+    throw new Error('invalid revision diff')
+  }
+  const from = decodeRevisionDiffDocument(value.from, fromRevisionId)
+  const to = decodeRevisionDiffDocument(value.to, toRevisionId)
+  if (
+    from.byteLength > MAX_DIFF_INPUT_BYTES ||
+    to.byteLength > MAX_DIFF_INPUT_BYTES ||
+    from.byteLength + to.byteLength > MAX_DIFF_INPUT_BYTES
+  ) {
+    throw new Error('revision diff input is too large')
+  }
+  const additions = value.additions as number
+  const deletions = value.deletions as number
+  if (additions > MAX_DIFF_OUTPUT_LINES || deletions > MAX_DIFF_OUTPUT_LINES) {
+    throw new Error('revision diff output is too large')
+  }
+  if (value.hunks.length > MAX_DIFF_OUTPUT_LINES) {
+    throw new Error('revision diff output is too large')
+  }
+  const hunks = value.hunks.map(decodeDiffHunk)
+  const outputLines = hunks.reduce((total, hunk) => total + hunk.lines.length, 0)
+  if (outputLines > MAX_DIFF_OUTPUT_LINES) throw new Error('revision diff output is too large')
+  const actualAdditions = hunks.reduce(
+    (total, hunk) => total + hunk.lines.filter((line) => line.kind === 'insert').length,
+    0,
+  )
+  const actualDeletions = hunks.reduce(
+    (total, hunk) => total + hunk.lines.filter((line) => line.kind === 'delete').length,
+    0,
+  )
+  if (actualAdditions !== additions || actualDeletions !== deletions) {
+    throw new Error('revision diff counts do not match lines')
+  }
+  let previousOldEnd = 1
+  let previousNewEnd = 1
+  for (const hunk of hunks) {
+    const oldEnd = hunk.oldStart + hunk.oldCount
+    const newEnd = hunk.newStart + hunk.newCount
+    if (!Number.isSafeInteger(oldEnd) || !Number.isSafeInteger(newEnd)) {
+      throw new Error('revision diff hunk range overflow')
+    }
+    if (hunk.oldStart < previousOldEnd || hunk.newStart < previousNewEnd) {
+      throw new Error('overlapping revision diff hunks')
+    }
+    previousOldEnd = oldEnd
+    previousNewEnd = newEnd
+  }
+  const sameIdentity = from.id === to.id || from.contentHash === to.contentHash
+  if (sameIdentity !== value.identical) {
+    throw new Error('invalid identical revision diff contract')
+  }
+  if (value.identical && (additions !== 0 || deletions !== 0 || hunks.length !== 0)) {
+    throw new Error('identical revision diff contains changes')
+  }
+  return { from, to, identical: value.identical, additions, deletions, hunks }
 }
 
 function decodeRevisionPage(value: unknown, requestCursor?: string): RevisionPage {
@@ -367,6 +581,37 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
       }
       try {
         return ok(decodeRevision(result.value))
+      } catch {
+        return err(invalidResponse())
+      }
+    },
+
+    async getRevisionDiff(
+      projectId: string,
+      fromRevisionId: string,
+      toRevisionId: string,
+    ): Promise<Result<RevisionDiff, ApiError>> {
+      const params = new URLSearchParams()
+      params.set('fromRevisionId', fromRevisionId)
+      params.set('toRevisionId', toRevisionId)
+      const result = await request<unknown>(
+        'GET',
+        `/api/projects/${encodeURIComponent(projectId)}/revisions/diff?${params.toString()}`,
+      )
+      if (!result.ok) {
+        if (result.error.code === 'http.404') {
+          return err({ code: API_ERROR.revisionNotFound, message: '版本不存在' })
+        }
+        if (result.error.code === 'http.413') {
+          return err({
+            code: API_ERROR.revisionDiffTooLarge,
+            message: '差异过大，暂时无法在浏览器中显示',
+          })
+        }
+        return result
+      }
+      try {
+        return ok(decodeRevisionDiff(result.value, fromRevisionId, toRevisionId))
       } catch {
         return err(invalidResponse())
       }

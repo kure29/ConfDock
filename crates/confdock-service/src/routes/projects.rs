@@ -10,8 +10,8 @@ use serde::Deserialize;
 
 use crate::{
     dto::{
-        CreateProjectRequest, ProjectDto, ProjectSummaryDto, RenameProjectRequest, RevisionDto,
-        RevisionPageDto, SaveResultDto, SaveRevisionRequest,
+        CreateProjectRequest, ProjectDto, ProjectSummaryDto, RenameProjectRequest, RevisionDiffDto,
+        RevisionDto, RevisionPageDto, SaveResultDto, SaveRevisionRequest,
     },
     error::ApiError,
     state::AppState,
@@ -25,6 +25,16 @@ use super::json;
 pub struct RevisionListQuery {
     pub cursor: Option<String>,
     pub limit: Option<usize>,
+}
+
+const MAX_REVISION_ID_BYTES: usize = 128;
+
+#[derive(Debug, Deserialize)]
+pub struct RevisionDiffQuery {
+    #[serde(rename = "fromRevisionId")]
+    pub from_revision_id: String,
+    #[serde(rename = "toRevisionId")]
+    pub to_revision_id: String,
 }
 
 pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<ProjectSummaryDto>>, ApiError> {
@@ -105,6 +115,36 @@ pub async fn get_revision(
     Ok(Json(
         storage::get_revision(&state.pool, &id, &revision_id).await?,
     ))
+}
+
+pub async fn diff(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    query: Result<Query<RevisionDiffQuery>, QueryRejection>,
+) -> Result<Json<RevisionDiffDto>, ApiError> {
+    let Query(query) =
+        query.map_err(|_| ApiError::bad_request("request.invalid", "版本差异查询参数无效"))?;
+    validate_revision_id(&query.from_revision_id)?;
+    validate_revision_id(&query.to_revision_id)?;
+    Ok(Json(
+        storage::get_revision_diff(
+            &state.pool,
+            &id,
+            &query.from_revision_id,
+            &query.to_revision_id,
+        )
+        .await?,
+    ))
+}
+
+fn validate_revision_id(value: &str) -> Result<(), ApiError> {
+    if value.is_empty()
+        || value.len() > MAX_REVISION_ID_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(ApiError::bad_request("request.invalid", "版本 ID 无效"));
+    }
+    Ok(())
 }
 
 pub async fn rename(

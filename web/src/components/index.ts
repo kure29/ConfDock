@@ -19,6 +19,8 @@ export type {
   RevisionPaginationTransition,
   RevisionRequestTransition,
 } from './RevisionHistory'
+export { RevisionDiff } from './RevisionDiff'
+export type { RevisionDiffProps } from './RevisionDiff'
 export { ServedUrlDialog } from './ServedUrlDialog'
 export { SourceEditor, diagnosticMarkers } from './SourceEditor'
 export type { EditorMarker, RevealRequest } from './SourceEditor'

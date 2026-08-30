@@ -71,6 +71,14 @@ impl ApiError {
         Self::bad_request("revision.invalid_cursor", "版本游标无效")
     }
 
+    pub fn revision_diff_too_large() -> Self {
+        Self::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "revision.diff_too_large",
+            "差异过大，暂时无法在浏览器中显示",
+        )
+    }
+
     pub fn validation(validation: ValidationResultDto) -> Self {
         let (status, code, message) = if validation.has_code("encoding.unsupported") {
             (
@@ -140,6 +148,10 @@ mod tests {
         assert_eq!(
             ApiError::revision_invalid_cursor().code,
             "revision.invalid_cursor"
+        );
+        assert_eq!(
+            ApiError::revision_diff_too_large().code,
+            "revision.diff_too_large"
         );
         assert_eq!(ApiError::too_large().status, StatusCode::PAYLOAD_TOO_LARGE);
         assert_eq!(ApiError::internal().code, "internal.error");

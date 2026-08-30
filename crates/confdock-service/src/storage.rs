@@ -5,9 +5,11 @@ use uuid::Uuid;
 
 use crate::{
     auth::{random_token, token_hash, unix_timestamp},
+    diff::{build_revision_diff, DiffError, RevisionDiffSource, MAX_DIFF_INPUT_BYTES},
     dto::{
         timestamp_to_iso, AccessTokenDto, CreatedAccessTokenDto, ProjectDto, ProjectSummaryDto,
-        RevisionDto, RevisionPageDto, RevisionSummaryDto, SaveResultDto, ValidationResultDto,
+        RevisionDiffDto, RevisionDto, RevisionPageDto, RevisionSummaryDto, SaveResultDto,
+        ValidationResultDto,
     },
     error::ApiError,
 };
@@ -250,6 +252,99 @@ pub async fn get_revision(
     let mut connection = begin_deferred(pool).await?;
     let result = get_revision_connection(&mut connection, project_id, revision_id).await;
     finish_transaction(connection, result).await
+}
+
+/// Read two immutable revisions in one SQLite snapshot, then perform the CPU
+/// heavy diff outside the async worker.  The blocking task owns only detached
+/// source bytes and metadata; it never holds a database connection.
+pub async fn get_revision_diff(
+    pool: &SqlitePool,
+    project_id: &str,
+    from_revision_id: &str,
+    to_revision_id: &str,
+) -> Result<RevisionDiffDto, ApiError> {
+    let mut connection = begin_deferred(pool).await?;
+    let result = load_revision_diff_connection(
+        &mut connection,
+        project_id,
+        from_revision_id,
+        to_revision_id,
+    )
+    .await;
+    let (from, to) = finish_transaction(connection, result).await?;
+    let computed = tokio::task::spawn_blocking(move || build_revision_diff(from, to))
+        .await
+        .map_err(|_| ApiError::internal())?;
+    computed.map_err(|error| match error {
+        DiffError::TooLarge => ApiError::revision_diff_too_large(),
+        // Stored revisions are validated UTF-8.  A corrupt database should
+        // fail closed without returning replacement characters or source data.
+        DiffError::InvalidUtf8 => ApiError::internal(),
+    })
+}
+
+async fn load_revision_diff_connection(
+    connection: &mut PoolConnection<Sqlite>,
+    project_id: &str,
+    from_revision_id: &str,
+    to_revision_id: &str,
+) -> Result<(RevisionDiffSource, RevisionDiffSource), ApiError> {
+    ensure_project_connection(connection, project_id).await?;
+    let from_length = revision_source_length(connection, project_id, from_revision_id).await?;
+    let to_length = revision_source_length(connection, project_id, to_revision_id).await?;
+    let combined_length = from_length
+        .checked_add(to_length)
+        .ok_or_else(ApiError::revision_diff_too_large)?;
+    if combined_length > i64::try_from(MAX_DIFF_INPUT_BYTES).map_err(|_| ApiError::internal())? {
+        return Err(ApiError::revision_diff_too_large());
+    }
+    let from = fetch_revision_diff_source(connection, project_id, from_revision_id).await?;
+    let to = fetch_revision_diff_source(connection, project_id, to_revision_id).await?;
+    Ok((from, to))
+}
+
+async fn revision_source_length(
+    connection: &mut PoolConnection<Sqlite>,
+    project_id: &str,
+    revision_id: &str,
+) -> Result<i64, ApiError> {
+    let length = sqlx::query_scalar::<_, i64>(
+        "SELECT length(source_bytes) FROM config_revisions WHERE project_id = ? AND id = ?",
+    )
+    .bind(project_id)
+    .bind(revision_id)
+    .fetch_optional(&mut **connection)
+    .await
+    .map_err(|_| ApiError::internal())?
+    .ok_or_else(ApiError::revision_not_found)?;
+    if length < 0 {
+        return Err(ApiError::internal());
+    }
+    Ok(length)
+}
+
+async fn fetch_revision_diff_source(
+    connection: &mut PoolConnection<Sqlite>,
+    project_id: &str,
+    revision_id: &str,
+) -> Result<RevisionDiffSource, ApiError> {
+    let row = sqlx::query(REVISION_DETAIL_QUERY)
+        .bind(project_id)
+        .bind(revision_id)
+        .fetch_optional(&mut **connection)
+        .await
+        .map_err(|_| ApiError::internal())?
+        .ok_or_else(ApiError::revision_not_found)?;
+    let source: Vec<u8> = row
+        .try_get("source_bytes")
+        .map_err(|_| ApiError::internal())?;
+    let summary = revision_summary_from_row(&row)?;
+    if source.len() != summary.byte_length
+        || hex_encode(&Sha256::digest(&source))? != summary.content_hash
+    {
+        return Err(ApiError::internal());
+    }
+    Ok(RevisionDiffSource { summary, source })
 }
 
 async fn get_revision_connection(

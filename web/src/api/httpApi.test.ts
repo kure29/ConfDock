@@ -26,6 +26,57 @@ function stubRevisionPage(items: unknown[], nextCursor: string | null = null) {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ items, nextCursor })))
 }
 
+function revisionDiffDocument(id: string, revisionNo: number, hash: string) {
+  return {
+    ...revisionWire(id, revisionNo),
+    contentHash: hash,
+    hasUtf8Bom: false,
+    lineEnding: 'lf',
+    trailingNewline: true,
+  }
+}
+
+function validRevisionDiffWire() {
+  return {
+    from: revisionDiffDocument('r1', 1, 'a'.repeat(64)),
+    to: revisionDiffDocument('r2', 2, 'b'.repeat(64)),
+    identical: false,
+    additions: 1,
+    deletions: 1,
+    hunks: [
+      {
+        oldStart: 1,
+        oldCount: 2,
+        newStart: 1,
+        newCount: 2,
+        lines: [
+          {
+            kind: 'context',
+            oldLineNo: 1,
+            newLineNo: 1,
+            text: 'same',
+            lineEnding: 'lf',
+          },
+          {
+            kind: 'delete',
+            oldLineNo: 2,
+            newLineNo: null,
+            text: 'old',
+            lineEnding: 'lf',
+          },
+          {
+            kind: 'insert',
+            oldLineNo: null,
+            newLineNo: 2,
+            text: 'new',
+            lineEnding: 'lf',
+          },
+        ],
+      },
+    ],
+  }
+}
+
 describe('HTTP API error boundary', () => {
   it('maps a missing current session to signed out', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 404 })))
@@ -210,6 +261,110 @@ describe('HTTP API error boundary', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       '/api/projects/p1/revisions?limit=25&cursor=revision%2F2',
     )
+  })
+
+  it('requests a read-only diff with encoded query parameters and decodes direction', async () => {
+    const wire = validRevisionDiffWire()
+    wire.from.id = 'r/1'
+    wire.to.id = 'r 2'
+    const fetchMock = vi.fn().mockResolvedValue(Response.json(wire))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await createHttpApi().getRevisionDiff('project/1', 'r/1', 'r 2')
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.from.id).toBe('r/1')
+      expect(result.value.to.id).toBe('r 2')
+      expect(result.value.hunks[0]?.lines[2]?.kind).toBe('insert')
+    }
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/projects/project%2F1/revisions/diff?fromRevisionId=r%2F1&toRevisionId=r+2',
+    )
+    expect(fetchMock.mock.calls[0]?.[1].credentials).toBe('same-origin')
+    expect(fetchMock.mock.calls[0]?.[1].cache).toBe('no-store')
+  })
+
+  it.each([
+    ['kind', { kind: 'update' }],
+    ['line ending', { lineEnding: 'dos' }],
+    ['line number combination', { oldLineNo: 2, newLineNo: 1 }],
+  ])('rejects an invalid diff %s at the HTTP boundary', async (_label, linePatch) => {
+    const wire = validRevisionDiffWire()
+    Object.assign(wire.hunks[0]!.lines[1]!, linePatch)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(wire)))
+    const result = await createHttpApi().getRevisionDiff('p1', 'r1', 'r2')
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+    })
+  })
+
+  it('rejects invalid hunk counts, hashes, and reversed from/to metadata', async () => {
+    const invalids = [
+      (() => {
+        const wire = validRevisionDiffWire()
+        wire.hunks[0]!.newCount = 99
+        return wire
+      })(),
+      (() => {
+        const wire = validRevisionDiffWire()
+        wire.from.contentHash = 'Z'.repeat(64)
+        return wire
+      })(),
+      (() => {
+        const wire = validRevisionDiffWire()
+        wire.to.id = 'r1'
+        return wire
+      })(),
+    ]
+    for (const wire of invalids) {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(wire)))
+      const result = await createHttpApi().getRevisionDiff('p1', 'r1', 'r2')
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('network.invalid_response')
+    }
+  })
+
+  it('enforces the identical response contract', async () => {
+    const wire = validRevisionDiffWire()
+    wire.identical = true
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(wire)))
+    const result = await createHttpApi().getRevisionDiff('p1', 'r1', 'r2')
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('network.invalid_response')
+  })
+
+  it('rejects a successful diff response that includes source bytes', async () => {
+    const wire = { ...validRevisionDiffWire(), source: 'c2Vuc2l0aXZl' }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(wire)))
+    const result = await createHttpApi().getRevisionDiff('p1', 'r1', 'r2')
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+    })
+  })
+
+  it('keeps diff authorization, not-found, size, server, and network errors observable', async () => {
+    const statuses = [
+      [401, 'auth.unauthorized'],
+      [404, 'revision.not_found'],
+      [413, 'revision.diff_too_large'],
+      [500, 'internal.error'],
+    ] as const
+    for (const [status, code] of statuses) {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          Response.json({ code, message: 'safe error' }, { status }),
+        ),
+      )
+      const result = await createHttpApi().getRevisionDiff('p1', 'r1', 'r2')
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe(code)
+    }
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    const unreachable = await createHttpApi().getRevisionDiff('p1', 'r1', 'r2')
+    expect(unreachable.ok).toBe(false)
+    if (!unreachable.ok) expect(unreachable.error.code).toBe('network.unreachable')
   })
 
   it('accepts a first page with only the current pointer', async () => {

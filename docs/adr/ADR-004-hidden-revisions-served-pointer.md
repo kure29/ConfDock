@@ -2,9 +2,11 @@
 
 ## Decision
 
-Reserve revision rows and project pointers now, without exposing Draft,
-Publish, History, Diff, or Rollback UI in V1. Successful V1 validation-and-save
-sets both `current_revision_id` and `served_revision_id` to the new revision.
+Reserve revision rows and project pointers now. Successful V1
+validation-and-save sets both `current_revision_id` and `served_revision_id`
+to the new revision. The initial V1 boundary did not expose Draft, Publish,
+History, Diff, or Rollback controls; the read-only History and Diff scope
+updates below do not change the pointer semantics.
 
 ## Consequences
 
@@ -20,3 +22,12 @@ immutable revision's original bytes. This is a read-only History view. It does
 not expose Draft, Publish, Diff, or Rollback, and it never moves either project
 pointer; successful saves still advance `current_revision_id` and
 `served_revision_id` together.
+
+## Scope update (Slice 3)
+
+Authenticated administrators may request a bounded, read-only line Diff from
+one revision to another revision in the same project. The UI currently offers
+the selected revision → parent comparison only. Diff reads never create,
+modify, delete, or repoint revisions, and successful saves continue to advance
+`current_revision_id` and `served_revision_id` together. Draft, Publish,
+Rollback, and native validator workflows remain outside this scope.

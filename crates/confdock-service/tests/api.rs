@@ -860,6 +860,218 @@ async fn revision_history_is_ordered_metadata_and_explicit_byte_preserving_detai
     );
 }
 
+#[tokio::test]
+async fn revision_diff_is_authenticated_static_read_only_and_source_preserving() {
+    let service = TestService::new().await;
+    let (cookie, _) = login(&service.app, PASSWORD).await;
+    let from_source = "[General]\r\nname=old\n家庭网络=保留\r\n".as_bytes();
+    let project = create_project(
+        &service.app,
+        &cookie,
+        "Diff",
+        "surge",
+        "config.conf",
+        from_source,
+    )
+    .await;
+    let project_id = project["id"].as_str().unwrap().to_owned();
+    let from_revision = project["currentRevisionId"].as_str().unwrap().to_owned();
+    let to_source = "[General]\r\nname=new\n家庭网络=保留\r\n".as_bytes();
+    let saved = request(
+        &service.app,
+        Method::POST,
+        &format!("/api/projects/{project_id}/revisions"),
+        Some(&cookie),
+        Some(json!({
+            "source": STANDARD.encode(to_source),
+            "expectedRevisionId": from_revision,
+        })),
+    )
+    .await;
+    assert_eq!(saved.status(), StatusCode::OK);
+    let to_revision = response_json(saved).await["project"]["currentRevisionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let path = format!(
+        "/api/projects/{project_id}/revisions/diff?fromRevisionId={from_revision}&toRevisionId={to_revision}"
+    );
+    let unauthenticated = request(&service.app, Method::GET, &path, None, None).await;
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+    let response = request(&service.app, Method::GET, &path, Some(&cookie), None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    let diff = response_json(response).await;
+    assert_eq!(diff["from"]["id"], from_revision);
+    assert_eq!(diff["to"]["id"], to_revision);
+    assert_eq!(diff["from"]["lineEnding"], "mixed");
+    assert_eq!(diff["to"]["lineEnding"], "mixed");
+    assert_eq!(diff["additions"], 1);
+    assert_eq!(diff["deletions"], 1);
+    assert!(diff.get("source").is_none());
+    assert!(diff["from"].get("source").is_none());
+    assert!(diff["to"].get("source").is_none());
+    assert_eq!(diff["hunks"][0]["lines"][1]["kind"], "delete");
+    assert_eq!(diff["hunks"][0]["lines"][2]["kind"], "insert");
+
+    let reverse = response_json(
+        request(
+            &service.app,
+            Method::GET,
+            &format!(
+                "/api/projects/{project_id}/revisions/diff?fromRevisionId={to_revision}&toRevisionId={from_revision}"
+            ),
+            Some(&cookie),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(reverse["from"]["id"], to_revision);
+    assert_eq!(reverse["to"]["id"], from_revision);
+    assert_eq!(reverse["hunks"][0]["lines"][1]["kind"], "delete");
+    assert_eq!(reverse["hunks"][0]["lines"][2]["kind"], "insert");
+
+    let identical = response_json(
+        request(
+            &service.app,
+            Method::GET,
+            &format!(
+                "/api/projects/{project_id}/revisions/diff?fromRevisionId={from_revision}&toRevisionId={from_revision}"
+            ),
+            Some(&cookie),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(identical["identical"], true);
+    assert_eq!(identical["additions"], 0);
+    assert_eq!(identical["deletions"], 0);
+    assert_eq!(identical["hunks"].as_array().unwrap().len(), 0);
+
+    // Missing query values are handled by the explicit static route; this
+    // must not fall through to /revisions/:revision_id.
+    let missing_query = request(
+        &service.app,
+        Method::GET,
+        &format!("/api/projects/{project_id}/revisions/diff"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(missing_query.status(), StatusCode::BAD_REQUEST);
+
+    let other = create_project(
+        &service.app,
+        &cookie,
+        "Other diff",
+        "surge",
+        "other.conf",
+        b"[General]\nother=value\n",
+    )
+    .await;
+    let other_revision = other["currentRevisionId"].as_str().unwrap();
+    let cross_project = request(
+        &service.app,
+        Method::GET,
+        &format!(
+            "/api/projects/{project_id}/revisions/diff?fromRevisionId={from_revision}&toRevisionId={other_revision}"
+        ),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(cross_project.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        response_json(cross_project).await["code"],
+        "revision.not_found"
+    );
+
+    let pointers: (String, String) =
+        sqlx::query_as("SELECT current_revision_id, served_revision_id FROM projects WHERE id = ?")
+            .bind(&project_id)
+            .fetch_one(&service.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(pointers.0, to_revision);
+    assert_eq!(pointers.1, to_revision);
+}
+
+#[tokio::test]
+async fn revision_diff_rejects_oversized_input_before_returning_blob_data() {
+    let service = TestService::new().await;
+    let (cookie, _) = login(&service.app, PASSWORD).await;
+    let project = create_project(
+        &service.app,
+        &cookie,
+        "Large diff",
+        "surge",
+        "large.conf",
+        b"[General]\nsmall=value\n",
+    )
+    .await;
+    let project_id = project["id"].as_str().unwrap().to_owned();
+    let first_revision = project["currentRevisionId"].as_str().unwrap().to_owned();
+    let huge = vec![b'x'; 8 * 1024 * 1024 + 1];
+    let huge_revision = "synthetic-large-revision";
+    let validation_json = r#"{"level":"basic","diagnostics":[]}"#;
+    sqlx::query(
+        "INSERT INTO config_revisions (id, project_id, parent_revision_id, revision_no, source_bytes, content_hash, validation_level, validation_result, validator_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+    )
+    .bind(huge_revision)
+    .bind(&project_id)
+    .bind(&first_revision)
+    .bind(2_i64)
+    .bind(&huge)
+    .bind(Sha256::digest(&huge).as_slice())
+    .bind("basic")
+    .bind(validation_json)
+    .bind(unix_timestamp())
+    .execute(&service.state.pool)
+    .await
+    .unwrap();
+
+    let before_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM config_revisions WHERE project_id = ?")
+            .bind(&project_id)
+            .fetch_one(&service.state.pool)
+            .await
+            .unwrap();
+    let response = request(
+        &service.app,
+        Method::GET,
+        &format!(
+            "/api/projects/{project_id}/revisions/diff?fromRevisionId={first_revision}&toRevisionId={huge_revision}"
+        ),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(
+        response_json(response).await["code"],
+        "revision.diff_too_large"
+    );
+    let after_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM config_revisions WHERE project_id = ?")
+            .bind(&project_id)
+            .fetch_one(&service.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(after_count, before_count);
+    let pointers: (String, String) =
+        sqlx::query_as("SELECT current_revision_id, served_revision_id FROM projects WHERE id = ?")
+            .bind(&project_id)
+            .fetch_one(&service.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(pointers.0, first_revision);
+    assert_eq!(pointers.1, first_revision);
+}
+
 fn hex_bytes(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }

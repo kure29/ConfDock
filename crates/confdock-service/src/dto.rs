@@ -116,6 +116,71 @@ pub struct RevisionPageDto {
     pub next_cursor: Option<String>,
 }
 
+/// The line-ending vocabulary used by the read-only revision diff.  A
+/// document-level value may be `mixed`; individual diff lines only ever use
+/// `none`, `lf`, or `crlf`.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RevisionDiffLineEnding {
+    None,
+    Lf,
+    CrLf,
+    Mixed,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RevisionDiffLineKind {
+    Context,
+    Delete,
+    Insert,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisionDiffLineDto {
+    pub kind: RevisionDiffLineKind,
+    pub old_line_no: Option<usize>,
+    pub new_line_no: Option<usize>,
+    /// Text without the line-ending bytes.  Whitespace is intentionally kept.
+    pub text: String,
+    pub line_ending: RevisionDiffLineEnding,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisionDiffHunkDto {
+    pub old_start: usize,
+    pub old_count: usize,
+    pub new_start: usize,
+    pub new_count: usize,
+    pub lines: Vec<RevisionDiffLineDto>,
+}
+
+/// Metadata for one side of a diff.  The regular revision summary is
+/// flattened so validation and parent information remain available without
+/// returning the source BLOB.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisionDiffDocumentDto {
+    #[serde(flatten)]
+    pub summary: RevisionSummaryDto,
+    pub has_utf8_bom: bool,
+    pub line_ending: RevisionDiffLineEnding,
+    pub trailing_newline: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisionDiffDto {
+    pub from: RevisionDiffDocumentDto,
+    pub to: RevisionDiffDocumentDto,
+    pub identical: bool,
+    pub additions: usize,
+    pub deletions: usize,
+    pub hunks: Vec<RevisionDiffHunkDto>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccessTokenDto {

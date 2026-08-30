@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
-import type { Revision, RevisionPage, RevisionSummary } from '../api'
+import type { Revision, RevisionDiff, RevisionPage, RevisionSummary } from '../api'
 import { decodeToEditor } from '../lib/bytes'
 import {
   REVISION_BYTES_LABEL,
   REVISION_CREATED_LABEL,
   REVISION_CURRENT_LABEL,
   REVISION_DETAIL_LABEL,
+  REVISION_DIFF_COMPARE,
+  REVISION_DIFF_INITIAL,
+  REVISION_DIFF_LOADING,
+  REVISION_DIFF_RETRY,
+  REVISION_DIFF_SHOW_SOURCE,
+  REVISION_DIFF_VIEW_MODE,
   REVISION_HASH_LABEL,
   REVISION_HISTORY_DESCRIPTION,
   REVISION_HISTORY_DETAIL_LOADING,
@@ -33,6 +39,7 @@ import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
 import { SourceEditor } from './SourceEditor'
+import { RevisionDiff as RevisionDiffPanel } from './RevisionDiff'
 import { ValidationLevelBadge } from './ValidationLevelBadge'
 import styles from './RevisionHistory.module.css'
 
@@ -53,8 +60,15 @@ export interface RevisionHistoryViewProps {
   nextCursor: string | null
   loadingMore: boolean
   loadMoreError: string | null
+  diff?: RevisionDiff | null
+  diffLoading?: boolean
+  diffError?: string | null
+  diffVisible?: boolean
   onSelect: (revisionId: string) => void
   onLoadMore: () => void
+  onCompare?: () => void
+  onRetryDiff?: () => void
+  onShowSource?: () => void
 }
 
 /**
@@ -208,8 +222,14 @@ export function RevisionHistory({
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
+  const [diff, setDiff] = useState<RevisionDiff | null>(null)
+  const [diffLoading, setDiffLoading] = useState(false)
+  const [diffError, setDiffError] = useState<string | null>(null)
+  const [diffVisible, setDiffVisible] = useState(false)
   const listSerial = useRef(0)
   const detailSerial = useRef(0)
+  const diffSerial = useRef(0)
+  const diffRequestKey = useRef<string | null>(null)
   const paginationRef = useRef<RevisionPaginationState>(createRevisionPaginationState())
   const loadingMoreRef = useRef(false)
   const [retry, setRetry] = useState(0)
@@ -218,6 +238,8 @@ export function RevisionHistory({
     const serial = listSerial.current + 1
     listSerial.current = serial
     detailSerial.current += 1
+    diffSerial.current += 1
+    diffRequestKey.current = null
     paginationRef.current = createRevisionPaginationState()
     loadingMoreRef.current = false
     setRevisions(null)
@@ -229,6 +251,10 @@ export function RevisionHistory({
     setDetail(null)
     setDetailError(null)
     setDetailLoading(false)
+    setDiff(null)
+    setDiffLoading(false)
+    setDiffError(null)
+    setDiffVisible(false)
     let live = true
     void (async () => {
       const result = await api.listRevisions(projectId, { limit: REVISION_PAGE_SIZE })
@@ -265,16 +291,57 @@ export function RevisionHistory({
   const select = useCallback(async (revisionId: string) => {
     const serial = detailSerial.current + 1
     detailSerial.current = serial
+    diffSerial.current += 1
+    diffRequestKey.current = null
     setSelectedId(revisionId)
     setDetail(null)
     setDetailError(null)
     setDetailLoading(true)
+    setDiff(null)
+    setDiffLoading(false)
+    setDiffError(null)
+    setDiffVisible(false)
     const result = await api.getRevision(projectId, revisionId)
     if (!isRevisionRequestCurrent(detailSerial.current, serial)) return
     setDetailLoading(false)
     if (result.ok) setDetail(result.value)
     else setDetailError(result.error.message)
   }, [projectId])
+
+  const compare = useCallback(async () => {
+    const selected = revisions?.find((revision) => revision.id === selectedId)
+    if (selected === undefined || selected.parentRevisionId === null) return
+    const key = `${selected.parentRevisionId}\u0000${selected.id}`
+    if (diffRequestKey.current === key) {
+      setDiffVisible(true)
+      return
+    }
+    if (
+      diff !== null &&
+      diff.from.id === selected.parentRevisionId &&
+      diff.to.id === selected.id
+    ) {
+      setDiffVisible(true)
+      return
+    }
+    const serial = diffSerial.current + 1
+    diffSerial.current = serial
+    diffRequestKey.current = key
+    setDiffVisible(true)
+    setDiff(null)
+    setDiffError(null)
+    setDiffLoading(true)
+    const result = await api.getRevisionDiff(projectId, selected.parentRevisionId, selected.id)
+    if (serial !== diffSerial.current || diffRequestKey.current !== key) return
+    diffRequestKey.current = null
+    setDiffLoading(false)
+    if (result.ok) setDiff(result.value)
+    else setDiffError(result.error.message)
+  }, [diff, projectId, revisions, selectedId])
+
+  const showSource = useCallback(() => {
+    setDiffVisible(false)
+  }, [])
 
   const loadMore = useCallback(async () => {
     const cursor = paginationRef.current.nextCursor
@@ -354,11 +421,18 @@ export function RevisionHistory({
       detail={detail}
       detailLoading={detailLoading}
       detailError={detailError}
+      diff={diff}
+      diffLoading={diffLoading}
+      diffError={diffError}
+      diffVisible={diffVisible}
       nextCursor={nextCursor}
       loadingMore={loadingMore}
       loadMoreError={loadMoreError}
       onSelect={(revisionId) => void select(revisionId)}
       onLoadMore={() => void loadMore()}
+      onCompare={() => void compare()}
+      onRetryDiff={() => void compare()}
+      onShowSource={showSource}
     />
   )
 }
@@ -374,11 +448,18 @@ export function RevisionHistoryView({
   detail,
   detailLoading,
   detailError,
+  diff = null,
+  diffLoading = false,
+  diffError = null,
+  diffVisible = false,
   nextCursor,
   loadingMore,
   loadMoreError,
   onSelect,
   onLoadMore,
+  onCompare = () => undefined,
+  onRetryDiff = () => undefined,
+  onShowSource = () => undefined,
 }: RevisionHistoryViewProps) {
   return (
     <div className={styles.history}>
@@ -467,7 +548,16 @@ export function RevisionHistoryView({
           ) : detail === null ? (
             <p className={styles.message}>{REVISION_HISTORY_SELECT}</p>
           ) : (
-            <RevisionDetail revision={detail} />
+            <RevisionDetail
+              revision={detail}
+              diff={diff}
+              diffLoading={diffLoading}
+              diffError={diffError}
+              diffVisible={diffVisible}
+              onCompare={onCompare}
+              onRetryDiff={onRetryDiff}
+              onShowSource={onShowSource}
+            />
           )}
         </section>
       </div>
@@ -477,8 +567,22 @@ export function RevisionHistoryView({
 
 function RevisionDetail({
   revision,
+  diff,
+  diffLoading,
+  diffError,
+  diffVisible,
+  onCompare,
+  onRetryDiff,
+  onShowSource,
 }: {
   revision: Revision
+  diff: RevisionDiff | null
+  diffLoading: boolean
+  diffError: string | null
+  diffVisible: boolean
+  onCompare: () => void
+  onRetryDiff: () => void
+  onShowSource: () => void
 }) {
   const decoded = useMemo(() => decodeToEditor(revision.source), [revision.source])
   return (
@@ -522,18 +626,54 @@ function RevisionDetail({
       </dl>
 
       <p className={styles.sourceNotice}>{REVISION_HISTORY_SOURCE_NOTICE}</p>
-      <Panel
-        title={`${REVISION_NUMBER_PREFIX}${revision.revisionNo}${REVISION_SOURCE_TITLE_SUFFIX}`}
-        flush
-      >
-        <SourceEditor
-          text={decoded.text}
-          onChange={() => undefined}
-          bytes={revision.source}
-          info={decoded.info}
-          readOnly
-        />
-      </Panel>
+      <div className={styles.detailMode} role="group" aria-label={REVISION_DIFF_VIEW_MODE}>
+        <Button
+          variant={diffVisible ? 'ghost' : 'secondary'}
+          onClick={onShowSource}
+          aria-pressed={!diffVisible}
+        >
+          {REVISION_DIFF_SHOW_SOURCE}
+        </Button>
+        {revision.parentRevisionId !== null ? (
+          <Button
+            variant={diffVisible ? 'secondary' : 'ghost'}
+            onClick={onCompare}
+            aria-pressed={diffVisible}
+          >
+            {REVISION_DIFF_COMPARE}
+          </Button>
+        ) : (
+          <span className={styles.initialNotice}>{REVISION_DIFF_INITIAL}</span>
+        )}
+      </div>
+
+      {diffVisible && revision.parentRevisionId !== null ? (
+        diffLoading ? (
+          <p className={styles.message} role="status">{REVISION_DIFF_LOADING}</p>
+        ) : diffError !== null ? (
+          <div className={styles.messageBlock} role="alert">
+            <p className={styles.message}>{diffError}</p>
+            <Button variant="ghost" onClick={onRetryDiff}>{REVISION_DIFF_RETRY}</Button>
+          </div>
+        ) : diff !== null ? (
+          <RevisionDiffPanel diff={diff} />
+        ) : (
+          <p className={styles.message} role="status">{REVISION_DIFF_LOADING}</p>
+        )
+      ) : (
+        <Panel
+          title={`${REVISION_NUMBER_PREFIX}${revision.revisionNo}${REVISION_SOURCE_TITLE_SUFFIX}`}
+          flush
+        >
+          <SourceEditor
+            text={decoded.text}
+            onChange={() => undefined}
+            bytes={revision.source}
+            info={decoded.info}
+            readOnly
+          />
+        </Panel>
+      )}
     </div>
   )
 }
