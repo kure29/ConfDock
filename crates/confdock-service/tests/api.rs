@@ -119,6 +119,7 @@ async fn login(app: &Router, password: &str) -> (String, Value) {
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
     let cookie = response
         .headers()
         .get(header::SET_COOKIE)
@@ -168,6 +169,7 @@ async fn health_service_login_cookie_session_and_logout_contract() {
 
     let info = request(&service.app, Method::GET, "/api/service", None, None).await;
     assert_eq!(info.status(), StatusCode::OK);
+    assert_eq!(info.headers()[header::CACHE_CONTROL], "no-store");
     assert_eq!(
         response_json(info).await,
         json!({
@@ -220,7 +222,7 @@ async fn health_service_login_cookie_session_and_logout_contract() {
         .to_owned();
     assert!(set_cookie.contains("HttpOnly"));
     assert!(set_cookie.contains("SameSite=Strict"));
-    assert!(set_cookie.contains("Path=/"));
+    assert!(set_cookie.contains("Path=/api"));
     assert!(set_cookie.contains("Max-Age=3600"));
     assert!(!set_cookie.contains("Domain="));
     assert!(!set_cookie.contains("Secure"));
@@ -254,6 +256,7 @@ async fn health_service_login_cookie_session_and_logout_contract() {
     )
     .await;
     assert_eq!(logout.status(), StatusCode::NO_CONTENT);
+    assert_eq!(logout.headers()[header::CACHE_CONTROL], "no-store");
     assert!(logout
         .headers()
         .get(header::SET_COOKIE)
@@ -261,6 +264,10 @@ async fn health_service_login_cookie_session_and_logout_contract() {
         .to_str()
         .unwrap()
         .contains("Max-Age=0"));
+    assert!(logout.headers()[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .contains("Path=/api"));
     assert_eq!(
         request(
             &service.app,
@@ -272,6 +279,38 @@ async fn health_service_login_cookie_session_and_logout_contract() {
         .await
         .status(),
         StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn management_and_subscription_errors_are_not_cached() {
+    let service = TestService::new().await;
+
+    let unauthorized = request(&service.app, Method::GET, "/api/projects", None, None).await;
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(unauthorized.headers()[header::CACHE_CONTROL], "no-store");
+
+    let invalid_login = request(
+        &service.app,
+        Method::POST,
+        "/api/session",
+        None,
+        Some(json!({ "password": "wrong password" })),
+    )
+    .await;
+    assert_eq!(invalid_login.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(invalid_login.headers()[header::CACHE_CONTROL], "no-store");
+
+    let unknown_api = request(&service.app, Method::GET, "/api/does-not-exist", None, None).await;
+    assert_eq!(unknown_api.status(), StatusCode::NOT_FOUND);
+    assert_eq!(unknown_api.headers()[header::CACHE_CONTROL], "no-store");
+
+    let unknown_subscription =
+        request(&service.app, Method::GET, "/sub/not-a-token", None, None).await;
+    assert_eq!(unknown_subscription.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        unknown_subscription.headers()[header::CACHE_CONTROL],
+        "no-store"
     );
 }
 
@@ -301,6 +340,123 @@ async fn first_start_requires_a_valid_bootstrap_password() {
         Err(error) => error,
     };
     assert!(short_error.to_string().contains("8 to 1024"));
+}
+
+#[tokio::test]
+async fn project_scoped_token_and_rename_operations_are_consistent_with_deletion() {
+    let service = TestService::new().await;
+    let (cookie, _) = login(&service.app, PASSWORD).await;
+
+    let project = create_project(
+        &service.app,
+        &cookie,
+        "Race",
+        "sing-box",
+        "config.json",
+        b"{}",
+    )
+    .await;
+    let project_id = project["id"].as_str().unwrap().to_owned();
+    let project_uri = format!("/api/projects/{project_id}");
+
+    let rename_request = request(
+        &service.app,
+        Method::PATCH,
+        &project_uri,
+        Some(&cookie),
+        Some(json!({ "name": "Renamed" })),
+    );
+    let delete_request = request(
+        &service.app,
+        Method::DELETE,
+        &project_uri,
+        Some(&cookie),
+        None,
+    );
+    let (renamed, deleted) = tokio::join!(rename_request, delete_request);
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    assert!(matches!(
+        renamed.status(),
+        StatusCode::OK | StatusCode::NOT_FOUND
+    ));
+
+    let project = create_project(
+        &service.app,
+        &cookie,
+        "Token race",
+        "sing-box",
+        "config.json",
+        b"{}",
+    )
+    .await;
+    let project_id = project["id"].as_str().unwrap().to_owned();
+    let token_collection_uri = format!("/api/projects/{project_id}/tokens");
+    let project_uri = format!("/api/projects/{project_id}");
+    let create_request = request(
+        &service.app,
+        Method::POST,
+        &token_collection_uri,
+        Some(&cookie),
+        None,
+    );
+    let delete_request = request(
+        &service.app,
+        Method::DELETE,
+        &project_uri,
+        Some(&cookie),
+        None,
+    );
+    let (created, deleted) = tokio::join!(create_request, delete_request);
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    assert!(matches!(
+        created.status(),
+        StatusCode::CREATED | StatusCode::NOT_FOUND
+    ));
+
+    let project = create_project(
+        &service.app,
+        &cookie,
+        "Revoke race",
+        "sing-box",
+        "config.json",
+        b"{}",
+    )
+    .await;
+    let project_id = project["id"].as_str().unwrap().to_owned();
+    let token = response_json(
+        request(
+            &service.app,
+            Method::POST,
+            &format!("/api/projects/{project_id}/tokens"),
+            Some(&cookie),
+            None,
+        )
+        .await,
+    )
+    .await;
+    let token_id = token["token"]["id"].as_str().unwrap().to_owned();
+    let revoke_uri = format!("/api/projects/{project_id}/tokens/{token_id}");
+    let project_uri = format!("/api/projects/{project_id}");
+    let revoke_request = request(
+        &service.app,
+        Method::DELETE,
+        &revoke_uri,
+        Some(&cookie),
+        None,
+    );
+    let delete_request = request(
+        &service.app,
+        Method::DELETE,
+        &project_uri,
+        Some(&cookie),
+        None,
+    );
+    let (revoked, deleted) = tokio::join!(revoke_request, delete_request);
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    assert!(matches!(
+        revoked.status(),
+        StatusCode::NO_CONTENT | StatusCode::NOT_FOUND
+    ));
 }
 
 #[tokio::test]

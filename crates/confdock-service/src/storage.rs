@@ -16,6 +16,10 @@ const FULL_PROJECT_QUERY: &str =
     "SELECT p.id, p.name, p.target_id, p.file_name, p.current_revision_id, \
      p.served_revision_id, p.last_validation_result, p.updated_at, r.source_bytes \
      FROM projects p JOIN config_revisions r ON r.id = p.served_revision_id WHERE p.id = ?";
+const SUMMARY_PROJECT_QUERY: &str =
+    "SELECT p.id, p.name, p.target_id, p.file_name, p.last_validation_result, \
+     p.updated_at, length(r.source_bytes) AS byte_length \
+     FROM projects p JOIN config_revisions r ON r.id = p.served_revision_id WHERE p.id = ?";
 
 pub async fn list_projects(pool: &SqlitePool) -> Result<Vec<ProjectSummaryDto>, ApiError> {
     let rows = sqlx::query(
@@ -262,25 +266,31 @@ pub async fn rename_project(
     id: &str,
     name: &str,
 ) -> Result<ProjectSummaryDto, ApiError> {
+    let mut connection = begin_immediate(pool).await?;
+    let result = rename_project_inner(&mut connection, id, name).await;
+    finish_transaction(connection, result).await
+}
+
+async fn rename_project_inner(
+    connection: &mut PoolConnection<Sqlite>,
+    id: &str,
+    name: &str,
+) -> Result<ProjectSummaryDto, ApiError> {
     let result = sqlx::query("UPDATE projects SET name = ?, updated_at = ? WHERE id = ?")
         .bind(name)
         .bind(unix_timestamp())
         .bind(id)
-        .execute(pool)
+        .execute(&mut **connection)
         .await
         .map_err(|_| ApiError::internal())?;
     if result.rows_affected() == 0 {
         return Err(ApiError::not_found("project.not_found", "配置不存在"));
     }
-    let row = sqlx::query(
-        "SELECT p.id, p.name, p.target_id, p.file_name, p.last_validation_result, \
-         p.updated_at, length(r.source_bytes) AS byte_length \
-         FROM projects p JOIN config_revisions r ON r.id = p.served_revision_id WHERE p.id = ?",
-    )
-    .bind(id)
-    .fetch_one(pool)
-    .await
-    .map_err(|_| ApiError::internal())?;
+    let row = sqlx::query(SUMMARY_PROJECT_QUERY)
+        .bind(id)
+        .fetch_one(&mut **connection)
+        .await
+        .map_err(|_| ApiError::internal())?;
     summary_from_row(&row)
 }
 
@@ -317,7 +327,17 @@ pub async fn create_token(
     project_id: &str,
     public_url: &str,
 ) -> Result<CreatedAccessTokenDto, ApiError> {
-    ensure_project(pool, project_id).await?;
+    let mut connection = begin_immediate(pool).await?;
+    let result = create_token_inner(&mut connection, project_id, public_url).await;
+    finish_transaction(connection, result).await
+}
+
+async fn create_token_inner(
+    connection: &mut PoolConnection<Sqlite>,
+    project_id: &str,
+    public_url: &str,
+) -> Result<CreatedAccessTokenDto, ApiError> {
+    ensure_project_connection(connection, project_id).await?;
     let plaintext = random_token();
     let hash = token_hash(&plaintext);
     let now = unix_timestamp();
@@ -345,7 +365,7 @@ pub async fn create_token(
     .bind(&token.prefix)
     .bind(&token.suffix)
     .bind(now)
-    .execute(pool)
+    .execute(&mut **connection)
     .await
     .map_err(|_| ApiError::internal())?;
     Ok(CreatedAccessTokenDto {
@@ -360,7 +380,17 @@ pub async fn revoke_token(
     project_id: &str,
     token_id: &str,
 ) -> Result<(), ApiError> {
-    ensure_project(pool, project_id).await?;
+    let mut connection = begin_immediate(pool).await?;
+    let result = revoke_token_inner(&mut connection, project_id, token_id).await;
+    finish_transaction(connection, result).await
+}
+
+async fn revoke_token_inner(
+    connection: &mut PoolConnection<Sqlite>,
+    project_id: &str,
+    token_id: &str,
+) -> Result<(), ApiError> {
+    ensure_project_connection(connection, project_id).await?;
     let result = sqlx::query(
         "UPDATE access_tokens SET revoked_at = ? \
          WHERE id = ? AND project_id = ? AND revoked_at IS NULL",
@@ -368,7 +398,7 @@ pub async fn revoke_token(
     .bind(unix_timestamp())
     .bind(token_id)
     .bind(project_id)
-    .execute(pool)
+    .execute(&mut **connection)
     .await
     .map_err(|_| ApiError::internal())?;
     if result.rows_affected() == 0 {
@@ -418,6 +448,22 @@ async fn ensure_project(pool: &SqlitePool, id: &str) -> Result<(), ApiError> {
     let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?)")
         .bind(id)
         .fetch_one(pool)
+        .await
+        .map_err(|_| ApiError::internal())?;
+    if exists {
+        Ok(())
+    } else {
+        Err(ApiError::not_found("project.not_found", "配置不存在"))
+    }
+}
+
+async fn ensure_project_connection(
+    connection: &mut PoolConnection<Sqlite>,
+    id: &str,
+) -> Result<(), ApiError> {
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?)")
+        .bind(id)
+        .fetch_one(&mut **connection)
         .await
         .map_err(|_| ApiError::internal())?;
     if exists {

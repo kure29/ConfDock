@@ -58,10 +58,12 @@ impl AppState {
             .connect_with(options)
             .await
             .map_err(|_| StartError::DatabaseOpen)?;
+        config.secure_database_permissions()?;
         sqlx::migrate!("./migrations")
             .run(&pool)
             .await
             .map_err(|_| StartError::Migration)?;
+        config.secure_database_permissions()?;
 
         let bootstrap_password = config.bootstrap_password.take();
         let created = bootstrap_admin(&pool, bootstrap_password).await?;

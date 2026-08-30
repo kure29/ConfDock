@@ -10,16 +10,21 @@ use rand_core::{OsRng, RngCore};
 use sha2::{Digest, Sha256};
 use sqlx::{Row, SqlitePool};
 use thiserror::Error;
-use tokio::{sync::Mutex, time::Instant};
+use tokio::{
+    sync::{Mutex, OwnedSemaphorePermit, Semaphore},
+    time::Instant,
+};
 use uuid::Uuid;
 
 use crate::config::{ServiceConfig, MAX_PASSWORD_BYTES};
 
 pub const SESSION_COOKIE: &str = "confdock_session";
+pub const SESSION_COOKIE_PATH: &str = "/api";
 const PASSWORD_MIN_BYTES: usize = 8;
 const ARGON2_MEMORY_KIB: u32 = 19 * 1024;
 const ARGON2_ITERATIONS: u32 = 2;
 const ARGON2_PARALLELISM: u32 = 1;
+const PASSWORD_HASH_SLOTS: usize = 2;
 
 #[derive(Debug, Error)]
 pub enum AuthError {
@@ -41,9 +46,19 @@ pub struct SessionIdentity {
     pub created_at: i64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct LoginThrottle {
     inner: Mutex<LoginThrottleState>,
+    password_hash_slots: std::sync::Arc<Semaphore>,
+}
+
+impl Default for LoginThrottle {
+    fn default() -> Self {
+        Self {
+            inner: Mutex::new(LoginThrottleState::default()),
+            password_hash_slots: std::sync::Arc::new(Semaphore::new(PASSWORD_HASH_SLOTS)),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -74,6 +89,17 @@ impl LoginThrottle {
 
     pub async fn reset(&self) {
         *self.inner.lock().await = LoginThrottleState::default();
+    }
+
+    /// Bound the number of expensive Argon2 operations that can run at once.
+    /// The semaphore is never closed during the service lifetime, so acquiring
+    /// a permit cannot fail under normal operation.
+    pub async fn password_hash_slot(&self) -> OwnedSemaphorePermit {
+        self.password_hash_slots
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("password hash semaphore remains open")
     }
 }
 
@@ -253,7 +279,7 @@ pub fn cookie_token(headers: &HeaderMap) -> Option<&str> {
 pub fn session_cookie(token: &str, config: &ServiceConfig) -> HeaderValue {
     let secure = if config.cookie_secure { "; Secure" } else { "" };
     HeaderValue::from_str(&format!(
-        "{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}{}",
+        "{SESSION_COOKIE}={token}; Path={SESSION_COOKIE_PATH}; HttpOnly; SameSite=Strict; Max-Age={}{}",
         config.session_ttl_seconds, secure
     ))
     .expect("generated cookie contains only header-safe characters")
@@ -262,7 +288,7 @@ pub fn session_cookie(token: &str, config: &ServiceConfig) -> HeaderValue {
 pub fn clear_session_cookie(config: &ServiceConfig) -> HeaderValue {
     let secure = if config.cookie_secure { "; Secure" } else { "" };
     HeaderValue::from_str(&format!(
-        "{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0{secure}"
+        "{SESSION_COOKIE}=; Path={SESSION_COOKIE_PATH}; HttpOnly; SameSite=Strict; Max-Age=0{secure}"
     ))
     .expect("static cookie is header-safe")
 }
@@ -317,6 +343,38 @@ mod tests {
         assert!(cookie.contains("; Secure"));
         assert!(cookie.contains("HttpOnly"));
         assert!(cookie.contains("SameSite=Strict"));
+        assert!(cookie.contains("Path=/api"));
         assert!(!cookie.contains("Domain="));
+    }
+
+    #[tokio::test]
+    async fn password_hash_slots_bound_concurrent_work() {
+        let throttle = std::sync::Arc::new(LoginThrottle::default());
+        let first = throttle.password_hash_slot().await;
+        let second = throttle.password_hash_slot().await;
+        assert_eq!(throttle.password_hash_slots.available_permits(), 0);
+
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let waiting = {
+            let throttle = throttle.clone();
+            tokio::spawn(async move {
+                let _permit = throttle.password_hash_slot().await;
+                let _ = ready_tx.send(());
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            })
+        };
+        let mut ready_rx = ready_rx;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut ready_rx)
+                .await
+                .is_err()
+        );
+
+        drop(first);
+        assert!(tokio::time::timeout(Duration::from_millis(250), ready_rx)
+            .await
+            .is_ok());
+        drop(second);
+        waiting.await.unwrap();
     }
 }

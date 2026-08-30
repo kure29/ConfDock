@@ -61,9 +61,9 @@ the Settings screen or `POST /api/admin/password`.
 | `CONFDOCK_DATABASE_URL` | `sqlite://data/confdock.db` | SQLite database URL |
 | `CONFDOCK_PUBLIC_URL` | `http://127.0.0.1:8787` | Stable URL origin/base |
 | `CONFDOCK_BOOTSTRAP_PASSWORD` | none | First-run administrator password only |
-| `CONFDOCK_SESSION_TTL_SECONDS` | `604800` | Session lifetime |
+| `CONFDOCK_SESSION_TTL_SECONDS` | `604800` | Session lifetime (maximum `31536000` seconds) |
 | `CONFDOCK_COOKIE_SECURE` | `false` | Add `Secure` to the session cookie |
-| `CONFDOCK_MAX_CONFIG_BYTES` | `8388608` | Maximum decoded configuration size |
+| `CONFDOCK_MAX_CONFIG_BYTES` | `8388608` | Maximum decoded configuration size (maximum `67108864` bytes) |
 | `RUST_LOG` | `info` | Rust log filter |
 
 Copy `.env.example` as a reference, but do not commit a real `.env`, password,
@@ -74,8 +74,15 @@ token, or database.
 - Passwords use Argon2id with a random salt; password plaintext is never stored.
 - Session and stable tokens contain 32 CSPRNG bytes. Cookies/creation responses
   receive plaintext, while SQLite stores only SHA-256 hashes.
-- The session cookie is `HttpOnly`, `SameSite=Strict`, `Path=/`, has no
+- The session cookie is `HttpOnly`, `SameSite=Strict`, `Path=/api`, has no
   `Domain`, and is `Secure` when configured for HTTPS.
+- Management and subscription responses send `Cache-Control: no-store`; the
+  browser HTTP client also opts out of its response cache.
+- The SQLite database file and existing `-wal` / `-shm` sidecars are restricted
+  to owner-only `0600` permissions on Unix. Symlinked or non-regular database
+  files are rejected at startup.
+- Session lifetimes are limited to one year and decoded configuration bytes to
+  64 MiB to bound request and password-work resource use.
 - Project creation and saves validate native bytes again in `confdock-core`.
 - Revisions are immutable BLOB rows with a SHA-256 content hash. A successful
   save advances `current_revision_id` and `served_revision_id` together.
@@ -88,6 +95,10 @@ token, or database.
 SQLite uses foreign keys, WAL, and a busy timeout. To back up the database,
 stop writes first or use SQLite's online backup facilities; copying only the
 main file while WAL writes are active is unsafe.
+
+When binding beyond loopback, put the service behind HTTPS and set
+`CONFDOCK_COOKIE_SECURE=true`; the service does not provide TLS termination or
+network-level rate limiting by itself.
 
 ## Verification
 

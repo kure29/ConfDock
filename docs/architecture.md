@@ -174,6 +174,10 @@ SQLite migrations run automatically at startup and create:
   usage timestamps, and revocation state.
 
 Foreign keys, WAL, and a busy timeout are enabled on every SQLite connection.
+On Unix, the database file and existing WAL/SHM sidecars are kept as regular,
+non-symlink files with owner-only `0600` permissions. Startup rejects an unsafe
+existing database path. Service configuration caps session lifetime at one year
+and decoded configuration bytes at 64 MiB.
 Deleting a project cascades to its revisions and access tokens. Revision rows
 cannot be updated. To back up a live database, stop writes or use SQLite's
 online backup facilities instead of copying only the main file while WAL is
@@ -203,11 +207,18 @@ starts never overwrite the database password from the environment. A password
 change keeps the current session and revokes every other session.
 
 Session plaintext is a URL-safe, unpadded encoding of 32 CSPRNG bytes; only its
-SHA-256 hash is stored. The cookie is `HttpOnly`, `SameSite=Strict`, `Path=/`,
+SHA-256 hash is stored. The cookie is `HttpOnly`, `SameSite=Strict`, `Path=/api`,
 has no `Domain`, and gains `Secure` when `CONFDOCK_COOKIE_SECURE=true`. Expired
 sessions are unusable and cleaned at startup or authentication time. Failed
 logins receive the same `auth.invalid_password` response and increasing short
-backoff.
+backoff. At most two Argon2 operations run concurrently per service process.
+
+Management and subscription responses carry `Cache-Control: no-store`,
+including authentication and error responses, so credentials and configuration
+metadata are not retained by browser or intermediary caches. Deployments that
+listen beyond loopback still require HTTPS and `CONFDOCK_COOKIE_SECURE=true`;
+TLS termination, IP rate limiting, and request filtering remain the proxy's
+responsibility.
 
 ### Stable URL security
 

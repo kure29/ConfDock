@@ -162,10 +162,13 @@ Session Token 永远不进 URL。Stable Token 只用于公开的 `/sub/:token`�
 
 ## Service 边界
 
-管理员密码使用 Argon2id；Session Cookie 为 `HttpOnly`、`SameSite=Strict`、`Path=/`，
+管理员密码使用 Argon2id；Session Cookie 为 `HttpOnly`、`SameSite=Strict`、`Path=/api`，
 HTTPS 部署通过 `CONFDOCK_COOKIE_SECURE=true` 增加 `Secure`。Session 和 Stable Token
 都是至少 32 字节 CSPRNG 数据，SQLite 只存 SHA-256 Hash。Stable Token 明文和完整 URL
 只在创建响应中出现一次。
+管理 API 和订阅响应都带 `Cache-Control: no-store`，HTTP 客户端也显式使用
+`cache: 'no-store'`。Session 最长一年，解码后的配置最多 64 MiB；Unix 上 SQLite
+主文件及已有 WAL/SHM sidecar 使用 owner-only `0600` 权限，符号链接路径会被拒绝。
 
 配置在管理 JSON 中使用标准 Base64；`GET /sub/:token` 直接返回 served Revision 的 SQLite
 BLOB，不转字符串、不重新序列化、不追加换行。保存使用 `expectedRevisionId` 防并发覆盖，
