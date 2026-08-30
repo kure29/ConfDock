@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/confdock-core",
+    "crates/confdock-service",
     "crates/confdock-validator",
     "crates/confdock-wasm",
 ]

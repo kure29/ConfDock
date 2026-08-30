@@ -8,8 +8,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    // Slice 1: point this at the local Axum service so `api/httpApi.ts` works
-    // without CORS. Until then `api/index.ts` selects the mock implementation.
+    // Keep development same-origin: session cookies never need CORS exceptions.
     proxy: {
       '/api': { target: 'http://127.0.0.1:8787', changeOrigin: true },
       '/sub': { target: 'http://127.0.0.1:8787', changeOrigin: true },

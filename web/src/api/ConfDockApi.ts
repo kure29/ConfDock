@@ -19,8 +19,8 @@ import type {
  * returns `Result<T, ApiError>`; no network or authorization error is converted
  * into an empty collection or `null`.
  *
- * `mockApi.ts` implements this against `localStorage` today; `httpApi.ts`
- * implements it against the REST shape documented in `web/README.md`.
+ * `httpApi.ts` implements it against the Axum REST boundary documented in
+ * `web/README.md`.
  */
 export interface ConfDockApi {
   // -- session ------------------------------------------------------------

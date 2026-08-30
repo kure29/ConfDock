@@ -154,11 +154,7 @@ export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
             </div>
             <div className={styles.infoRow}>
               <dt className={styles.term}>后端</dt>
-              <dd className={styles.value}>
-                {service?.api === 'http'
-                  ? 'Axum HTTP 服务'
-                  : 'localStorage —— 数据只在这台浏览器里'}
-              </dd>
+              <dd className={styles.value}>{service ? 'Axum HTTP 服务' : '—'}</dd>
             </div>
             <div className={styles.infoRow}>
               <dt className={styles.term}>订阅前缀</dt>
