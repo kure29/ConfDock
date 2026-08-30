@@ -8,4 +8,6 @@ pub mod native;
 pub mod traits;
 
 pub use native::NativeProcessPolicy;
-pub use traits::{NativeValidationContext, NativeValidationResult, NativeValidator};
+pub use traits::{
+    NativeValidationContext, NativeValidationResult, NativeValidationStatus, NativeValidator,
+};

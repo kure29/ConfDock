@@ -1,7 +1,9 @@
 //! Optional target schema metadata. Schemas describe editable paths but never
 //! replace the native document or dictate full-file serialization.
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+use crate::path::ConfigPath;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SchemaValueType {
     String,
     Integer,
@@ -9,12 +11,13 @@ pub enum SchemaValueType {
     Number,
     Object,
     Array,
+    Null,
     Any,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SchemaField {
-    pub path: String,
+    pub path: ConfigPath,
     pub value_type: SchemaValueType,
     pub description: String,
 }
@@ -29,7 +32,7 @@ impl TargetSchema {
         Self { fields }
     }
 
-    pub fn field(&self, path: &str) -> Option<&SchemaField> {
-        self.fields.iter().find(|field| field.path == path)
+    pub fn field(&self, path: &ConfigPath) -> Option<&SchemaField> {
+        self.fields.iter().find(|field| &field.path == path)
     }
 }

@@ -1,6 +1,9 @@
-use crate::diagnostics::{Diagnostic, ValidationLevel, ValidationResult};
+use crate::diagnostics::Diagnostic;
 use crate::document::{NativeDocument, ParsedDocument, SourceField, SourceSpan};
-use crate::patch::{apply_span_patch, EditError, StructuredEdit};
+use crate::patch::EditError;
+use crate::path::ConfigPath;
+
+use serde_json::Value;
 
 use super::{DetectionConfidence, DetectionResult, ParseError, TargetId};
 
@@ -31,6 +34,21 @@ pub(crate) fn parse_json_document(
     } else {
         0
     };
+    let value: Value =
+        serde_json::from_slice(&document.bytes()[base_offset..]).map_err(|error| {
+            ParseError::new(vec![Diagnostic::error(
+                "json.syntax",
+                format!("invalid {target} JSON: {error}"),
+                None,
+            )])
+        })?;
+    if !value.is_object() {
+        return Err(ParseError::new(vec![Diagnostic::error(
+            "json.root_object",
+            format!("{target} configuration root must be a JSON object"),
+            Some(SourceSpan::new(base_offset, source.len())),
+        )]));
+    }
     let mut scanner = Scanner {
         bytes: &document.bytes()[base_offset..],
         cursor: 0,
@@ -67,7 +85,7 @@ pub(crate) fn parse_json_document(
 
 pub(crate) fn find_json_field(
     source: &[u8],
-    path: &str,
+    path: &ConfigPath,
     target: TargetId,
 ) -> Result<SourceSpan, EditError> {
     let parsed = parse_json_document(source, target).map_err(|error| {
@@ -82,28 +100,17 @@ pub(crate) fn find_json_field(
     let matches: Vec<_> = parsed
         .fields
         .iter()
-        .filter(|field| field.path == path)
+        .filter(|field| &field.path == path)
         .collect();
     match matches.as_slice() {
-        [] => Err(EditError::FieldNotFound(path.to_owned())),
-        [_one, _two, ..] => Err(EditError::AmbiguousField(path.to_owned())),
+        [] => Err(EditError::FieldNotFound(path.to_string())),
+        [_one, _two, ..] => Err(EditError::AmbiguousField(path.to_string())),
         [one] => Ok(one.value_span),
     }
 }
 
 pub(crate) fn validate_json_literal(literal: &str) -> bool {
-    let bytes = literal.as_bytes();
-    let mut scanner = Scanner {
-        bytes,
-        cursor: 0,
-        base_offset: 0,
-        fields: Vec::new(),
-    };
-    scanner.skip_ws();
-    scanner.parse_value(String::new()).is_ok() && {
-        scanner.skip_ws();
-        scanner.cursor == bytes.len()
-    }
+    serde_json::from_str::<Value>(literal).is_ok()
 }
 
 pub(crate) fn json_detection(source: &[u8], target: TargetId) -> DetectionResult {
@@ -125,13 +132,6 @@ pub(crate) fn json_detection(source: &[u8], target: TargetId) -> DetectionResult
     }
 }
 
-pub(crate) fn json_validation(source: &[u8], target: TargetId) -> ValidationResult {
-    match parse_json_document(source, target) {
-        Ok(_) => ValidationResult::valid(ValidationLevel::Static),
-        Err(error) => ValidationResult::new(ValidationLevel::ParseOnly, error.diagnostics),
-    }
-}
-
 impl<'a> Scanner<'a> {
     fn skip_ws(&mut self) {
         while self.cursor < self.bytes.len() && self.bytes[self.cursor].is_ascii_whitespace() {
@@ -143,8 +143,8 @@ impl<'a> Scanner<'a> {
         self.skip_ws();
         let start = self.cursor;
         let kind = match self.bytes.get(self.cursor).copied() {
-            Some(b'{') => self.parse_object(path)?,
-            Some(b'[') => self.parse_array(path)?,
+            Some(b'{') => self.parse_object(path.clone())?,
+            Some(b'[') => self.parse_array(path.clone())?,
             Some(b'"') => {
                 self.parse_string()?;
                 JsonValueKind::Scalar
@@ -170,7 +170,7 @@ impl<'a> Scanner<'a> {
         };
         if !path.is_empty() {
             self.fields.push(SourceField {
-                path,
+                path: ConfigPath::new(path).expect("scanner produces valid JSON Pointers"),
                 value_span: SourceSpan::new(
                     self.base_offset + start,
                     self.base_offset + self.cursor,
@@ -196,11 +196,7 @@ impl<'a> Scanner<'a> {
             if !self.consume_if(b':') {
                 return Err("expected ':' after object key".into());
             }
-            let child_path = if path.is_empty() {
-                key
-            } else {
-                format!("{path}.{key}")
-            };
+            let child_path = append_pointer(&path, &key);
             self.parse_value(child_path)?;
             self.skip_ws();
             if self.consume_if(b'}') {
@@ -220,11 +216,7 @@ impl<'a> Scanner<'a> {
         }
         let mut index = 0usize;
         loop {
-            let child_path = if path.is_empty() {
-                index.to_string()
-            } else {
-                format!("{path}.{index}")
-            };
+            let child_path = append_pointer(&path, &index.to_string());
             self.parse_value(child_path)?;
             index += 1;
             self.skip_ws();
@@ -240,10 +232,8 @@ impl<'a> Scanner<'a> {
     fn parse_string_value(&mut self) -> Result<String, String> {
         let start = self.cursor;
         self.parse_string()?;
-        let raw = &self.bytes[start + 1..self.cursor - 1];
-        // Object keys used for paths are ASCII in all built-in targets. Keep
-        // escaped keys deterministic without pulling in a JSON dependency.
-        String::from_utf8(raw.to_vec()).map_err(|_| "object key is not UTF-8".into())
+        serde_json::from_slice(&self.bytes[start..self.cursor])
+            .map_err(|error| format!("invalid JSON object key: {error}"))
     }
 
     fn parse_string(&mut self) -> Result<(), String> {
@@ -334,4 +324,9 @@ impl<'a> Scanner<'a> {
         }
         self.cursor - start
     }
+}
+
+fn append_pointer(path: &str, segment: &str) -> String {
+    let escaped = segment.replace('~', "~0").replace('/', "~1");
+    format!("{path}/{escaped}")
 }

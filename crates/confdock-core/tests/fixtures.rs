@@ -1,127 +1,438 @@
+use confdock_core::targets::mihomo::MihomoAdapter;
 use confdock_core::{
-    ConfigAdapter, DetectionConfidence, DiagnosticSeverity, EditError, LineEnding, NativeDocument,
-    SourceEncoding, StructuredEdit, TargetRegistry, ValidationLevel,
+    ConfigPath, DetectionConfidence, DiagnosticSeverity, EditError, LineEnding, NativeDocument,
+    RegistryError, SchemaValueType, SourceEncoding, StructuredEdit, StructuredEditOperation,
+    StructuredEditScope, TargetRegistry, ValidationLevel,
 };
 
-const MIHOMO: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/mihomo/config.yaml"));
-const SINGBOX: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/singbox/config.json"));
-const SURGE: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/surge/config.conf"));
-const LOON: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/loon/config.conf"));
-const QX: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/quantumult_x/config.conf"));
-const SHADOWROCKET: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/shadowrocket/config.conf"));
+const MIHOMO: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/mihomo/config.yaml"
+));
+const SINGBOX: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/singbox/config.json"
+));
+const SURGE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/surge/config.conf"
+));
+const LOON: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/loon/config.conf"
+));
+const QX: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/quantumult_x/config.conf"
+));
+const SHADOWROCKET: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/shadowrocket/config.conf"
+));
+
+fn edit(path: &str, replacement: &str) -> StructuredEdit {
+    StructuredEdit::new(ConfigPath::new(path).expect("test path"), replacement)
+}
 
 #[test]
 fn all_fixtures_round_trip_byte_for_byte() {
     let registry = TargetRegistry::builtin();
-    for (id, source) in [("mihomo", MIHOMO), ("sing-box", SINGBOX), ("surge", SURGE), ("loon", LOON), ("quantumult-x", QX), ("shadowrocket", SHADOWROCKET)] {
+    for (id, source) in [
+        ("mihomo", MIHOMO),
+        ("sing-box", SINGBOX),
+        ("surge", SURGE),
+        ("loon", LOON),
+        ("quantumult-x", QX),
+        ("shadowrocket", SHADOWROCKET),
+    ] {
         let adapter = registry.get_str(id).expect("registered adapter");
         let parsed = adapter.parse(source).expect("fixture parses");
         assert_eq!(parsed.document.bytes(), source, "{id} must preserve bytes");
-        assert_eq!(adapter.validate(source).level, adapter.descriptor().capabilities.validation_level);
+        assert_eq!(
+            adapter.validate(source).level,
+            adapter.descriptor().capabilities.validation_level
+        );
     }
 }
 
 #[test]
-fn line_endings_unicode_and_unknown_content_survive() {
+fn capability_contracts_match_real_schema_and_validation() {
     let registry = TargetRegistry::builtin();
-    for (id, source, path, replacement) in [
-        ("mihomo", MIHOMO, "mixed-port", "7893"),
-        ("surge", SURGE, "General.loglevel", "info"),
-        ("loon", LOON, "General.dns-server", "1.1.1.1"),
-        ("quantumult-x", QX, "general.server_check_url", "https://example.test/new"),
-        ("shadowrocket", SHADOWROCKET, "General.bypass-system", "false"),
+    let expected = [
+        ("mihomo", ValidationLevel::Static, true),
+        ("sing-box", ValidationLevel::Syntax, true),
+        ("surge", ValidationLevel::Basic, false),
+        ("loon", ValidationLevel::Basic, false),
+        ("quantumult-x", ValidationLevel::Basic, false),
+        ("shadowrocket", ValidationLevel::Basic, false),
+    ];
+    for (id, level, has_schema) in expected {
+        let adapter = registry.get_str(id).unwrap();
+        assert_eq!(adapter.descriptor().capabilities.validation_level, level);
+        assert_eq!(adapter.schema().is_some(), has_schema);
+        assert_eq!(
+            adapter
+                .schema()
+                .is_some_and(|schema| !schema.fields.is_empty()),
+            has_schema
+        );
+        let [capability] = adapter.structured_edit_capabilities() else {
+            panic!("{id} must expose exactly one precise structured-edit capability");
+        };
+        assert_eq!(
+            capability.operations,
+            [StructuredEditOperation::ReplaceExistingValue]
+        );
+        match (id, &capability.scope) {
+            ("mihomo", StructuredEditScope::ExactPaths(paths)) => {
+                assert_eq!(
+                    paths.iter().map(ConfigPath::as_str).collect::<Vec<_>>(),
+                    ["/mixed-port"]
+                );
+                assert_eq!(capability.value_types, [SchemaValueType::Integer]);
+            }
+            ("sing-box", StructuredEditScope::ExistingJsonPointerValues) => {
+                assert_eq!(
+                    capability.value_types,
+                    [
+                        SchemaValueType::String,
+                        SchemaValueType::Integer,
+                        SchemaValueType::Boolean,
+                        SchemaValueType::Number,
+                        SchemaValueType::Object,
+                        SchemaValueType::Array,
+                        SchemaValueType::Null,
+                    ]
+                );
+            }
+            (
+                "surge" | "loon" | "quantumult-x" | "shadowrocket",
+                StructuredEditScope::ExistingSectionKeys {
+                    sections,
+                    case_sensitive,
+                },
+            ) => {
+                let expected_section = if id == "quantumult-x" {
+                    "general"
+                } else {
+                    "General"
+                };
+                assert_eq!(sections, &[expected_section]);
+                assert!(*case_sensitive);
+                assert_eq!(capability.value_types, [SchemaValueType::String]);
+            }
+            _ => panic!("{id} structured-edit scope drifted"),
+        }
+        assert!(!adapter.descriptor().capabilities.native_validation);
+    }
+}
+
+#[test]
+fn registry_rejects_duplicate_target_ids() {
+    let mut registry = TargetRegistry::builtin();
+    let error = registry.register(MihomoAdapter::new()).unwrap_err();
+    assert!(matches!(error, RegistryError::DuplicateTarget(id) if id.as_str() == "mihomo"));
+
+    let mut ids: Vec<_> = registry
+        .adapters()
+        .iter()
+        .map(|adapter| adapter.descriptor().id.as_str())
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), registry.adapters().len());
+}
+
+#[test]
+fn mihomo_uses_real_yaml_syntax_validation() {
+    let registry = TargetRegistry::builtin();
+    let adapter = registry.get_str("mihomo").unwrap();
+    let invalid = adapter.validate(b"mixed-port: [7890\n");
+    assert_eq!(invalid.level, ValidationLevel::Syntax);
+    assert!(!invalid.is_valid());
+    assert_eq!(invalid.diagnostics[0].code, "mihomo.yaml_syntax");
+
+    assert!(adapter.validate(MIHOMO).is_valid(), "anchor/alias fixture");
+
+    let wrong_root = adapter.validate(b"- one\n- two\n");
+    assert_eq!(wrong_root.level, ValidationLevel::Syntax);
+    assert_eq!(wrong_root.diagnostics[0].code, "mihomo.root_mapping");
+}
+
+#[test]
+fn mihomo_static_mixed_port_diagnostics_are_precise() {
+    let registry = TargetRegistry::builtin();
+    let adapter = registry.get_str("mihomo").unwrap();
+    let wrong_type = b"mixed-port: \"7890\"\n";
+    let result = adapter.validate(wrong_type);
+    assert_eq!(result.level, ValidationLevel::Static);
+    assert_eq!(result.diagnostics[0].code, "mihomo.mixed_port_type");
+    let span = result.diagnostics[0].span.unwrap();
+    assert_eq!(span.get(wrong_type), Some(&b"\"7890\""[..]));
+
+    let out_of_range = b"mixed-port: 70000\n";
+    let result = adapter.validate(out_of_range);
+    assert_eq!(result.diagnostics[0].code, "mihomo.mixed_port_range");
+    let span = result.diagnostics[0].span.unwrap();
+    assert_eq!(span.get(out_of_range), Some(&b"70000"[..]));
+}
+
+#[test]
+fn mihomo_patch_preserves_comments_block_scalars_and_all_other_bytes() {
+    let registry = TargetRegistry::builtin();
+    let adapter = registry.get_str("mihomo").unwrap();
+    let source = b"mixed-port: 7890 # keep this comment\nscript: |-\n  line one\n  line two\n";
+    let edited = adapter
+        .apply_edit(source, edit("/mixed-port", "7893"))
+        .unwrap();
+    assert_eq!(
+        edited,
+        b"mixed-port: 7893 # keep this comment\nscript: |-\n  line one\n  line two\n"
+    );
+}
+
+#[test]
+fn mihomo_rejects_duplicate_or_unsafe_mixed_port_spans() {
+    let registry = TargetRegistry::builtin();
+    let adapter = registry.get_str("mihomo").unwrap();
+    let duplicate = b"mixed-port: 7890\n\"mixed-port\": 7891\n";
+    assert!(matches!(
+        adapter.apply_edit(duplicate, edit("/mixed-port", "7893")),
+        Err(EditError::AmbiguousField(_))
+    ));
+    let validation = adapter.validate(duplicate);
+    assert_eq!(validation.level, ValidationLevel::Static);
+    assert_eq!(
+        validation.diagnostics[0].code,
+        "mihomo.mixed_port_duplicate"
+    );
+
+    let tagged = b"mixed-port: !!int 7890\n";
+    assert!(matches!(
+        adapter.apply_edit(tagged, edit("/mixed-port", "7893")),
+        Err(EditError::UnsupportedEdit(_))
+    ));
+}
+
+#[test]
+fn singbox_rejects_invalid_escape_trailing_content_and_non_object_root() {
+    let registry = TargetRegistry::builtin();
+    let adapter = registry.get_str("sing-box").unwrap();
+    for source in [
+        &b"{\"value\": \"bad\\q\"}"[..],
+        &b"{} false"[..],
+        &b"[]"[..],
+    ] {
+        let result = adapter.validate(source);
+        assert_eq!(result.level, ValidationLevel::Syntax);
+        assert!(!result.is_valid());
+    }
+}
+
+#[test]
+fn singbox_uses_unambiguous_json_pointers() {
+    let registry = TargetRegistry::builtin();
+    let adapter = registry.get_str("sing-box").unwrap();
+    let source = br#"{
+  "a/b": 1,
+  "a~b": 2,
+  "a.b": 3,
+  "escaped\u002fkey": 4,
+  "outbounds": [{"type": "direct"}]
+}"#;
+    let cases = [
+        ("/a~1b", "10", "\"a/b\": 10"),
+        ("/a~0b", "20", "\"a~b\": 20"),
+        ("/a.b", "30", "\"a.b\": 30"),
+        ("/escaped~1key", "40", "\"escaped\\u002fkey\": 40"),
+        ("/outbounds/0/type", "\"block\"", "\"type\": \"block\""),
+    ];
+    for (path, replacement, expected) in cases {
+        let edited = adapter.apply_edit(source, edit(path, replacement)).unwrap();
+        assert!(String::from_utf8(edited).unwrap().contains(expected));
+    }
+}
+
+#[test]
+fn singbox_duplicate_pointer_is_ambiguous() {
+    let registry = TargetRegistry::builtin();
+    let adapter = registry.get_str("sing-box").unwrap();
+    let source = b"{\"log\": {\"level\": \"info\", \"level\": \"warn\"}}";
+    assert!(matches!(
+        adapter.apply_edit(source, edit("/log/level", "\"error\"")),
+        Err(EditError::AmbiguousField(_))
+    ));
+}
+
+fn assert_conf_adapter_boundaries(
+    id: &str,
+    source: &[u8],
+    editable_path: &str,
+    replacement: &str,
+    complex_path: &str,
+) {
+    let registry = TargetRegistry::builtin();
+    let adapter = registry.get_str(id).unwrap();
+    let edited = adapter
+        .apply_edit(source, edit(editable_path, replacement))
+        .unwrap();
+    assert!(String::from_utf8(edited).unwrap().contains(replacement));
+    assert!(matches!(
+        adapter.apply_edit(source, edit(complex_path, "unsafe")),
+        Err(EditError::UnsupportedEdit(_))
+    ));
+}
+
+#[test]
+fn surge_only_patches_safe_general_keys() {
+    assert_conf_adapter_boundaries(
+        "surge",
+        SURGE,
+        "/General/loglevel",
+        "info",
+        "/Script/http-response",
+    );
+}
+
+#[test]
+fn loon_only_patches_safe_general_keys() {
+    assert_conf_adapter_boundaries(
+        "loon",
+        LOON,
+        "/General/dns-server",
+        "1.1.1.1",
+        "/Rewrite/rule",
+    );
+}
+
+#[test]
+fn quantumult_x_only_patches_safe_general_keys() {
+    assert_conf_adapter_boundaries(
+        "quantumult-x",
+        QX,
+        "/general/server_check_url",
+        "https://example.test/new",
+        "/rewrite_remote/url",
+    );
+}
+
+#[test]
+fn shadowrocket_only_patches_safe_general_keys() {
+    assert_conf_adapter_boundaries(
+        "shadowrocket",
+        SHADOWROCKET,
+        "/General/bypass-system",
+        "false",
+        "/Rule/example",
+    );
+}
+
+#[test]
+fn conf_duplicate_sections_keys_and_inline_comments_are_refused() {
+    let registry = TargetRegistry::builtin();
+    let adapter = registry.get_str("surge").unwrap();
+    let duplicate_section = b"[General]\nloglevel = notify\n[General]\nother = value\n";
+    assert!(matches!(
+        adapter.apply_edit(duplicate_section, edit("/General/loglevel", "info")),
+        Err(EditError::AmbiguousField(_))
+    ));
+
+    let duplicate_key = b"[General]\nloglevel = notify\nloglevel = warn\n";
+    assert!(matches!(
+        adapter.apply_edit(duplicate_key, edit("/General/loglevel", "info")),
+        Err(EditError::AmbiguousField(_))
+    ));
+
+    let inline_comment = b"[General]\nloglevel = notify # preserve\n";
+    assert!(matches!(
+        adapter.apply_edit(inline_comment, edit("/General/loglevel", "info")),
+        Err(EditError::UnsupportedEdit(_))
+    ));
+}
+
+#[test]
+fn line_endings_unicode_bom_and_unknown_content_survive() {
+    let registry = TargetRegistry::builtin();
+    for (id, source, path, original, replacement) in [
+        ("mihomo", MIHOMO, "/mixed-port", "7890", "7893"),
+        ("sing-box", SINGBOX, "/log/level", "\"info\"", "\"warn\""),
+        ("surge", SURGE, "/General/loglevel", "notify", "info"),
+        ("loon", LOON, "/General/dns-server", "system", "1.1.1.1"),
+        (
+            "quantumult-x",
+            QX,
+            "/general/server_check_url",
+            "https://example.test/check",
+            "https://example.test/new",
+        ),
+        (
+            "shadowrocket",
+            SHADOWROCKET,
+            "/General/bypass-system",
+            "true",
+            "false",
+        ),
     ] {
         let adapter = registry.get_str(id).unwrap();
-        let crlf = String::from_utf8(source.to_vec()).unwrap().replace('\n', "\r\n").into_bytes();
-        let edited = adapter.apply_edit(&crlf, StructuredEdit::new(path, replacement)).unwrap();
-        assert_eq!(NativeDocument::from_bytes(&edited).line_ending(), LineEnding::CrLf, "{id} CRLF");
-        assert!(String::from_utf8_lossy(&edited).contains("中文") || id == "mihomo" || id == "shadowrocket");
-        assert!(String::from_utf8_lossy(&edited).contains("example.test") || id == "mihomo");
+        let source_text = String::from_utf8(source.to_vec()).unwrap();
+        let expected = source_text.replacen(original, replacement, 1).into_bytes();
+        let edited = adapter.apply_edit(source, edit(path, replacement)).unwrap();
+        assert_eq!(edited, expected, "{id} LF and surrounding bytes");
+        assert_eq!(
+            NativeDocument::from_bytes(&edited).line_ending(),
+            LineEnding::Lf
+        );
+        assert!(NativeDocument::from_bytes(&edited).has_trailing_newline());
+
+        let crlf_text = source_text.replace('\n', "\r\n");
+        let crlf = crlf_text.as_bytes();
+        let expected_crlf = crlf_text.replacen(original, replacement, 1).into_bytes();
+        let edited = adapter.apply_edit(crlf, edit(path, replacement)).unwrap();
+        assert_eq!(edited, expected_crlf, "{id} CRLF and surrounding bytes");
+        let edited_document = NativeDocument::from_bytes(&edited);
+        assert_eq!(edited_document.line_ending(), LineEnding::CrLf, "{id}");
+        assert!(edited_document.has_trailing_newline(), "{id}");
+
+        let mut bom = vec![0xef, 0xbb, 0xbf];
+        bom.extend_from_slice(source);
+        let mut expected_bom = vec![0xef, 0xbb, 0xbf];
+        expected_bom.extend_from_slice(&expected);
+        let edited = adapter.apply_edit(&bom, edit(path, replacement)).unwrap();
+        assert_eq!(edited, expected_bom, "{id} BOM and surrounding bytes");
+        assert_eq!(
+            NativeDocument::from_bytes(&edited).encoding(),
+            SourceEncoding::Utf8Bom,
+            "{id}"
+        );
     }
-}
-
-#[test]
-fn yaml_patch_changes_only_target_span() {
-    let adapter = TargetRegistry::builtin().get_str("mihomo").unwrap();
-    let edited = adapter.apply_edit(MIHOMO, StructuredEdit::new("mixed-port", "7893")).unwrap();
-    assert_eq!(edited.len(), MIHOMO.len());
-    let start = MIHOMO.iter().position(|byte| *byte == b'7').unwrap();
-    for (index, (before, after)) in MIHOMO.iter().zip(edited.iter()).enumerate() {
-        if (start..start + 4).contains(&index) {
-            continue;
-        }
-        assert_eq!(before, after, "unrelated YAML byte changed at {index}");
-    }
-    assert!(String::from_utf8(edited).unwrap().contains("mixed-port: 7893"));
-}
-
-#[test]
-fn json_patch_preserves_layout_order_and_unknown_fields() {
-    let adapter = TargetRegistry::builtin().get_str("sing-box").unwrap();
-    let edited = adapter.apply_edit(SINGBOX, StructuredEdit::new("log.level", "\"warn\"")).unwrap();
-    let text = String::from_utf8(edited).unwrap();
-    assert!(text.contains("\"level\": \"warn\""));
-    assert!(text.contains("\"unknown-field\": { \"keep\": \"中文\" }"));
-    assert!(text.contains("  \"log\": {") && text.contains("  \"outbounds\": ["));
-}
-
-#[test]
-fn duplicate_key_and_unsafe_edit_are_explicit_errors() {
-    let adapter = TargetRegistry::builtin().get_str("surge").unwrap();
-    let duplicate = b"[General]\nloglevel = notify\nloglevel = warn\n";
-    assert!(matches!(adapter.apply_edit(duplicate, StructuredEdit::new("General.loglevel", "info")), Err(EditError::AmbiguousField(_))));
-    assert!(matches!(adapter.apply_edit(SURGE, StructuredEdit::new("General.loglevel", "bad\nline")), Err(EditError::UnsafeValue(_))));
-}
-
-#[test]
-fn parse_diagnostics_have_stable_shape_and_spans() {
-    let adapter = TargetRegistry::builtin().get_str("sing-box").unwrap();
-    let result = adapter.validate(b"{\n  \"log\": }\n");
-    assert_eq!(result.level, ValidationLevel::ParseOnly);
-    let diagnostic = result.diagnostics.first().expect("diagnostic");
-    assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
-    assert!(!diagnostic.code.is_empty());
-    assert!(!diagnostic.message.is_empty());
-    assert!(diagnostic.span.is_some());
-}
-
-#[test]
-fn detection_is_a_hint_and_capabilities_do_not_claim_native_validation() {
-    let registry = TargetRegistry::builtin();
-    assert_eq!(registry.get_str("mihomo").unwrap().detect(MIHOMO).confidence, DetectionConfidence::Likely);
-    for adapter in registry.adapters() {
-        assert!(adapter.descriptor().capabilities.raw_edit);
-        assert!(!adapter.descriptor().capabilities.native_validation);
-        assert_ne!(adapter.descriptor().capabilities.validation_level, ValidationLevel::Native);
-    }
-    assert_eq!(NativeDocument::from_bytes(&[0xff]).encoding(), SourceEncoding::Unsupported);
-}
-
-#[test]
-fn utf8_bom_is_preserved_and_spans_are_offset_after_it() {
-    let registry = TargetRegistry::builtin();
-    let mihomo = registry.get_str("mihomo").unwrap();
-    let mut yaml = vec![0xef, 0xbb, 0xbf];
-    yaml.extend_from_slice(MIHOMO);
-    let edited = mihomo.apply_edit(&yaml, StructuredEdit::new("mixed-port", "7893")).unwrap();
-    assert!(edited.starts_with(&[0xef, 0xbb, 0xbf]));
-    assert!(String::from_utf8(edited).unwrap().contains("mixed-port: 7893"));
-
-    let singbox = registry.get_str("sing-box").unwrap();
-    let mut json = vec![0xef, 0xbb, 0xbf];
-    json.extend_from_slice(SINGBOX);
-    let edited = singbox.apply_edit(&json, StructuredEdit::new("log.level", "\"warn\"")).unwrap();
-    assert!(edited.starts_with(&[0xef, 0xbb, 0xbf]));
-    assert!(String::from_utf8(edited).unwrap().contains("\"level\": \"warn\""));
 }
 
 #[test]
 fn adapters_reject_non_utf8_without_silent_conversion() {
     let registry = TargetRegistry::builtin();
     for adapter in registry.adapters() {
-        let error = adapter.parse(&[0xff]).expect_err("invalid encoding must be rejected");
+        let error = adapter
+            .parse(&[0xff])
+            .expect_err("invalid encoding must be rejected");
         let diagnostic = error.diagnostics.first().expect("encoding diagnostic");
         assert_eq!(diagnostic.code, "encoding.unsupported");
         assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
     }
+    assert_eq!(
+        NativeDocument::from_bytes(&[0xff]).encoding(),
+        SourceEncoding::Unsupported
+    );
+}
+
+#[test]
+fn detection_remains_advisory() {
+    let registry = TargetRegistry::builtin();
+    assert_eq!(
+        registry
+            .get_str("mihomo")
+            .unwrap()
+            .detect(MIHOMO)
+            .confidence,
+        DetectionConfidence::Likely
+    );
 }

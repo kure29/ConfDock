@@ -1,6 +1,7 @@
 use std::fmt;
 
 use crate::diagnostics::{Diagnostic, DiagnosticSeverity};
+use crate::path::ConfigPath;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SourceSpan {
@@ -21,7 +22,7 @@ impl SourceSpan {
         self.start >= self.end
     }
 
-    pub fn get<'a>(self, source: &'a [u8]) -> Option<&'a [u8]> {
+    pub fn get(self, source: &[u8]) -> Option<&[u8]> {
         source.get(self.start..self.end)
     }
 }
@@ -128,7 +129,7 @@ impl fmt::Display for SourceEncoding {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SourceField {
-    pub path: String,
+    pub path: ConfigPath,
     /// Span of the complete value, excluding surrounding whitespace.
     pub value_span: SourceSpan,
 }
@@ -144,8 +145,8 @@ impl ParsedDocument {
         Self { document, fields }
     }
 
-    pub fn field(&self, path: &str) -> Option<&SourceField> {
-        self.fields.iter().find(|field| field.path == path)
+    pub fn field(&self, path: &ConfigPath) -> Option<&SourceField> {
+        self.fields.iter().find(|field| &field.path == path)
     }
 }
 

@@ -7,6 +7,7 @@
 pub mod diagnostics;
 pub mod document;
 pub mod patch;
+pub mod path;
 pub mod schema;
 pub mod targets;
 
@@ -15,9 +16,11 @@ pub use document::{
     LineEnding, NativeDocument, ParsedDocument, SourceEncoding, SourceField, SourceSpan,
 };
 pub use patch::{apply_span_patch, EditError, StructuredEdit};
+pub use path::{ConfigPath, ConfigPathError};
 pub use schema::{SchemaField, SchemaValueType, TargetSchema};
 pub use targets::{
     AdapterCapabilities, ConfigAdapter, DetectionConfidence, DetectionResult, ParseError,
+    RegistryError, StructuredEditCapability, StructuredEditOperation, StructuredEditScope,
     TargetDescriptor, TargetId, TargetRegistry,
 };
 

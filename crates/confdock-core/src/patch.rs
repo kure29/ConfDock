@@ -1,10 +1,11 @@
 use std::fmt;
 
 use crate::document::{SourceEncoding, SourceSpan};
+use crate::path::ConfigPath;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StructuredEdit {
-    pub path: String,
+    pub path: ConfigPath,
     /// Replacement text is inserted verbatim. Adapters validate its syntax
     /// before applying it; callers should provide a JSON literal for JSON
     /// targets and a scalar/line value for text targets.
@@ -12,9 +13,9 @@ pub struct StructuredEdit {
 }
 
 impl StructuredEdit {
-    pub fn new(path: impl Into<String>, replacement: impl Into<String>) -> Self {
+    pub fn new(path: ConfigPath, replacement: impl Into<String>) -> Self {
         Self {
-            path: path.into(),
+            path,
             replacement: replacement.into(),
         }
     }

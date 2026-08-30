@@ -12,6 +12,8 @@ use std::fmt;
 use crate::diagnostics::{Diagnostic, ValidationResult};
 use crate::document::ParsedDocument;
 use crate::patch::{EditError, StructuredEdit};
+use crate::path::ConfigPath;
+use crate::schema::{SchemaValueType, TargetSchema};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct TargetId(String);
@@ -28,10 +30,7 @@ impl TargetId {
         let value = value.into();
         if value.is_empty()
             || !value.bytes().all(|byte| {
-                byte.is_ascii_lowercase()
-                    || byte.is_ascii_digit()
-                    || byte == b'-'
-                    || byte == b'_'
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'_'
             })
         {
             return Err(TargetIdError(value));
@@ -128,11 +127,32 @@ impl DetectionResult {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AdapterCapabilities {
     pub raw_edit: bool,
-    pub schema: bool,
-    pub structured_edit: bool,
     pub validation_level: crate::diagnostics::ValidationLevel,
     pub native_validation: bool,
     pub sections: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StructuredEditScope {
+    ExactPaths(Vec<ConfigPath>),
+    ExistingJsonPointerValues,
+    ExistingSectionKeys {
+        sections: Vec<String>,
+        case_sensitive: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StructuredEditOperation {
+    ReplaceExistingValue,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StructuredEditCapability {
+    pub scope: StructuredEditScope,
+    pub operations: Vec<StructuredEditOperation>,
+    pub value_types: Vec<SchemaValueType>,
+    pub safety_notes: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -168,6 +188,8 @@ impl std::error::Error for ParseError {}
 
 pub trait ConfigAdapter: Send + Sync {
     fn descriptor(&self) -> &TargetDescriptor;
+    fn schema(&self) -> Option<&TargetSchema>;
+    fn structured_edit_capabilities(&self) -> &[StructuredEditCapability];
     fn detect(&self, source: &[u8]) -> DetectionResult;
     fn parse(&self, source: &[u8]) -> Result<ParsedDocument, ParseError>;
     fn validate(&self, source: &[u8]) -> ValidationResult;
@@ -178,6 +200,21 @@ pub struct TargetRegistry {
     adapters: Vec<Box<dyn ConfigAdapter>>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RegistryError {
+    DuplicateTarget(TargetId),
+}
+
+impl fmt::Display for RegistryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DuplicateTarget(id) => write!(formatter, "target is already registered: {id}"),
+        }
+    }
+}
+
+impl std::error::Error for RegistryError {}
+
 impl Default for TargetRegistry {
     fn default() -> Self {
         Self::builtin()
@@ -186,27 +223,44 @@ impl Default for TargetRegistry {
 
 impl TargetRegistry {
     pub fn builtin() -> Self {
-        Self {
-            adapters: vec![
-                Box::new(mihomo::MihomoAdapter::new()),
-                Box::new(singbox::SingBoxAdapter::new()),
-                Box::new(surge::SurgeAdapter::new()),
-                Box::new(loon::LoonAdapter::new()),
-                Box::new(quantumult_x::QuantumultXAdapter::new()),
-                Box::new(shadowrocket::ShadowrocketAdapter::new()),
-            ],
-        }
+        let mut registry = Self {
+            adapters: Vec::new(),
+        };
+        registry
+            .register(mihomo::MihomoAdapter::new())
+            .expect("unique built-in target");
+        registry
+            .register(singbox::SingBoxAdapter::new())
+            .expect("unique built-in target");
+        registry
+            .register(surge::SurgeAdapter::new())
+            .expect("unique built-in target");
+        registry
+            .register(loon::LoonAdapter::new())
+            .expect("unique built-in target");
+        registry
+            .register(quantumult_x::QuantumultXAdapter::new())
+            .expect("unique built-in target");
+        registry
+            .register(shadowrocket::ShadowrocketAdapter::new())
+            .expect("unique built-in target");
+        registry
     }
 
     pub fn adapters(&self) -> &[Box<dyn ConfigAdapter>] {
         &self.adapters
     }
 
-    pub fn register<A>(&mut self, adapter: A)
+    pub fn register<A>(&mut self, adapter: A) -> Result<(), RegistryError>
     where
         A: ConfigAdapter + 'static,
     {
+        let id = adapter.descriptor().id.clone();
+        if self.get(&id).is_some() {
+            return Err(RegistryError::DuplicateTarget(id));
+        }
         self.adapters.push(Box::new(adapter));
+        Ok(())
     }
 
     pub fn get(&self, id: &TargetId) -> Option<&dyn ConfigAdapter> {

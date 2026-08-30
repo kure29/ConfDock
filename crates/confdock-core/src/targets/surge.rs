@@ -1,14 +1,17 @@
 use crate::diagnostics::{ValidationLevel, ValidationResult};
 use crate::document::ParsedDocument;
 use crate::patch::{EditError, StructuredEdit};
+use crate::schema::{SchemaValueType, TargetSchema};
 
 use super::common::{parse_ini_like, text_detection, value_edit, IniParseOptions};
 use super::{
-    AdapterCapabilities, ConfigAdapter, DetectionResult, ParseError, TargetDescriptor, TargetId,
+    AdapterCapabilities, ConfigAdapter, DetectionResult, ParseError, StructuredEditCapability,
+    StructuredEditOperation, StructuredEditScope, TargetDescriptor, TargetId,
 };
 
 pub struct SurgeAdapter {
     descriptor: TargetDescriptor,
+    structured_edits: Vec<StructuredEditCapability>,
 }
 
 impl SurgeAdapter {
@@ -20,9 +23,7 @@ impl SurgeAdapter {
                 file_extensions: vec!["conf".into()],
                 capabilities: AdapterCapabilities {
                     raw_edit: true,
-                    schema: true,
-                    structured_edit: true,
-                    validation_level: ValidationLevel::Static,
+                    validation_level: ValidationLevel::Basic,
                     native_validation: false,
                     sections: vec![
                         "General".into(),
@@ -34,6 +35,7 @@ impl SurgeAdapter {
                     ],
                 },
             },
+            structured_edits: general_section_capability("General"),
         }
     }
 }
@@ -47,8 +49,22 @@ impl Default for SurgeAdapter {
 fn options(id: TargetId) -> IniParseOptions {
     IniParseOptions {
         target: id,
-        allow_bare_rules: true,
+        editable_sections: &["General"],
+        case_sensitive_sections: true,
     }
+}
+
+fn general_section_capability(section: &str) -> Vec<StructuredEditCapability> {
+    vec![StructuredEditCapability {
+        scope: StructuredEditScope::ExistingSectionKeys {
+            sections: vec![section.into()],
+            case_sensitive: true,
+        },
+        operations: vec![StructuredEditOperation::ReplaceExistingValue],
+        value_types: vec![SchemaValueType::String],
+        safety_notes: "Only unique existing General keys without inline comments are patchable."
+            .into(),
+    }]
 }
 
 impl ConfigAdapter for SurgeAdapter {
@@ -56,29 +72,30 @@ impl ConfigAdapter for SurgeAdapter {
         &self.descriptor
     }
 
+    fn schema(&self) -> Option<&TargetSchema> {
+        None
+    }
+
+    fn structured_edit_capabilities(&self) -> &[StructuredEditCapability] {
+        &self.structured_edits
+    }
+
     fn detect(&self, source: &[u8]) -> DetectionResult {
         text_detection(source, self.descriptor.id.clone(), "[General]")
     }
 
     fn parse(&self, source: &[u8]) -> Result<ParsedDocument, ParseError> {
-        parse_ini_like(source, options(self.descriptor.id.clone()))
+        parse_ini_like(source, options(self.descriptor.id.clone())).map(|parsed| parsed.parsed)
     }
 
     fn validate(&self, source: &[u8]) -> ValidationResult {
         match self.parse(source) {
-            Ok(_) => ValidationResult::valid(ValidationLevel::Static),
-            Err(error) => ValidationResult::new(ValidationLevel::ParseOnly, error.diagnostics),
+            Ok(_) => ValidationResult::valid(ValidationLevel::Basic),
+            Err(error) => ValidationResult::new(ValidationLevel::Basic, error.diagnostics),
         }
     }
 
     fn apply_edit(&self, source: &[u8], edit: StructuredEdit) -> Result<Vec<u8>, EditError> {
-        value_edit(
-            source,
-            edit,
-            options(self.descriptor.id.clone()),
-            |value| {
-                !value.contains('\r') && !value.contains('\n') && !value.trim().is_empty()
-            },
-        )
+        value_edit(source, edit, options(self.descriptor.id.clone()))
     }
 }

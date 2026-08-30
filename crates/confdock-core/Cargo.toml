@@ -3,8 +3,11 @@ name = "confdock-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-rust-version.workspace = true
 description = "Source-preserving native configuration core for ConfDock"
+
+[dependencies]
+serde_json = "1.0"
+yaml-rust2 = "0.12"
 
 [lib]
 path = "src/lib.rs"

@@ -51,8 +51,10 @@ impl Diagnostic {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum ValidationLevel {
-    /// Syntax was parsed, but no target-specific semantic checks were run.
-    ParseOnly,
+    /// Encoding and only the most conservative structural checks were run.
+    Basic,
+    /// A real parser accepted the target format and required root structure.
+    Syntax,
     /// Target-specific static/schema checks were run.
     Static,
     /// An external, pinned native validator also accepted the document.

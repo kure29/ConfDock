@@ -1,14 +1,17 @@
 use crate::diagnostics::{ValidationLevel, ValidationResult};
 use crate::document::ParsedDocument;
 use crate::patch::{EditError, StructuredEdit};
+use crate::schema::{SchemaValueType, TargetSchema};
 
 use super::common::{parse_ini_like, text_detection, value_edit, IniParseOptions};
 use super::{
-    AdapterCapabilities, ConfigAdapter, DetectionResult, ParseError, TargetDescriptor, TargetId,
+    AdapterCapabilities, ConfigAdapter, DetectionResult, ParseError, StructuredEditCapability,
+    StructuredEditOperation, StructuredEditScope, TargetDescriptor, TargetId,
 };
 
 pub struct ShadowrocketAdapter {
     descriptor: TargetDescriptor,
+    structured_edits: Vec<StructuredEditCapability>,
 }
 
 impl ShadowrocketAdapter {
@@ -20,9 +23,7 @@ impl ShadowrocketAdapter {
                 file_extensions: vec!["conf".into()],
                 capabilities: AdapterCapabilities {
                     raw_edit: true,
-                    schema: false,
-                    structured_edit: true,
-                    validation_level: ValidationLevel::Static,
+                    validation_level: ValidationLevel::Basic,
                     native_validation: false,
                     sections: vec![
                         "General".into(),
@@ -32,6 +33,17 @@ impl ShadowrocketAdapter {
                     ],
                 },
             },
+            structured_edits: vec![StructuredEditCapability {
+                scope: StructuredEditScope::ExistingSectionKeys {
+                    sections: vec!["General".into()],
+                    case_sensitive: true,
+                },
+                operations: vec![StructuredEditOperation::ReplaceExistingValue],
+                value_types: vec![SchemaValueType::String],
+                safety_notes:
+                    "Only unique existing General keys without inline comments are patchable."
+                        .into(),
+            }],
         }
     }
 }
@@ -45,7 +57,8 @@ impl Default for ShadowrocketAdapter {
 fn options(id: TargetId) -> IniParseOptions {
     IniParseOptions {
         target: id,
-        allow_bare_rules: true,
+        editable_sections: &["General"],
+        case_sensitive_sections: true,
     }
 }
 
@@ -54,29 +67,30 @@ impl ConfigAdapter for ShadowrocketAdapter {
         &self.descriptor
     }
 
+    fn schema(&self) -> Option<&TargetSchema> {
+        None
+    }
+
+    fn structured_edit_capabilities(&self) -> &[StructuredEditCapability] {
+        &self.structured_edits
+    }
+
     fn detect(&self, source: &[u8]) -> DetectionResult {
         text_detection(source, self.descriptor.id.clone(), "[General]")
     }
 
     fn parse(&self, source: &[u8]) -> Result<ParsedDocument, ParseError> {
-        parse_ini_like(source, options(self.descriptor.id.clone()))
+        parse_ini_like(source, options(self.descriptor.id.clone())).map(|parsed| parsed.parsed)
     }
 
     fn validate(&self, source: &[u8]) -> ValidationResult {
         match self.parse(source) {
-            Ok(_) => ValidationResult::valid(ValidationLevel::Static),
-            Err(error) => ValidationResult::new(ValidationLevel::ParseOnly, error.diagnostics),
+            Ok(_) => ValidationResult::valid(ValidationLevel::Basic),
+            Err(error) => ValidationResult::new(ValidationLevel::Basic, error.diagnostics),
         }
     }
 
     fn apply_edit(&self, source: &[u8], edit: StructuredEdit) -> Result<Vec<u8>, EditError> {
-        value_edit(
-            source,
-            edit,
-            options(self.descriptor.id.clone()),
-            |value| {
-                !value.contains('\r') && !value.contains('\n') && !value.trim().is_empty()
-            },
-        )
+        value_edit(source, edit, options(self.descriptor.id.clone()))
     }
 }
