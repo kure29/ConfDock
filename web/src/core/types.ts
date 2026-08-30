@@ -1,9 +1,9 @@
 /* TypeScript mirror of the `confdock-core` public contracts.
  *
- * Every type here corresponds one-to-one to a Rust type in
- * `crates/confdock-core/src/`. Keep the shapes aligned: when the WASM bindings
- * land in Slice 2 they will serialize into exactly these structures, and the
- * mock in `mockCore.ts` will be deleted without touching a single component.
+ * Every type here corresponds one-to-one to a hand-written DTO emitted by
+ * `crates/confdock-wasm`, which in turn maps the public
+ * `crates/confdock-core/src/` contracts. Keep the wire shapes stable so the
+ * React shell remains independent of Rust implementation details.
  *
  * Rust enums become discriminated unions so components can exhaustively match
  * without knowing which target they are looking at. That is what

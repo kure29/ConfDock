@@ -13,7 +13,7 @@ interface TargetPickerProps {
 }
 
 /**
- * Every registered target, from the registry, in registry order.
+ * Every target returned by the Rust registry, in registry order.
  *
  * Detection is shown as a hint and nothing more: `docs/architecture.md` is
  * explicit that `detect` is advisory and a user-selected target always wins, so

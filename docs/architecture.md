@@ -33,8 +33,9 @@ and a JSON source-span scanner. Unknown fields/sections remain opaque and are
 never discarded.
 
 `detect` is advisory only; a user-selected Target always wins. Adapters do not
-read a database or depend on Axum, and the core is kept suitable for a future
-WASM build.
+read a database or depend on Axum. The `confdock-wasm` crate now exposes this
+registry to the React shell through hand-written DTOs; the core itself remains
+free of `wasm-bindgen`, browser, and transport dependencies.
 
 Slice 0.1 capability matrix:
 
@@ -118,6 +119,23 @@ and has no validator version; only completed execution raises the level to
 values. Tests cover both duplicate registration and uniqueness of the built-in
 registry.
 
+## WASM boundary
+
+`crates/confdock-wasm` owns the browser boundary. `WasmConfigCore` holds one
+`TargetRegistry::builtin()` and exposes target descriptors, schemas, detection,
+validation, parsing, structured edits, and document metadata. Inputs and patch
+outputs cross the boundary as byte arrays; `serde-wasm-bindgen` serializes only
+stable DTOs that mirror the TypeScript wire shapes. Mapping is explicit and
+exhaustive, so Rust Core types do not need browser-oriented serde derives.
+
+The web app initializes this module before rendering React. A load or decode
+failure shows a startup error and never falls back to a second TypeScript
+parser. `web/src/api/mockApi.ts` remains a temporary localStorage backend only;
+it does not participate in configuration semantics. `npm run wasm:build
+--prefix web` uses the pinned `wasm-bindgen-cli` version and writes generated
+glue under `web/src/core/wasm-generated/` (ignored except for its declaration
+file). CI generates these artifacts before typecheck, tests, and Vite build.
+
 ## Future service architecture
 
 ```text
@@ -157,9 +175,11 @@ messages. Management APIs require single-admin authentication.
 * **Slice 0.1 (this repository):** hardened core contracts, strict read-only
   YAML/JSON validation, source-preserving patches, truthful capabilities,
   fixtures, validator boundary, and CI.
+* **WASM web boundary (current):** `confdock-wasm` and the React shell consume
+  the Rust registry and preserve native bytes; no duplicate parser or registry
+  exists in TypeScript.
 * **Slice 1:** persistence/revision service and authenticated API; keep the
-  served pointer behavior defined above.
-* **Slice 2:** WASM bindings and a minimal editor shell that consumes the Target
-  Registry (no target conditionals scattered through React).
+  served pointer behavior defined above. This is the next independent backend
+  slice and is not part of the WASM boundary.
 * **Later:** optional native validators, publish/revision UX, and individually
   scoped adapters or conversion tools.

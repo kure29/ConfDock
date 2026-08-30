@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/confdock-core",
     "crates/confdock-validator",
+    "crates/confdock-wasm",
 ]
 
 [workspace.package]

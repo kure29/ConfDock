@@ -22,9 +22,9 @@ interface SettingsScreenProps {
 /**
  * Password, appearance, and what this build actually is.
  *
- * The capability table is rendered from the registry rather than written by
- * hand, so it cannot claim an ability the adapters do not have — and it updates
- * itself when the Rust side gains one.
+ * The capability table is rendered from the Rust registry rather than written
+ * by hand, so it cannot claim an ability the adapters do not have — and it
+ * updates itself when the Rust side gains one.
  */
 export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
   const toast = useToast()
@@ -149,7 +149,7 @@ export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
               <dd className={styles.value}>
                 {service?.core === 'wasm'
                   ? 'confdock-core（WASM）'
-                  : '临时 TypeScript Mock Core —— 非权威，不能证明与 Rust 一致'}
+                  : '未连接 Rust WASM Core'}
               </dd>
             </div>
             <div className={styles.infoRow}>

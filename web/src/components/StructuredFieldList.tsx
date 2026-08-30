@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { core, editableSections, isStrictJsonLiteral, isValidPath, pathSegments } from '../core'
+import { core, isValidPath, pathSegments } from '../core'
 import type {
   EditError,
   ParseError,
@@ -47,7 +47,9 @@ export function StructuredFieldList({
   const displayName = descriptor?.displayName ?? targetId
   const schema = core.schema(targetId)
   const capabilities = core.editCapabilities(targetId)
-  const sectionScope = editableSections(targetId)
+  const sectionScope = capabilities.find(
+    (capability) => capability.scope.kind === 'existingSectionKeys',
+  )?.scope
   const pointerScope = capabilities.some(
     (capability) => capability.scope.kind === 'existingJsonPointerValues',
   )
@@ -77,12 +79,12 @@ export function StructuredFieldList({
     return { field, matches }
   })
 
-  const sectionRows: SourceField[] = sectionScope
+  const sectionRows: SourceField[] = sectionScope?.kind === 'existingSectionKeys'
     ? fields.filter((field) => {
         const segments = pathSegments(field.path)
         const section = segments[0]
         if (segments.length !== 2 || section === undefined) return false
-        return sectionScope.sections.some((allowed) =>
+        return sectionScope.sections.some((allowed: string) =>
           sectionScope.caseSensitive
             ? allowed === section
             : allowed.toLowerCase() === section.toLowerCase(),
@@ -188,7 +190,7 @@ function PointerEditor({
   const [done, setDone] = useState(false)
 
   const pathReady = path !== '' && isValidPath(path)
-  const literalReady = value !== '' && isStrictJsonLiteral(value)
+  const literalReady = value.trim() !== ''
 
   function submit() {
     setDone(false)
@@ -230,8 +232,8 @@ function PointerEditor({
           placeholder='"warn"'
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          hint="一个严格的 JSON 字面量：字符串要带双引号"
-          error={value !== '' && !literalReady ? '不是合法的 JSON 字面量' : undefined}
+          hint="不能为空；最终 JSON 字面量安全检查由配置内核执行"
+          error={value !== '' && !literalReady ? '请输入一个值' : undefined}
         />
       </div>
       <div className={styles.pointerActions}>

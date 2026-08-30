@@ -11,6 +11,7 @@
 ```bash
 cd web
 npm install
+npm run wasm:build # requires stable Rust, wasm32-unknown-unknown and wasm-bindgen 0.2.127
 npm run dev        # http://localhost:5173
 npm run typecheck  # tsc --noEmit
 npm run build      # typecheck + vite build
@@ -18,6 +19,9 @@ npm run build      # typecheck + vite build
 
 运行时依赖为 `react` `react-dom` `react-router-dom`；开发依赖包括 `vite`
 `@vitejs/plugin-react` `typescript` 与 `vitest`。
+`npm run typecheck`、`npm run test` 和 `npm run build` 会通过 npm lifecycle
+自动生成 WASM glue 与 `.wasm` 文件，因此不需要手工复制产物。
+生成目录是 `src/core/wasm-generated/`，其中 JS/WASM 产物不提交，只有声明文件保留在仓库。
 没有 UI 库、CSS 框架、状态库、图标库，也没有 CodeMirror / Monaco —— 字体全部走系统栈，**零网络请求**。
 
 首次进入时 mock 后端会用 `fixtures/` 里的真实内容播种 3 个项目（家庭网络 / Mihomo、旅行 / sing-box、备用 / Surge），存在 `localStorage`。想回到初始状态：
@@ -72,7 +76,7 @@ localStorage.removeItem('confdock.mock.v1')
 src/
   main.tsx  App.tsx              # 路由 + AuthProvider + ToastProvider + useTheme
   styles/    tokens.css  reset.css  global.css
-  core/                          # ← WASM 接缝
+  core/                          # ← Rust WASM 接缝（ConfigCore + DTO adapter）
   api/                           # ← Axum 接缝
   lib/       bytes.ts  lines.ts  time.ts  copy.ts  cx.ts
   ui/                            # 原语，零业务概念
@@ -81,9 +85,9 @@ src/
   state/     AuthContext  ToastContext  useProject  useTheme
 ```
 
-`web/src/core` 与 `web/src/api` 都是边界层：前者暂时使用非权威的 TypeScript
-Mock Core，后者暂时使用 localStorage Mock API。它们只服务于交互走查，不能替代
-`confdock-core` 或未来的 Axum/SQLite 服务。
+`web/src/core` 与 `web/src/api` 都是边界层：前者已经使用真实 Rust
+`confdock-wasm`（其唯一能力来源是 `confdock-core::TargetRegistry`），后者仍使用
+localStorage Mock API。Mock API 只服务于交互走查，不能替代未来的 Axum/SQLite 服务。
 
 `lib/copy.ts` 是**所有面向用户的文案**的唯一出处，包括 4 个校验层级的定义和 `EditError` 的人话翻译。改文案改这一个文件。适配器返回的英文 `detail` / `safetyNotes` 一律**原文照登**（等宽字体），不翻译、不改写 —— 那是 Rust 侧的准确措辞。
 
@@ -91,20 +95,22 @@ Mock Core，后者暂时使用 localStorage Mock API。它们只服务于交互�
 
 ## 两条接缝
 
-### `core/` → WASM（Slice 2）
+### `core/` → Rust WASM
 
-`ConfigCore` 是同步接口，因为 `confdock-core` 的 WASM 导出就是同步的。换实现只改一行：
+`ConfigCore` 是同步接口，因为 WASM 模块初始化完成后导出方法都是同步的。
+入口在 `src/core/wasmCore.ts`，启动时先异步加载生成的 wasm-bindgen glue，成功后才渲染
+`<App />`：
 
 ```ts
-// src/core/index.ts
-import { createWasmCore } from './wasmCore'
-export const core: ConfigCore = await createWasmCore()   // 顶层 await，Vite 支持
+// src/main.tsx
+await initializeCore()
+root.render(<App />)
 ```
 
-然后删掉临时 `mockCore.ts`，并删除 `registry.ts` 中重复的 Target Registry 数据，改为
-从 WASM 读取。当前 Registry 只是供 Mock Core 与 UI 走查使用的镜像，不是权威来源。
-
-一个细节：`core/index.ts` 目前把 `isStrictJsonLiteral` 从 `mockCore.ts` 转出（`StructuredFieldList` 用它做提交前的本地预检）。删 mock 时把这一行重新指向 WASM 导出即可 —— barrel 是唯一需要改的地方。
+`mockCore.ts` 与重复的 `registry.ts` 已删除；TargetPicker、Settings 和结构化编辑器全部从
+`core.targets()`、`core.schema()` 与 `core.editCapabilities()` 读取能力。WASM 初始化失败时只显示
+明确的启动错误，不会静默回退到 TypeScript 解析器。`isStrictJsonLiteral` 也不再存在于前端，
+最终值安全判断由 Rust adapter 执行。
 
 ### `api/` → Axum（Slice 1）
 
@@ -145,33 +151,12 @@ GET    /sub/:token                    → served 修订的原生字节（唯一�
 
 ---
 
-## mock 的诚实边界
+## 临时 API 的诚实边界
 
-`mockCore.ts` 是临时 TypeScript 行为模拟，重复了部分 Rust 算法来演示适配器契约：
-哪些路径可编辑、什么情况下拒绝、报哪个 level 和 code。它不是权威配置核心，不能
-证明与 Rust 完全一致。
-
-**当前刻意对齐的契约路径**（仍不构成 Rust 完全一致的保证）：
-
-- `parse_ini_like` + `value_edit`（`targets/common.rs`）→ 整个 CONF 家族（Surge / Loon / Quantumult X / Shadowrocket），包括哪些键算字段、哪些段不透明、拒绝的**先后顺序**
-- JSON `Scanner` + `append_pointer`（`targets/json.rs`）→ sing-box。完整的严格 JSON 扫描，每个值一条 RFC 6901 pointer，重复键同样报 `ambiguousField`
-- `scan_mixed_port`（`targets/mihomo.rs`）→ `/mixed-port` 是否有可安全 patch 的十进制 span
-
-**近似的部分**（需要真 YAML 解析器）：
-
-1. Mihomo 的 `mihomo.yaml_syntax` —— 换成了「缩进里有 tab」这一条保守检查
-2. Mihomo 的 `mihomo.document_count` —— 换成了数 `---` 标记
-3. Mihomo 的 `mihomo.root_mapping` —— 换成了看第一行有效内容的形状
-
-这三条**只在明确非法时才报错**，不会无中生有；但会漏掉真解析器能抓到的 YAML 错误。
-
-4. 一个已知盲点：顶层 `mixed-port` 的取值同样走行扫描，所以**加了引号的键（`"mixed-port":`）在 mock 里不可见**，而 Rust 的 YAML 事件流看得见。
-
-另外，mock 后端**不做认证**（没有服务端；在设置里设过密码之前任意密码都能进），且只在这一个浏览器 profile 里有数据。登录页会把这件事写出来，不假装有后端。
-
-Mihomo 的 YAML 校验只是近似实现，可能漏掉真实解析器会发现的错误。生产版本必须由
-Rust WASM Core 替换；接入 WASM 时删除 `mockCore.ts` 以及重复的 Registry 数据，
-不能继续扩展这套模拟实现。
+`mockApi.ts` 仍是不带服务器的 localStorage 后端，只用于交互走查和测试。它不提供真实
+认证、并发持久化或跨设备数据，也不替代未来的 Axum/SQLite 服务；`httpApi.ts` 已按同一
+契约实现，后续服务 Slice 可直接切换。配置解析、校验、检测和结构化编辑不在 Mock API
+中，而是全部由 `confdock-core` 经 `confdock-wasm` 执行。
 
 ### Native Bytes V1 边界
 

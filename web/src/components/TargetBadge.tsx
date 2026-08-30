@@ -3,9 +3,9 @@ import type { TargetId } from '../core'
 import { Badge } from '../ui/Badge'
 
 /**
- * The client's display name, read from the registry rather than from a lookup
- * table in the UI. If a seventh adapter is registered in Rust, this renders it
- * without a change here.
+ * The client's display name, read from the Rust registry rather than from a
+ * lookup table in the UI. If another adapter is registered in Rust, this
+ * renders it without a React change.
  */
 export function TargetBadge({ id }: { id: TargetId }) {
   const descriptor = core.descriptor(id)

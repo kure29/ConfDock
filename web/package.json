@@ -6,9 +6,14 @@
   "description": "ConfDock 管理界面：单管理员、原生配置源码保真编辑",
   "scripts": {
     "dev": "vite",
+    "predev": "npm run wasm:build",
+    "wasm:build": "node scripts/build-wasm.mjs",
+    "prebuild": "npm run wasm:build",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "pretypecheck": "npm run wasm:build",
     "typecheck": "tsc --noEmit",
+    "pretest": "npm run wasm:build",
     "test": "vitest run"
   },
   "dependencies": {

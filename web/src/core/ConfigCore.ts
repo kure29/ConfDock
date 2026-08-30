@@ -16,12 +16,12 @@ import type {
 /**
  * The seam between the React shell and the Rust core.
  *
- * `docs/architecture.md` (Slice 2) plans a WASM build of `confdock-core`. Until
- * that lands, `mockCore.ts` implements this interface; afterwards a
- * `wasmCore.ts` implements it and nothing above this file changes.
+ * `wasmCore.ts` implements this interface by adapting the generated
+ * wasm-bindgen bindings. Nothing above this file depends on the transport or
+ * on a target-specific parser.
  *
- * Everything is synchronous because the real implementation will be a WASM
- * module in-process, not a network call. Byte arrays cross the boundary, never
+ * Everything is synchronous after the WASM module initializes in-process, not a
+ * network call. Byte arrays cross the boundary, never
  * strings — the source bytes are the source of truth and decoding them is a
  * view concern (see ADR-001).
  */

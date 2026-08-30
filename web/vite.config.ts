@@ -1,8 +1,11 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  test: {
+    setupFiles: ['./test/setup.mjs'],
+  },
   server: {
     port: 5173,
     // Slice 1: point this at the local Axum service so `api/httpApi.ts` works

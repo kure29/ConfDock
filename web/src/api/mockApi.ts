@@ -454,7 +454,9 @@ export function createMockApi(subscriptionBase: string): ConfDockApi {
       await delay(READ_DELAY)
       return ok({
         version: '0.1.0-dev',
-        core: 'mock',
+        // The API is still localStorage-backed, but configuration semantics
+        // now run through the real Rust WASM core.
+        core: 'wasm',
         api: 'mock',
         subscriptionBase,
       })

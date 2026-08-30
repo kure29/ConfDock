@@ -4,12 +4,11 @@ import type { TargetId, ValidationResult } from '../core/types'
  * The shape of the Axum service planned in `docs/architecture.md`.
  *
  * These types describe the *service*, not the config format — anything about
- * config semantics belongs in `core/`. The split matters because Slice 1
- * replaces `mockApi.ts` with `httpApi.ts` and Slice 2 replaces `mockCore.ts`
- * with a WASM core, independently.
+ * config semantics belongs in `core/`. The split lets the temporary API be
+ * replaced by `httpApi.ts` independently of the Rust WASM core.
  *
  * Field names mirror the `projects` / `config_revisions` / `access_tokens`
- * tables in architecture.md.
+ * tables planned in architecture.md.
  */
 
 // ---------------------------------------------------------------------------
@@ -102,7 +101,8 @@ export interface CreatedAccessToken {
 export interface ServiceInfo {
   version: string
   /** Which implementation is actually behind the seams right now. The settings
-   * screen shows this so nobody mistakes the mock for the real service. */
+ * screen shows this so nobody mistakes the temporary local API for the real
+ * service. */
   core: 'mock' | 'wasm'
   api: 'mock' | 'http'
   /** Prefix a subscription URL is built on, e.g. `http://127.0.0.1:8787/sub`. */
