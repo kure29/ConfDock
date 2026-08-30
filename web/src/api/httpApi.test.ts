@@ -77,6 +77,16 @@ function validRevisionDiffWire() {
   }
 }
 
+function identicalRevisionDiffWire() {
+  const wire = validRevisionDiffWire()
+  wire.to.contentHash = wire.from.contentHash
+  wire.identical = true
+  wire.additions = 0
+  wire.deletions = 0
+  wire.hunks = []
+  return wire
+}
+
 describe('HTTP API error boundary', () => {
   it('maps a missing current session to signed out', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 404 })))
@@ -331,6 +341,57 @@ describe('HTTP API error boundary', () => {
     const result = await createHttpApi().getRevisionDiff('p1', 'r1', 'r2')
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('network.invalid_response')
+  })
+
+  it('rejects the same revision ID with different hashes', async () => {
+    const wire = identicalRevisionDiffWire()
+    wire.to.id = wire.from.id
+    wire.to.contentHash = 'b'.repeat(64)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(wire)))
+
+    const result = await createHttpApi().getRevisionDiff('p1', 'r1', 'r1')
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('network.invalid_response')
+  })
+
+  it.each([
+    ['byte length', { byteLength: 2 }],
+    ['BOM', { hasUtf8Bom: true }],
+    ['line ending', { lineEnding: 'crlf' }],
+    ['trailing newline', { trailingNewline: false }],
+  ])('rejects identical hashes with contradictory %s metadata', async (_label, patch) => {
+    const wire = identicalRevisionDiffWire()
+    Object.assign(wire.to, patch)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(wire)))
+
+    const result = await createHttpApi().getRevisionDiff('p1', 'r1', 'r2')
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('network.invalid_response')
+  })
+
+  it('rejects an identical response containing a hunk', async () => {
+    const wire = identicalRevisionDiffWire()
+    const changed = validRevisionDiffWire()
+    wire.additions = changed.additions
+    wire.deletions = changed.deletions
+    wire.hunks = changed.hunks
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(wire)))
+
+    const result = await createHttpApi().getRevisionDiff('p1', 'r1', 'r2')
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('network.invalid_response')
+  })
+
+  it('accepts different revisions with identical byte metadata', async () => {
+    const wire = identicalRevisionDiffWire()
+    wire.to.createdAt = '2026-08-31T00:00:00Z'
+    wire.to.isCurrent = true
+    wire.to.isServed = true
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(wire)))
+
+    const result = await createHttpApi().getRevisionDiff('p1', 'r1', 'r2')
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.value.identical).toBe(true)
   })
 
   it('rejects a successful diff response that includes source bytes', async () => {

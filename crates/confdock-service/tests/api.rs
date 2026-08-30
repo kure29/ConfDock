@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -9,7 +9,9 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use confdock_service::{
     auth::{token_hash, unix_timestamp},
     config::ServiceConfig,
-    router, AppState,
+    router,
+    state::MAX_CONCURRENT_DIFFS,
+    storage, AppState,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -1070,6 +1072,136 @@ async fn revision_diff_rejects_oversized_input_before_returning_blob_data() {
             .unwrap();
     assert_eq!(pointers.0, first_revision);
     assert_eq!(pointers.1, first_revision);
+}
+
+#[tokio::test]
+async fn app_state_clones_share_one_diff_slot() {
+    let service = TestService::new().await;
+    let cloned = service.state.clone();
+
+    assert_eq!(MAX_CONCURRENT_DIFFS, 1);
+    assert!(Arc::ptr_eq(&service.state.diff_slots, &cloned.diff_slots));
+    assert_eq!(cloned.diff_slots.available_permits(), 1);
+    let permit = service
+        .state
+        .diff_slots
+        .clone()
+        .acquire_owned()
+        .await
+        .unwrap();
+    assert_eq!(cloned.diff_slots.available_permits(), 0);
+    drop(permit);
+    assert_eq!(cloned.diff_slots.available_permits(), 1);
+}
+
+#[tokio::test]
+async fn diff_waits_for_slot_before_loading_revision_blobs() {
+    let service = TestService::new().await;
+    let (cookie, _) = login(&service.app, PASSWORD).await;
+    let project = create_project(
+        &service.app,
+        &cookie,
+        "Queued diff load",
+        "surge",
+        "queued.conf",
+        b"old=value\n",
+    )
+    .await;
+    let project_id = project["id"].as_str().unwrap().to_owned();
+    let from_revision_id = project["currentRevisionId"].as_str().unwrap().to_owned();
+    let to_revision_id = "queued-late-revision";
+    let permit = service
+        .state
+        .diff_slots
+        .clone()
+        .acquire_owned()
+        .await
+        .unwrap();
+    let mut pending = Box::pin(storage::get_revision_diff(
+        &service.state.pool,
+        &service.state.diff_slots,
+        &project_id,
+        &from_revision_id,
+        to_revision_id,
+    ));
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), pending.as_mut())
+            .await
+            .is_err()
+    );
+    let to_source = b"new=value\n";
+    sqlx::query(
+        "INSERT INTO config_revisions (id, project_id, parent_revision_id, revision_no, source_bytes, content_hash, validation_level, validation_result, validator_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+    )
+        .bind(to_revision_id)
+        .bind(&project_id)
+        .bind(&from_revision_id)
+        .bind(2_i64)
+        .bind(to_source.as_slice())
+        .bind(Sha256::digest(to_source).as_slice())
+        .bind("basic")
+        .bind(r#"{"level":"basic","diagnostics":[]}"#)
+        .bind(unix_timestamp())
+        .execute(&service.state.pool)
+        .await
+        .unwrap();
+    drop(permit);
+
+    let diff = pending.await.unwrap();
+    assert_eq!(diff.from.summary.id, from_revision_id);
+    assert_eq!(diff.to.summary.id, to_revision_id);
+    assert!(!diff.identical);
+}
+
+#[tokio::test]
+async fn queued_diff_requests_share_the_slot_and_finish_after_release() {
+    let service = TestService::new().await;
+    let (cookie, _) = login(&service.app, PASSWORD).await;
+    let project = create_project(
+        &service.app,
+        &cookie,
+        "Queued diffs",
+        "surge",
+        "queued.conf",
+        b"same=value\n",
+    )
+    .await;
+    let project_id = project["id"].as_str().unwrap().to_owned();
+    let revision_id = project["currentRevisionId"].as_str().unwrap().to_owned();
+    let permit = service
+        .state
+        .diff_slots
+        .clone()
+        .acquire_owned()
+        .await
+        .unwrap();
+    let mut first = Box::pin(storage::get_revision_diff(
+        &service.state.pool,
+        &service.state.diff_slots,
+        &project_id,
+        &revision_id,
+        &revision_id,
+    ));
+    let mut second = Box::pin(storage::get_revision_diff(
+        &service.state.pool,
+        &service.state.diff_slots,
+        &project_id,
+        &revision_id,
+        &revision_id,
+    ));
+
+    assert!(tokio::time::timeout(Duration::from_millis(50), async {
+        tokio::join!(first.as_mut(), second.as_mut())
+    })
+    .await
+    .is_err());
+    drop(permit);
+
+    let (first_result, second_result) = tokio::join!(first.as_mut(), second.as_mut());
+    assert!(first_result.unwrap().identical);
+    assert!(second_result.unwrap().identical);
+    assert_eq!(service.state.diff_slots.available_permits(), 1);
 }
 
 fn hex_bytes(bytes: &[u8]) -> String {

@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use sha2::{Digest, Sha256};
 use sqlx::{pool::PoolConnection, sqlite::SqliteRow, Row, Sqlite, SqlitePool};
+use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::{
@@ -259,10 +262,19 @@ pub async fn get_revision(
 /// source bytes and metadata; it never holds a database connection.
 pub async fn get_revision_diff(
     pool: &SqlitePool,
+    diff_slots: &Arc<Semaphore>,
     project_id: &str,
     from_revision_id: &str,
     to_revision_id: &str,
 ) -> Result<RevisionDiffDto, ApiError> {
+    // Acquire before opening a transaction or loading either BLOB. Moving the
+    // permit into the blocking task keeps the slot occupied even if the
+    // request future is cancelled while CPU work is still running.
+    let permit = diff_slots
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|_| ApiError::internal())?;
     let mut connection = begin_deferred(pool).await?;
     let result = load_revision_diff_connection(
         &mut connection,
@@ -272,9 +284,12 @@ pub async fn get_revision_diff(
     )
     .await;
     let (from, to) = finish_transaction(connection, result).await?;
-    let computed = tokio::task::spawn_blocking(move || build_revision_diff(from, to))
-        .await
-        .map_err(|_| ApiError::internal())?;
+    let computed = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        build_revision_diff(from, to)
+    })
+    .await
+    .map_err(|_| ApiError::internal())?;
     computed.map_err(|error| match error {
         DiffError::TooLarge => ApiError::revision_diff_too_large(),
         // Stored revisions are validated UTF-8.  A corrupt database should

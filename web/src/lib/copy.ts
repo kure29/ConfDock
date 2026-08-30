@@ -262,6 +262,8 @@ export const REVISION_DIFF_EOF = 'EOF'
 export const REVISION_DIFF_LF = 'LF'
 export const REVISION_DIFF_CRLF = 'CRLF'
 export const REVISION_DIFF_NONE = '无换行'
+export const REVISION_DIFF_CONTEXT_LINE = '上下文行'
+export const REVISION_DIFF_EMPTY_LINE = '空行'
 
 // ---------------------------------------------------------------------------
 // Access tokens (architecture.md §Security)

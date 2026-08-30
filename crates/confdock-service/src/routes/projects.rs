@@ -129,6 +129,7 @@ pub async fn diff(
     Ok(Json(
         storage::get_revision_diff(
             &state.pool,
+            &state.diff_slots,
             &id,
             &query.from_revision_id,
             &query.to_revision_id,

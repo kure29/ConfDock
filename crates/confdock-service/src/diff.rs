@@ -5,7 +5,9 @@
 //! keeps each line's real terminator visible.  No parser or serializer is
 //! involved and the bytes in SQLite are never rewritten.
 
-use similar::{capture_diff_slices, group_diff_ops, Algorithm, DiffOp, DiffTag};
+use std::time::{Duration, Instant};
+
+use similar::{capture_diff_slices_deadline, group_diff_ops, Algorithm, DiffOp, DiffTag};
 
 use crate::dto::{
     RevisionDiffDocumentDto, RevisionDiffDto, RevisionDiffHunkDto, RevisionDiffLineDto,
@@ -22,6 +24,9 @@ pub const MAX_DIFF_INPUT_LINES: usize = 200_000;
 pub const MAX_DIFF_OUTPUT_LINES: usize = 10_000;
 /// Number of unchanged rows retained around each changed region.
 pub const DIFF_CONTEXT_LINES: usize = 3;
+/// Maximum wall-clock time given to the Myers algorithm before it falls back
+/// to a complete, coarser-grained approximation.
+pub const MAX_DIFF_COMPUTE_TIME: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug)]
 pub(crate) struct RevisionDiffSource {
@@ -54,6 +59,15 @@ struct ParsedSource {
 pub(crate) fn build_revision_diff(
     from: RevisionDiffSource,
     to: RevisionDiffSource,
+) -> Result<RevisionDiffDto, DiffError> {
+    let deadline = deadline_after(MAX_DIFF_COMPUTE_TIME)?;
+    build_revision_diff_with_deadline(from, to, deadline)
+}
+
+pub(crate) fn build_revision_diff_with_deadline(
+    from: RevisionDiffSource,
+    to: RevisionDiffSource,
+    deadline: Instant,
 ) -> Result<RevisionDiffDto, DiffError> {
     let combined_bytes = from
         .source
@@ -95,7 +109,12 @@ pub(crate) fn build_revision_diff(
         });
     }
 
-    let ops = capture_diff_slices(Algorithm::Myers, &from_parsed.lines, &to_parsed.lines);
+    let ops = capture_diff_slices_deadline(
+        Algorithm::Myers,
+        &from_parsed.lines,
+        &to_parsed.lines,
+        Some(deadline),
+    );
     let additions = ops
         .iter()
         .filter(|op| op.tag() != DiffTag::Equal)
@@ -128,6 +147,12 @@ pub(crate) fn build_revision_diff(
         deletions,
         hunks,
     })
+}
+
+fn deadline_after(duration: Duration) -> Result<Instant, DiffError> {
+    Instant::now()
+        .checked_add(duration)
+        .ok_or(DiffError::TooLarge)
 }
 
 fn parse_source(source: &[u8]) -> Result<ParsedSource, DiffError> {
@@ -481,5 +506,54 @@ mod tests {
             source("to", 2, b"", &"b".repeat(64)),
         );
         assert_eq!(result, Err(DiffError::TooLarge));
+    }
+
+    #[test]
+    fn expired_deadline_returns_a_complete_bounded_approximation() {
+        let old = (0..2_000)
+            .map(|index| format!("old-{index}\n"))
+            .collect::<String>();
+        let new = (0..2_000)
+            .map(|index| format!("new-{index}\n"))
+            .collect::<String>();
+        let deadline = Instant::now()
+            .checked_sub(Duration::from_secs(1))
+            .unwrap_or_else(Instant::now);
+        let started = Instant::now();
+        let diff = build_revision_diff_with_deadline(
+            source("from", 1, old.as_bytes(), &"a".repeat(64)),
+            source("to", 2, new.as_bytes(), &"b".repeat(64)),
+            deadline,
+        )
+        .unwrap();
+
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!((diff.additions, diff.deletions), (2_000, 2_000));
+        assert_eq!(diff.hunks[0].lines.len(), 4_000);
+    }
+
+    #[test]
+    fn deadline_approximation_still_fails_closed_at_output_limit() {
+        let old = (0..(MAX_DIFF_OUTPUT_LINES / 2 + 1))
+            .map(|index| format!("old-{index}\n"))
+            .collect::<String>();
+        let new = (0..(MAX_DIFF_OUTPUT_LINES / 2 + 1))
+            .map(|index| format!("new-{index}\n"))
+            .collect::<String>();
+        let deadline = Instant::now()
+            .checked_sub(Duration::from_secs(1))
+            .unwrap_or_else(Instant::now);
+        let result = build_revision_diff_with_deadline(
+            source("from", 1, old.as_bytes(), &"a".repeat(64)),
+            source("to", 2, new.as_bytes(), &"b".repeat(64)),
+            deadline,
+        );
+
+        assert_eq!(result, Err(DiffError::TooLarge));
+    }
+
+    #[test]
+    fn deadline_overflow_fails_closed() {
+        assert_eq!(deadline_after(Duration::MAX), Err(DiffError::TooLarge));
     }
 }

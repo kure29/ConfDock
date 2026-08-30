@@ -8,8 +8,10 @@ import {
   REVISION_DIFF_ADDITIONS,
   REVISION_DIFF_BOM,
   REVISION_DIFF_CRLF,
+  REVISION_DIFF_CONTEXT_LINE,
   REVISION_DIFF_DELETIONS,
   REVISION_DIFF_EOF,
+  REVISION_DIFF_EMPTY_LINE,
   REVISION_DIFF_FROM,
   REVISION_DIFF_HUNK_PREFIX,
   REVISION_DIFF_IDENTICAL,
@@ -140,17 +142,20 @@ function DiffLine({ line }: { line: RevisionDiffLine }) {
         ? REVISION_DIFF_CRLF
         : REVISION_DIFF_NONE
   const label = line.kind === 'context'
-    ? `${REVISION_DIFF_OLD_LINE} ${line.oldLineNo}，${REVISION_DIFF_NEW_LINE} ${line.newLineNo}`
+    ? `${REVISION_DIFF_CONTEXT_LINE}，${REVISION_DIFF_OLD_LINE} ${line.oldLineNo}，${REVISION_DIFF_NEW_LINE} ${line.newLineNo}`
     : line.kind === 'delete'
-      ? `${REVISION_DIFF_OLD_LINE} ${line.oldLineNo}`
-      : `${REVISION_DIFF_NEW_LINE} ${line.newLineNo}`
+      ? `${REVISION_DIFF_DELETIONS}，${REVISION_DIFF_OLD_LINE} ${line.oldLineNo}`
+      : `${REVISION_DIFF_ADDITIONS}，${REVISION_DIFF_NEW_LINE} ${line.newLineNo}`
   return (
-    <li className={`${styles.line} ${styles[line.kind]}`} aria-label={`${label}，${ending}`}>
+    <li className={`${styles.line} ${styles[line.kind]}`}>
+      <span className={styles.srOnly}>{label}，{ending}：</span>
       <span className={styles.marker} aria-hidden="true">{kindLabel}</span>
       <span className={styles.oldLineNo} aria-hidden="true">{line.oldLineNo ?? ''}</span>
       <span className={styles.newLineNo} aria-hidden="true">{line.newLineNo ?? ''}</span>
-      <span className={styles.text}>{line.text}</span>
-      <span className={styles.ending}>{ending}</span>
+      <span className={styles.text}>
+        {line.text || <span className={styles.srOnly}>{REVISION_DIFF_EMPTY_LINE}</span>}
+      </span>
+      <span className={styles.ending} aria-hidden="true">{ending}</span>
     </li>
   )
 }

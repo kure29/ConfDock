@@ -31,13 +31,14 @@ function diff(overrides: Partial<RevisionDiff> = {}): RevisionDiff {
     hunks: [
       {
         oldStart: 1,
-        oldCount: 2,
+        oldCount: 3,
         newStart: 1,
-        newCount: 2,
+        newCount: 3,
         lines: [
-          { kind: 'context', oldLineNo: 1, newLineNo: 1, text: '', lineEnding: 'lf' },
+          { kind: 'context', oldLineNo: 1, newLineNo: 1, text: 'same', lineEnding: 'lf' },
           { kind: 'delete', oldLineNo: 2, newLineNo: null, text: 'old  ', lineEnding: 'crlf' },
           { kind: 'insert', oldLineNo: null, newLineNo: 2, text: 'new  ', lineEnding: 'none' },
+          { kind: 'context', oldLineNo: 3, newLineNo: 3, text: '', lineEnding: 'lf' },
         ],
       },
     ],
@@ -55,8 +56,16 @@ describe('RevisionDiff view', () => {
     expect(markup).toContain('old  ')
     expect(markup).toContain('CRLF')
     expect(markup).toContain('EOF')
-    expect(markup).toContain('aria-label="旧行 2，CRLF"')
-    expect(markup).toContain('aria-label="新行 2，EOF"')
+    expect(markup).toContain('上下文行，旧行 1，新行 1，LF：')
+    expect(markup).toContain('删除行，旧行 2，CRLF：')
+    expect(markup).toContain('新增行，新行 2，EOF：')
+    expect(markup).toContain('>same</span>')
+    expect(markup).toContain('>old  </span>')
+    expect(markup).toContain('>new  </span>')
+    expect(markup).toContain('空行')
+    const lineTags = markup.match(/<li[^>]*>/g) ?? []
+    expect(lineTags).toHaveLength(4)
+    expect(lineTags.every((tag) => !tag.includes('aria-label'))).toBe(true)
   })
 
   it('renders an explicit identical state without hunk rows', () => {

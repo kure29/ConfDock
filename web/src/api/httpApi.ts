@@ -349,11 +349,23 @@ function decodeRevisionDiff(
     previousOldEnd = oldEnd
     previousNewEnd = newEnd
   }
+  const sameByteMetadata =
+    from.contentHash === to.contentHash &&
+    from.byteLength === to.byteLength &&
+    from.hasUtf8Bom === to.hasUtf8Bom &&
+    from.lineEnding === to.lineEnding &&
+    from.trailingNewline === to.trailingNewline
+  if (from.id === to.id && !sameByteMetadata) {
+    throw new Error('same revision has contradictory byte metadata')
+  }
   const sameIdentity = from.id === to.id || from.contentHash === to.contentHash
   if (sameIdentity !== value.identical) {
     throw new Error('invalid identical revision diff contract')
   }
-  if (value.identical && (additions !== 0 || deletions !== 0 || hunks.length !== 0)) {
+  if (
+    value.identical &&
+    (!sameByteMetadata || additions !== 0 || deletions !== 0 || hunks.length !== 0)
+  ) {
     throw new Error('identical revision diff contains changes')
   }
   return { from, to, identical: value.identical, additions, deletions, hunks }
