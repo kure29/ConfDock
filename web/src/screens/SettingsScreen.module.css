@@ -1,0 +1,97 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+.info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.infoRow {
+  display: grid;
+  grid-template-columns: 7em minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: baseline;
+}
+
+.term {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.value {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--fg);
+}
+
+.mono {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+}
+
+/* The capability table is the one place in the app with more than three columns,
+ * so it gets a horizontal scroller instead of being crushed on narrow screens. */
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+}
+
+.table th,
+.table td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  white-space: normal;
+}
+
+.table thead th {
+  font-weight: var(--weight-medium);
+  color: var(--fg-subtle);
+  white-space: nowrap;
+}
+
+.table tbody tr:last-child th,
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.rowHead {
+  font-weight: var(--weight-medium);
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.table .mono {
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .pair {
+    grid-template-columns: 1fr;
+  }
+
+  .infoRow {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+}

@@ -1,0 +1,68 @@
+/* Shared page furniture: the title row and the vertical rhythm between blocks.
+ * One file so the three content screens cannot drift apart. */
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-medium);
+  color: var(--fg);
+  line-height: var(--leading-tight);
+}
+
+.lead {
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+  line-height: var(--leading-normal);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* Stack of panels. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.quiet {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+/* Inside a flush panel, where the panel supplies no padding of its own. */
+.loadingRow {
+  padding: var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.back {
+  display: inline-block;
+  margin-bottom: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+  transition: color var(--transition);
+}
+
+.back:hover {
+  color: var(--fg);
+}

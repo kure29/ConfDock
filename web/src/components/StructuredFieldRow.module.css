@@ -1,0 +1,27 @@
+.row {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.row:first-child {
+  border-top: 0;
+}
+
+.path {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.error {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* The adapter's own English message, kept as supporting evidence under the
+ * translated explanation. */
+.detail {
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}

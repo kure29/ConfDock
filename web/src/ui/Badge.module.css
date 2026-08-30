@@ -1,0 +1,52 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-normal);
+  line-height: var(--leading-tight);
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* Borderless, for meta lines where a box would be noise. */
+.quiet {
+  border-color: transparent;
+  background: transparent;
+  padding-inline: 0;
+  color: var(--fg-subtle);
+}
+
+.neutral {
+  background: var(--bg-inset);
+  border-color: var(--border);
+  color: var(--fg-muted);
+}
+
+/* Reserved for the deepest validation levels actually reached — never for
+ * "passed". See lib/copy.ts. */
+.accent {
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.warn {
+  background: var(--warn-subtle);
+  border-color: var(--warn-border);
+  color: var(--warn);
+}
+
+.bad {
+  background: var(--bad-subtle);
+  border-color: var(--bad-border);
+  color: var(--bad);
+}

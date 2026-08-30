@@ -1,0 +1,72 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--transition),
+    border-color var(--transition),
+    color var(--transition);
+}
+
+.button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---- primary: the one accented control per screen ---- */
+.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.primary:hover:not(:disabled) {
+  /* Darkening via a translucent overlay keeps one accent token, not two. */
+  background: color-mix(in srgb, var(--accent) 88%, black);
+  border-color: color-mix(in srgb, var(--accent) 88%, black);
+}
+
+/* ---- secondary: default ---- */
+.secondary {
+  background: var(--bg);
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+.secondary:hover:not(:disabled) {
+  background: var(--bg-subtle);
+}
+
+/* ---- ghost: toolbar and inline actions ---- */
+.ghost {
+  color: var(--fg-muted);
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--bg-inset);
+  color: var(--fg);
+}
+
+/* ---- danger: revoke, delete ---- */
+.danger {
+  background: var(--bg);
+  border-color: var(--bad-border);
+  color: var(--bad);
+}
+
+.danger:hover:not(:disabled) {
+  background: var(--bad-subtle);
+}
