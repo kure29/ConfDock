@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import type { Revision, RevisionPage, RevisionSummary } from '../api'
+import type { Revision, RevisionDiff, RevisionPage, RevisionSummary } from '../api'
 import {
   applyRevisionPage,
   beginRevisionPageRequest,
@@ -44,6 +44,28 @@ function viewProps(overrides: Partial<Parameters<typeof RevisionHistoryView>[0]>
 
 function page(items: RevisionSummary[], nextCursor: string | null): RevisionPage {
   return { items, nextCursor }
+}
+
+function revisionDiff(): RevisionDiff {
+  return {
+    from: { ...summary('r1', 1), hasUtf8Bom: false, lineEnding: 'lf', trailingNewline: true },
+    to: { ...summary('r2', 2, true), hasUtf8Bom: false, lineEnding: 'lf', trailingNewline: true },
+    identical: false,
+    additions: 1,
+    deletions: 0,
+    hunks: [
+      {
+        oldStart: 1,
+        oldCount: 1,
+        newStart: 1,
+        newCount: 2,
+        lines: [
+          { kind: 'context', oldLineNo: 1, newLineNo: 1, text: 'old', lineEnding: 'lf' },
+          { kind: 'insert', oldLineNo: null, newLineNo: 2, text: 'new', lineEnding: 'none' },
+        ],
+      },
+    ],
+  }
 }
 
 describe('RevisionHistory view states', () => {
@@ -116,6 +138,80 @@ describe('RevisionHistory view states', () => {
     )
     expect(markup).toContain('aria-label="历史版本源码（只读）"')
     expect(markup).toContain('readOnly=""')
+  })
+
+  it('offers parent comparison and keeps the initial revision explicitly non-comparable', () => {
+    const withParent = renderToStaticMarkup(
+      <RevisionHistoryView
+        {...viewProps({ selectedId: 'r2', detail: { ...summary('r2', 2, true), source: new Uint8Array([1]) } })}
+      />,
+    )
+    expect(withParent).toContain('与上一版本比较')
+
+    const initial = renderToStaticMarkup(
+      <RevisionHistoryView
+        {...viewProps({
+          revisions: [summary('r1', 1)],
+          selectedId: 'r1',
+          detail: { ...summary('r1', 1), source: new Uint8Array([1]) },
+        })}
+      />,
+    )
+    expect(initial).not.toContain('与上一版本比较')
+    expect(initial).toContain('这是初始版本，没有上一版本可比较')
+  })
+
+  it('renders diff loading, success, identical, and retryable error states', () => {
+    const loading = renderToStaticMarkup(
+      <RevisionHistoryView
+        {...viewProps({
+          selectedId: 'r2',
+          detail: { ...summary('r2', 2, true), source: new Uint8Array([1]) },
+          diffVisible: true,
+          diffLoading: true,
+        })}
+      />,
+    )
+    expect(loading).toContain('role="status"')
+    expect(loading).toContain('正在读取版本差异')
+
+    const success = renderToStaticMarkup(
+      <RevisionHistoryView
+        {...viewProps({
+          selectedId: 'r2',
+          detail: { ...summary('r2', 2, true), source: new Uint8Array([1]) },
+          diffVisible: true,
+          diff: revisionDiff(),
+        })}
+      />,
+    )
+    expect(success).toContain('差异块 1')
+    expect(success).toContain('版本 1')
+
+    const identical = renderToStaticMarkup(
+      <RevisionHistoryView
+        {...viewProps({
+          selectedId: 'r2',
+          detail: { ...summary('r2', 2, true), source: new Uint8Array([1]) },
+          diffVisible: true,
+          diff: { ...revisionDiff(), identical: true, additions: 0, deletions: 0, hunks: [] },
+        })}
+      />,
+    )
+    expect(identical).toContain('两个版本的原始字节完全一致')
+
+    const failed = renderToStaticMarkup(
+      <RevisionHistoryView
+        {...viewProps({
+          selectedId: 'r2',
+          detail: { ...summary('r2', 2, true), source: new Uint8Array([1]) },
+          diffVisible: true,
+          diffError: '差异读取失败',
+        })}
+      />,
+    )
+    expect(failed).toContain('role="alert"')
+    expect(failed).toContain('重试差异读取')
   })
 })
 

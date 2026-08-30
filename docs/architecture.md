@@ -1,4 +1,4 @@
-# ConfDock architecture (Slice 2)
+# ConfDock architecture (Slice 3)
 
 ## Product boundary
 
@@ -211,8 +211,35 @@ a history refresh does not copy every configuration into memory or across the
 wire. The detail endpoint `GET /api/projects/:id/revisions/:revisionId` returns
 one selected revision's original bytes as Base64 plus the same metadata. Both
 operations are read-only: selecting or inspecting history never changes
-pointers, creates a revision, or publishes anything. The UI does not offer Diff,
-Rollback, or Publish actions.
+pointers, creates a revision, or publishes anything. The UI now offers a
+read-only comparison from the selected revision to its parent; it does not
+offer Rollback or Publish actions.
+
+### Read-only revision diff
+
+Slice 3 adds the authenticated `GET
+/api/projects/:id/revisions/diff?fromRevisionId=…&toRevisionId=…` endpoint.
+The two IDs must belong to the same project. A missing or cross-project
+revision is always `404 revision.not_found`, and the explicit static `diff`
+route is registered before the revision-detail route. Both immutable rows are
+read in one read-only SQLite transaction. The transaction is committed before
+the CPU-heavy line diff runs in a controlled Tokio blocking task, so a SQLite
+connection is never held by the diff algorithm.
+
+The service uses the `similar` Myers algorithm over records containing the
+original line text and its actual terminator. It does not normalize bytes,
+line endings, or configuration syntax. LF and CRLF therefore remain
+observable, as do mixed endings, an unterminated final line, empty files,
+Unicode, and UTF-8 BOM presence. Diff metadata includes the exact byte length,
+SHA-256, BOM, line-ending style, trailing-newline state, and both live pointer
+flags. The source BLOB is never Base64-encoded into the diff response.
+
+Diff resource limits are deliberately below the 64 MiB configuration limit:
+the two inputs together may use at most 8 MiB and 200,000 logical lines, and
+the returned hunks may contain at most 10,000 rows. Exceeding a limit returns
+`413 revision.diff_too_large`; the service never silently truncates a result.
+Comparing the same revision or the same content hash returns an empty,
+`identical` result without running Myers.
 
 ### Administrator and session security
 
@@ -261,7 +288,11 @@ Internal errors expose only a safe request ID.
 * **Slice 1:** single-admin Axum service, SQLite persistence,
   immutable revisions, concurrency protection, stable URLs, and the real Web
   HTTP seam.
-* **Slice 2 (current):** read-only revision history metadata/detail API and
-  editor inspection UI, while current and served pointers remain coupled.
-* **Later:** Diff, Publish/Rollback, optional native validators, embedded Web
-  assets, Docker, and individually scoped adapters or conversion tools.
+* **Slice 2:** read-only revision history metadata/detail API and editor
+  inspection UI, while current and served pointers remain coupled.
+* **Slice 3 (current):** bounded, read-only parent revision Diff in the Rust
+  Service and the history detail view. The UI currently compares only the
+  selected revision with its parent; `current_revision_id` and
+  `served_revision_id` remain coupled.
+* **Later:** Publish/Rollback, optional native validators, embedded Web assets,
+  Docker, and individually scoped adapters or conversion tools.

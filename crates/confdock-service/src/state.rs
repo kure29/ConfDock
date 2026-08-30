@@ -10,7 +10,7 @@ use sqlx::{
     SqlitePool,
 };
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 
 use crate::{
     auth::{bootstrap_admin, cleanup_expired_sessions, AuthError, LoginThrottle},
@@ -23,12 +23,15 @@ use crate::{
 // its migration lock for separate processes.
 static STARTUP_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
+pub const MAX_CONCURRENT_DIFFS: usize = 1;
+
 #[derive(Clone)]
 pub struct AppState {
     pub pool: SqlitePool,
     pub config: Arc<ServiceConfig>,
     pub registry: Arc<TargetRegistry>,
     pub login_throttle: Arc<LoginThrottle>,
+    pub diff_slots: Arc<Semaphore>,
 }
 
 #[derive(Debug, Error)]
@@ -77,6 +80,7 @@ impl AppState {
             config: Arc::new(config),
             registry: Arc::new(TargetRegistry::builtin()),
             login_throttle: Arc::new(LoginThrottle::default()),
+            diff_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_DIFFS)),
         })
     }
 }

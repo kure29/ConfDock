@@ -8,6 +8,7 @@ import type {
   Project,
   ProjectSummary,
   Revision,
+  RevisionDiff,
   RevisionListOptions,
   RevisionPage,
   SaveResult,
@@ -54,6 +55,12 @@ export interface ConfDockApi {
   ): Promise<Result<RevisionPage, ApiError>>
   /** Load one immutable revision's original bytes for read-only inspection. */
   getRevision(projectId: string, revisionId: string): Promise<Result<Revision, ApiError>>
+  /** Return a bounded, read-only line diff in the explicit from → to order. */
+  getRevisionDiff(
+    projectId: string,
+    fromRevisionId: string,
+    toRevisionId: string,
+  ): Promise<Result<RevisionDiff, ApiError>>
   renameProject(id: string, name: string): Promise<Result<ProjectSummary, ApiError>>
   deleteProject(id: string): Promise<Result<void, ApiError>>
 

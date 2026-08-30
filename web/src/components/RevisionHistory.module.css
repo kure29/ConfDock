@@ -189,6 +189,18 @@
   line-height: var(--leading-normal);
 }
 
+.detailMode {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.initialNotice {
+  color: var(--fg-subtle);
+  font-size: var(--text-xs);
+}
+
 .message {
   padding: var(--space-4) 0;
   color: var(--fg-subtle);

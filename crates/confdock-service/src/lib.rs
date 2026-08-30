@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod config;
+pub(crate) mod diff;
 pub mod dto;
 pub mod error;
 pub mod routes;
