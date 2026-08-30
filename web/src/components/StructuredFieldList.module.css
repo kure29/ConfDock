@@ -1,0 +1,84 @@
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+.notice {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+  line-height: var(--leading-normal);
+}
+
+.absent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+}
+
+.absent:first-child {
+  border-top: 0;
+}
+
+.absentPath {
+  font-family: var(--font-mono);
+  color: var(--fg);
+}
+
+.pointer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.pointerTitle {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--fg);
+}
+
+.pointerGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.pointerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.ok {
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+}
+
+.pointerError {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-xs);
+  color: var(--bad);
+  line-height: var(--leading-normal);
+}
+
+.pointerDetail {
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .pointerGrid {
+    grid-template-columns: 1fr;
+  }
+}

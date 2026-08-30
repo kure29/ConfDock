@@ -1,0 +1,116 @@
+.bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.back {
+  flex-shrink: 0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  transition: color var(--transition), background-color var(--transition);
+}
+
+.back:hover {
+  color: var(--fg);
+  background: var(--bg-subtle);
+}
+
+/* Editable in place: renaming is a one-field operation and does not deserve a
+ * dialog. It reads as a heading until you focus it. */
+.name {
+  min-width: 6ch;
+  max-width: 28ch;
+  flex: 0 1 auto;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-tight);
+  transition: border-color var(--transition), background-color var(--transition);
+}
+
+.name:hover {
+  border-color: var(--border);
+}
+
+.name:focus {
+  border-color: var(--border-strong);
+  background: var(--bg);
+}
+
+.file {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.dirty {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.panel {
+  margin-top: var(--space-4);
+}
+
+.validating {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.notice {
+  margin-top: var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  line-height: var(--leading-normal);
+}
+
+.danger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-12);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.dangerText {
+  margin-right: auto;
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+}
+
+.confirm {
+  font-size: var(--text-sm);
+  color: var(--fg);
+}
+
+@media (max-width: 720px) {
+  .bar {
+    flex-wrap: wrap;
+  }
+
+  .file {
+    display: none;
+  }
+
+  .actions {
+    width: 100%;
+    margin-left: 0;
+  }
+}

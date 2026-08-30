@@ -1,0 +1,32 @@
+{
+  "name": "confdock-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "ConfDock 管理界面：单管理员、原生配置源码保真编辑",
+  "scripts": {
+    "dev": "vite",
+    "predev": "npm run wasm:build",
+    "wasm:build": "node scripts/build-wasm.mjs",
+    "prebuild": "npm run wasm:build",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "pretypecheck": "npm run wasm:build",
+    "typecheck": "tsc --noEmit",
+    "pretest": "npm run wasm:build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vitest": "^4.1.11"
+  }
+}

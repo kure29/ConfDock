@@ -1,0 +1,69 @@
+.created {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  background: var(--accent-subtle);
+}
+
+.createdTitle {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--fg);
+}
+
+/* Stated in warn colour because it is a one-time chance, not a tip. */
+.warning {
+  font-size: var(--text-xs);
+  color: var(--warn);
+  line-height: var(--leading-normal);
+}
+
+.note {
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+}
+
+.loading {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border);
+}
+
+.item:first-child {
+  border-top: 0;
+}
+
+.itemText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.token {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--fg);
+}
+
+.itemMeta {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}

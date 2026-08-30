@@ -1,0 +1,59 @@
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.none {
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+  line-height: var(--leading-normal);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-subtle);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 6em 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.term {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.detail {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--fg);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+
+/* The adapter's own words, set apart so it reads as a quotation rather than as
+ * our description of it. */
+.verbatim {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+  line-height: var(--leading-code);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}

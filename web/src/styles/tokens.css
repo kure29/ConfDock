@@ -1,0 +1,158 @@
+/* ConfDock design tokens.
+ *
+ * Rules this file exists to enforce:
+ *   - Near-monochrome plus ONE accent. Semantic colour is limited to warn/bad.
+ *   - No shadows, no gradients. Depth comes from 1px borders and whitespace.
+ *   - Four type sizes, two weights. Anything else is a mistake, not a variant.
+ *   - One radius. One transition duration.
+ *   - Zero network fonts.
+ *
+ * Light is the design baseline; dark overrides the same token names so no
+ * component ever branches on theme.
+ */
+
+:root {
+  /* Lets the browser paint scrollbars and native menus to match. The forced
+   * themes below pin it; by default it follows the OS. */
+  color-scheme: light dark;
+
+  /* ---- Surfaces ---- */
+  --bg: #ffffff;
+  --bg-subtle: #fafafa; /* row hover, table head */
+  --bg-inset: #f4f4f5; /* code, inputs, disabled */
+
+  /* ---- Lines ---- */
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8; /* input borders, focused containers */
+
+  /* ---- Text ---- */
+  --fg: #18181b;
+  --fg-muted: #71717a; /* meta lines, labels */
+  --fg-subtle: #a1a1aa; /* line numbers, placeholders */
+
+  /* ---- Accent (single) ---- */
+  --accent: #2f6f64;
+  --accent-fg: #ffffff;
+  --accent-subtle: #eef4f2;
+  --accent-border: #b8d3cd;
+
+  /* ---- Semantic (only two) ---- */
+  --warn: #a16207;
+  --warn-subtle: #fefce8;
+  --warn-border: #eadcac;
+
+  --bad: #b42318;
+  --bad-subtle: #fef3f2;
+  --bad-border: #f0c8c3;
+
+  /* ---- Type ---- */
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+    'Liberation Mono', monospace;
+
+  --text-xs: 12px; /* badges, meta */
+  --text-sm: 13px; /* body, forms, code */
+  --text-md: 15px; /* list titles, section headings */
+  --text-lg: 21px; /* page title */
+
+  --leading-tight: 1.3;
+  --leading-normal: 1.55;
+  --leading-code: 1.6;
+
+  /* Only these two weights exist. */
+  --weight-normal: 400;
+  --weight-medium: 500;
+
+  /* ---- Space (4px base) ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  /* ---- Shape & motion ---- */
+  --radius: 6px;
+  --radius-sm: 4px;
+  --transition: 120ms ease;
+
+  /* ---- Layout ---- */
+  --width-content: 880px; /* list, settings, login */
+  --width-wide: 1180px; /* editor, needs room for code */
+  --topbar-height: 52px;
+
+  /* The single shadow in the system, used only to lift a modal off the page. */
+  --shadow-dialog: 0 10px 40px rgb(0 0 0 / 12%);
+}
+
+/* Follow the OS unless the user forced a theme in Settings. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0e0f11;
+    --bg-subtle: #17181b;
+    --bg-inset: #1c1d21;
+
+    --border: #27282c;
+    --border-strong: #3a3b40;
+
+    --fg: #e8e8ea;
+    --fg-muted: #9a9aa2;
+    --fg-subtle: #6c6d75;
+
+    --accent: #4fa896;
+    --accent-fg: #0e0f11;
+    --accent-subtle: #14201e;
+    --accent-border: #2c4a44;
+
+    --warn: #d4a72c;
+    --warn-subtle: #241f10;
+    --warn-border: #4a4023;
+
+    --bad: #f27b72;
+    --bad-subtle: #2a1614;
+    --bad-border: #552a26;
+
+    --shadow-dialog: 0 10px 40px rgb(0 0 0 / 50%);
+  }
+}
+
+/* Forced dark, regardless of OS. Values duplicated on purpose: CSS cannot
+ * reference a media-query block, and one extra copy is cheaper than a
+ * runtime theme object. */
+:root[data-theme='dark'] {
+  --bg: #0e0f11;
+  --bg-subtle: #17181b;
+  --bg-inset: #1c1d21;
+
+  --border: #27282c;
+  --border-strong: #3a3b40;
+
+  --fg: #e8e8ea;
+  --fg-muted: #9a9aa2;
+  --fg-subtle: #6c6d75;
+
+  --accent: #4fa896;
+  --accent-fg: #0e0f11;
+  --accent-subtle: #14201e;
+  --accent-border: #2c4a44;
+
+  --warn: #d4a72c;
+  --warn-subtle: #241f10;
+  --warn-border: #4a4023;
+
+  --bad: #f27b72;
+  --bad-subtle: #2a1614;
+  --bad-border: #552a26;
+
+  --shadow-dialog: 0 10px 40px rgb(0 0 0 / 50%);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
