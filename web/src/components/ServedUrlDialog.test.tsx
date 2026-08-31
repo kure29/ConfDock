@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     createToken: vi.fn(),
     updateToken: vi.fn(),
     revokeToken: vi.fn(),
+    deleteRevokedToken: vi.fn(),
   },
   toast: { notify: vi.fn(), fail: vi.fn() },
 }))
@@ -73,6 +74,7 @@ beforeEach(() => {
   mocks.api.createToken.mockReset()
   mocks.api.updateToken.mockReset()
   mocks.api.revokeToken.mockReset()
+  mocks.api.deleteRevokedToken.mockReset()
   mocks.toast.notify.mockReset()
   mocks.toast.fail.mockReset()
   mocks.api.listTokens.mockResolvedValue(ok([]))
@@ -122,7 +124,7 @@ describe('ServedUrlDialog hosted address controls', () => {
       renderer = create(<ServedUrlDialog open onClose={() => {}} projectId="p1" />)
     })
     expect(renderer!.root.findAllByType('button').map((button) => button.props.children)).toContain('编辑')
-    expect(renderer!.root.findAllByType('button')).toHaveLength(6)
+    expect(renderer!.root.findAllByType('button')).toHaveLength(7)
     const text = renderer!.toJSON()
     expect(JSON.stringify(text)).toContain('永久有效')
     expect(JSON.stringify(text)).toContain('已撤销')
@@ -144,6 +146,25 @@ describe('ServedUrlDialog hosted address controls', () => {
       expectedDisplayName: '临时分享',
       expectedExpiresAt: '2026-09-01T00:00:00Z',
     })
+  })
+
+  it('offers permanent deletion only after a token has been revoked', async () => {
+    const revoked = token({ id: 't-revoked', displayName: '旧地址', revokedAt: '2026-08-30T00:00:00Z' })
+    mocks.api.listTokens.mockResolvedValue(ok([revoked]))
+    mocks.api.deleteRevokedToken.mockResolvedValue(ok(undefined))
+    await act(async () => {
+      renderer = create(<ServedUrlDialog open onClose={() => {}} projectId="p1" />)
+    })
+    expect(renderer!.root.findAllByType('button').map((button) => button.props.children)).toContain('删除')
+    expect(renderer!.root.findAllByType('button').map((button) => button.props.children)).not.toContain('撤销')
+    const deleteButton = renderer!.root.findAllByType('button').find((button) => button.props.children === '删除')
+    await act(async () => deleteButton!.props.onClick())
+    expect(JSON.stringify(renderer!.toJSON())).toContain('永久删除托管地址')
+    const confirm = renderer!.root
+      .findAllByType('button')
+      .find((button) => button.props.children === '永久删除')
+    await act(async () => confirm!.props.onClick())
+    expect(mocks.api.deleteRevokedToken).toHaveBeenCalledWith('p1', 't-revoked')
   })
 
   it('rejects an explicitly cleared address name instead of restoring the project name', async () => {

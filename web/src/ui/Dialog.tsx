@@ -20,6 +20,7 @@ interface DialogProps {
  */
 export function Dialog({ open, onClose, title, description, footer, children }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null)
+  const titleRef = useRef<HTMLHeadingElement>(null)
   /** Several dialogs are mounted at once (closed ones still render), so the
    * title id has to be unique per instance. */
   const titleId = useId()
@@ -27,7 +28,13 @@ export function Dialog({ open, onClose, title, description, footer, children }: 
   useEffect(() => {
     const dialog = ref.current
     if (dialog === null) return
-    if (open && !dialog.open) dialog.showModal()
+    if (open && !dialog.open) {
+      dialog.showModal()
+      // Native dialogs otherwise move focus to the first input. Focusing the
+      // title gives touch users a stable starting point without stealing their
+      // attention into a form control as soon as the sheet opens.
+      titleRef.current?.focus({ preventScroll: true })
+    }
     if (!open && dialog.open) dialog.close()
   }, [open])
 
@@ -50,10 +57,16 @@ export function Dialog({ open, onClose, title, description, footer, children }: 
   }
 
   return (
-    <dialog ref={ref} className={styles.dialog} onClick={onBackdropClick} aria-labelledby={titleId}>
+    <dialog
+      ref={ref}
+      className={styles.dialog}
+      onClick={onBackdropClick}
+      aria-labelledby={titleId}
+      tabIndex={-1}
+    >
       <div className={styles.inner}>
         <header className={styles.header}>
-          <h2 className={styles.title} id={titleId}>
+          <h2 ref={titleRef} className={styles.title} id={titleId} tabIndex={-1}>
             {title}
           </h2>
           {description !== undefined && <p className={styles.description}>{description}</p>}

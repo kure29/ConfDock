@@ -1862,6 +1862,37 @@ async fn stable_tokens_store_only_hash_serve_exact_bytes_and_revoke_or_cascade()
         StatusCode::NOT_FOUND
     );
 
+    assert_eq!(
+        request(
+            &service.app,
+            Method::POST,
+            &format!("/api/projects/{project_id}/tokens/{token_id}/purge"),
+            None,
+            None,
+        )
+        .await
+        .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let purged = request(
+        &service.app,
+        Method::POST,
+        &format!("/api/projects/{project_id}/tokens/{token_id}/purge"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(purged.status(), StatusCode::NO_CONTENT);
+    let purged_again = request(
+        &service.app,
+        Method::POST,
+        &format!("/api/projects/{project_id}/tokens/{token_id}/purge"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(purged_again.status(), StatusCode::NOT_FOUND);
+
     let second = response_json(
         request(
             &service.app,
@@ -1874,6 +1905,18 @@ async fn stable_tokens_store_only_hash_serve_exact_bytes_and_revoke_or_cascade()
     )
     .await;
     let second_plaintext = second["plaintext"].as_str().unwrap().to_owned();
+    let active_purge = request(
+        &service.app,
+        Method::POST,
+        &format!(
+            "/api/projects/{project_id}/tokens/{}/purge",
+            second["token"]["id"]
+        ),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(active_purge.status(), StatusCode::NOT_FOUND);
     let updated_source = [
         &[0xef, 0xbb, 0xbf][..],
         b"{\r\n  \"log\": {\"level\": \"warn\"},\n  \"note\": \"\xe5\xae\xb6\xe5\xba\xad\xe7\xbd\x91\xe7\xbb\x9c\"\r\n}\r\n",
@@ -1955,6 +1998,109 @@ async fn stable_tokens_store_only_hash_serve_exact_bytes_and_revoke_or_cascade()
         .await
         .unwrap();
     assert_eq!((revisions, tokens), (0, 0));
+}
+
+#[tokio::test]
+async fn public_url_settings_are_authenticated_validated_and_persisted() {
+    let service = TestService::new().await;
+    assert_eq!(
+        request(&service.app, Method::GET, "/api/settings", None, None)
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let (cookie, _) = login(&service.app, PASSWORD).await;
+    assert_eq!(
+        response_json(
+            request(
+                &service.app,
+                Method::GET,
+                "/api/settings",
+                Some(&cookie),
+                None
+            )
+            .await
+        )
+        .await,
+        json!({"publicUrl": "http://127.0.0.1:8787"})
+    );
+
+    for invalid in [
+        "ftp://example.test",
+        "https://example.test/path",
+        "https://example.test/?token=secret",
+        "https://user:password@example.test",
+    ] {
+        let response = request(
+            &service.app,
+            Method::PATCH,
+            "/api/settings",
+            Some(&cookie),
+            Some(json!({"publicUrl": invalid})),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{invalid}");
+    }
+
+    let updated = request(
+        &service.app,
+        Method::PATCH,
+        "/api/settings",
+        Some(&cookie),
+        Some(json!({"publicUrl": "https://cd.example.test:8443/"})),
+    )
+    .await;
+    assert_eq!(updated.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(updated).await,
+        json!({"publicUrl": "https://cd.example.test:8443"})
+    );
+
+    let info =
+        response_json(request(&service.app, Method::GET, "/api/service", None, None).await).await;
+    assert_eq!(info["subscriptionBase"], "https://cd.example.test:8443/sub");
+    let project = create_project(
+        &service.app,
+        &cookie,
+        "Settings URL",
+        "sing-box",
+        "config.json",
+        br#"{}"#,
+    )
+    .await;
+    let token = response_json(
+        request(
+            &service.app,
+            Method::POST,
+            &format!("/api/projects/{}/tokens", project["id"].as_str().unwrap()),
+            Some(&cookie),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert!(token["url"]
+        .as_str()
+        .unwrap()
+        .starts_with("https://cd.example.test:8443/sub/"));
+
+    let restarted = initialize(&service.database_url, Some(PASSWORD), 1024 * 1024).await;
+    let restarted_app = router(restarted);
+    let (restarted_cookie, _) = login(&restarted_app, PASSWORD).await;
+    assert_eq!(
+        response_json(
+            request(
+                &restarted_app,
+                Method::GET,
+                "/api/settings",
+                Some(&restarted_cookie),
+                None
+            )
+            .await,
+        )
+        .await,
+        json!({"publicUrl": "https://cd.example.test:8443"})
+    );
 }
 
 #[tokio::test]

@@ -56,6 +56,7 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
   const [editName, setEditName] = useState('')
   const [editPreset, setEditPreset] = useState<HostedExpiryPreset>('never')
   const [editCustomExpiry, setEditCustomExpiry] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<AccessToken | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [statusNow, setStatusNow] = useState(() => Date.now())
@@ -142,6 +143,7 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
     setCreated(null)
     setError(null)
     setEditingId(null)
+    setDeleteTarget(null)
     setDisplayName(tokenName(projectName ?? '', DEFAULT_NAME))
     setExpiryPreset('never')
     setCustomExpiry('')
@@ -155,6 +157,7 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
       setBusy(false)
       setCreated(null)
       setEditingId(null)
+      setDeleteTarget(null)
       return
     }
     setTokens(null)
@@ -320,13 +323,35 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
     }
   }
 
+  async function purge(tokenId: string) {
+    const busyToken = beginBusy()
+    if (busyToken === null) return
+    const requestedProjectId = projectId
+    const requestedGeneration = generationRef.current
+    try {
+      const result = await api.deleteRevokedToken(requestedProjectId, tokenId)
+      if (isCurrent(requestedProjectId, requestedGeneration)) {
+        if (!result.ok) {
+          toast.fail(result.error.message)
+        } else {
+          setDeleteTarget(null)
+          setCreated((current) => (current?.token.id === tokenId ? null : current))
+          await reload()
+        }
+      }
+    } finally {
+      finishBusy(busyToken)
+    }
+  }
+
   function closeDialog() {
     if (busyTokenRef.current !== null) return
     onClose()
   }
 
   return (
-    <Dialog
+    <>
+      <Dialog
       open={open}
       onClose={closeDialog}
       title="托管地址"
@@ -459,6 +484,15 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
                         撤销
                       </Button>
                     )}
+                    {revoked && (
+                      <Button
+                        variant="danger"
+                        disabled={busy}
+                        onClick={() => setDeleteTarget(token)}
+                      >
+                        删除
+                      </Button>
+                    )}
                   </>
                 )}
               </li>
@@ -466,6 +500,38 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
           })}
         </ul>
       )}
-    </Dialog>
+      </Dialog>
+
+      {deleteTarget !== null && (
+        <Dialog
+          open
+          onClose={() => {
+            if (!busy) setDeleteTarget(null)
+          }}
+          title="永久删除托管地址"
+          description="删除后，这条托管地址的记录将无法恢复。"
+          footer={
+            <>
+              <Button variant="secondary" disabled={busy} onClick={() => setDeleteTarget(null)}>
+                取消
+              </Button>
+              <Button
+                variant="danger"
+                loading={busy}
+                onClick={() => {
+                  void purge(deleteTarget.id)
+                }}
+              >
+                永久删除
+              </Button>
+            </>
+          }
+        >
+          <p>
+            确定要删除「{deleteTarget.displayName}」吗？撤销记录和相关元数据都会被移除。
+          </p>
+        </Dialog>
+      )}
+    </>
   )
 }

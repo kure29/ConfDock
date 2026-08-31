@@ -315,12 +315,13 @@ impl ServiceConfig {
     }
 }
 
-fn normalize_public_url(value: &str) -> Result<String, ConfigError> {
+pub fn normalize_public_url(value: &str) -> Result<String, ConfigError> {
     let parsed = Url::parse(value).map_err(|_| ConfigError::InvalidPublicUrl)?;
     if !matches!(parsed.scheme(), "http" | "https")
         || parsed.host_str().is_none()
         || !parsed.username().is_empty()
         || parsed.password().is_some()
+        || (parsed.path() != "" && parsed.path() != "/")
         || parsed.query().is_some()
         || parsed.fragment().is_some()
     {
@@ -426,6 +427,7 @@ mod tests {
         );
         assert!(normalize_public_url("file:///tmp/config").is_err());
         assert!(normalize_public_url("https://user@example.test").is_err());
+        assert!(normalize_public_url("https://example.test/path").is_err());
         assert!(normalize_public_url("https://example.test/?token=secret").is_err());
     }
     #[test]

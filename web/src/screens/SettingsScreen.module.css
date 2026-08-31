@@ -43,48 +43,6 @@
   color: var(--fg-muted);
 }
 
-/* The capability table is the one place in the app with more than three columns,
- * so it gets a horizontal scroller instead of being crushed on narrow screens. */
-.tableWrap {
-  overflow-x: auto;
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--text-xs);
-}
-
-.table th,
-.table td {
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  vertical-align: top;
-  white-space: normal;
-}
-
-.table thead th {
-  font-weight: var(--weight-medium);
-  color: var(--fg-subtle);
-  white-space: nowrap;
-}
-
-.table tbody tr:last-child th,
-.table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.rowHead {
-  font-weight: var(--weight-medium);
-  color: var(--fg);
-  white-space: nowrap;
-}
-
-.table .mono {
-  white-space: nowrap;
-}
-
 @media (max-width: 640px) {
   .pair {
     grid-template-columns: 1fr;

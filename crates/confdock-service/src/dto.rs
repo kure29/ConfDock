@@ -251,6 +251,18 @@ pub struct ServiceInfoDto {
     pub subscription_base: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceSettingsDto {
+    pub public_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateServiceSettingsRequest {
+    pub public_url: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SignInRequest {
     pub password: String,

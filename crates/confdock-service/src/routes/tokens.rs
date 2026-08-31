@@ -38,14 +38,9 @@ pub async fn create(
         None => DEFAULT_TOKEN_DISPLAY_NAME.to_owned(),
     };
     let expires_at = token_expiry(input.expires_at.as_deref(), unix_timestamp())?;
-    let token = storage::create_token(
-        &state.pool,
-        &id,
-        &display_name,
-        expires_at,
-        &state.config.public_url,
-    )
-    .await?;
+    let public_url = state.public_url.read().await.clone();
+    let token =
+        storage::create_token(&state.pool, &id, &display_name, expires_at, &public_url).await?;
     Ok((StatusCode::CREATED, Json(token)))
 }
 
@@ -78,5 +73,13 @@ pub async fn revoke(
     Path((id, token_id)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
     storage::revoke_token(&state.pool, &id, &token_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn purge(
+    State(state): State<AppState>,
+    Path((id, token_id)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    storage::delete_revoked_token(&state.pool, &id, &token_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

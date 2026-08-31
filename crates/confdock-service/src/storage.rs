@@ -20,6 +20,35 @@ use crate::{
 pub const DEFAULT_REVISION_PAGE_SIZE: usize = 50;
 pub const MAX_REVISION_PAGE_SIZE: usize = 100;
 const MAX_REVISION_CURSOR_BYTES: usize = 128;
+const INSTANCE_SETTINGS_ID: i64 = 1;
+
+pub async fn ensure_public_url(pool: &SqlitePool, fallback: &str) -> Result<String, sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO instance_settings (id, public_url) VALUES (?, ?) \
+         ON CONFLICT(id) DO NOTHING",
+    )
+    .bind(INSTANCE_SETTINGS_ID)
+    .bind(fallback)
+    .execute(pool)
+    .await?;
+    sqlx::query_scalar("SELECT public_url FROM instance_settings WHERE id = ?")
+        .bind(INSTANCE_SETTINGS_ID)
+        .fetch_one(pool)
+        .await
+}
+
+pub async fn update_public_url(pool: &SqlitePool, public_url: &str) -> Result<(), ApiError> {
+    let result = sqlx::query("UPDATE instance_settings SET public_url = ? WHERE id = ?")
+        .bind(public_url)
+        .bind(INSTANCE_SETTINGS_ID)
+        .execute(pool)
+        .await
+        .map_err(|_| ApiError::internal())?;
+    if result.rows_affected() != 1 {
+        return Err(ApiError::internal());
+    }
+    Ok(())
+}
 
 const FULL_PROJECT_QUERY: &str =
     "SELECT p.id, p.name, p.target_id, p.file_name, p.current_revision_id, \
@@ -782,6 +811,39 @@ pub async fn revoke_token(
     let mut connection = begin_immediate(pool).await?;
     let result = revoke_token_inner(&mut connection, project_id, token_id).await;
     finish_transaction(connection, result).await
+}
+
+pub async fn delete_revoked_token(
+    pool: &SqlitePool,
+    project_id: &str,
+    token_id: &str,
+) -> Result<(), ApiError> {
+    let mut connection = begin_immediate(pool).await?;
+    let result = delete_revoked_token_inner(&mut connection, project_id, token_id).await;
+    finish_transaction(connection, result).await
+}
+
+async fn delete_revoked_token_inner(
+    connection: &mut PoolConnection<Sqlite>,
+    project_id: &str,
+    token_id: &str,
+) -> Result<(), ApiError> {
+    ensure_project_connection(connection, project_id).await?;
+    let result = sqlx::query(
+        "DELETE FROM access_tokens WHERE id = ? AND project_id = ? AND revoked_at IS NOT NULL",
+    )
+    .bind(token_id)
+    .bind(project_id)
+    .execute(&mut **connection)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    if result.rows_affected() == 0 {
+        return Err(ApiError::not_found(
+            "token.not_found",
+            "托管地址不存在或尚未撤销",
+        ));
+    }
+    Ok(())
 }
 
 async fn revoke_token_inner(

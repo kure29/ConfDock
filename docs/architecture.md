@@ -172,6 +172,8 @@ SQLite migrations run automatically at startup and create:
   validation snapshots, parent IDs, and project-local revision numbers;
 * `access_tokens`: random-token SHA-256 hashes, display-only prefix/suffix,
   usage timestamps, and revocation state.
+* `instance_settings`: the singleton public URL used to build hosted address
+  links and reported by the service-info endpoint.
 
 Foreign keys, WAL, and a busy timeout are enabled on every SQLite connection.
 On Unix, the database file and existing WAL/SHM sidecars are kept as regular,
@@ -182,6 +184,13 @@ Deleting a project cascades to its revisions and access tokens. Revision rows
 cannot be updated. To back up a live database, stop writes or use SQLite's
 online backup facilities instead of copying only the main file while WAL is
 active.
+
+The authenticated `/api/settings` endpoint reads and updates the singleton
+public URL. It accepts only an `http://` or `https://` origin (host plus an
+optional port, with no credentials, path, query, or fragment). The listener
+continues to bind to its configured local address; this setting only controls
+the origin embedded in newly created hosted links and returned by
+`/api/service`.
 
 ### Project and revision transaction
 

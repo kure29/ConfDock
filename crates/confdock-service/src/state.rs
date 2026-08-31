@@ -10,7 +10,7 @@ use sqlx::{
     SqlitePool,
 };
 use thiserror::Error;
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::{Mutex, RwLock, Semaphore};
 
 use crate::{
     auth::{bootstrap_admin, cleanup_expired_sessions, AuthError, LoginThrottle},
@@ -29,6 +29,7 @@ pub const MAX_CONCURRENT_DIFFS: usize = 1;
 pub struct AppState {
     pub pool: SqlitePool,
     pub config: Arc<ServiceConfig>,
+    pub public_url: Arc<RwLock<String>>,
     pub registry: Arc<TargetRegistry>,
     pub login_throttle: Arc<LoginThrottle>,
     pub diff_slots: Arc<Semaphore>,
@@ -81,11 +82,18 @@ impl AppState {
             .map_err(|_| StartError::Migration)?;
         config.secure_database_permissions()?;
 
+        let public_url = crate::storage::ensure_public_url(&pool, &config.public_url)
+            .await
+            .map_err(|_| StartError::Migration)?;
+        let public_url =
+            crate::config::normalize_public_url(&public_url).map_err(|_| StartError::Migration)?;
+
         cleanup_expired_sessions(&pool).await?;
 
         Ok(Self {
             pool,
             config: Arc::new(config),
+            public_url: Arc::new(RwLock::new(public_url)),
             registry: Arc::new(TargetRegistry::builtin()),
             login_throttle: Arc::new(LoginThrottle::default()),
             diff_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_DIFFS)),
