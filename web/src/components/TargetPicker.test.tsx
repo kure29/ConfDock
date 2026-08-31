@@ -14,7 +14,10 @@ describe('TargetPicker cards', () => {
     expect(markup).not.toMatch(/https?:\/\//)
     for (const descriptor of descriptors) {
       expect(markup).toContain(descriptor.displayName)
-      expect(markup).toContain(`/client-icons/${descriptor.id === 'sing-box' ? 'sing-box' : descriptor.id}.png`)
+      const icon = descriptor.id === 'mihomo'
+        ? 'mihomo-party.png'
+        : `${descriptor.id === 'sing-box' ? 'sing-box' : descriptor.id}.png`
+      expect(markup).toContain(`/client-icons/${icon}`)
     }
     expect(markup).not.toContain('最深校验')
     expect(markup).not.toContain('.yaml')

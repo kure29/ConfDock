@@ -38,10 +38,17 @@ printf 'Rustc: %s\n' "$(rustc --version)"
 printf 'Cargo: %s\n' "$(cargo --version)"
 printf 'wasm-bindgen: %s\n' "$wasm_bindgen_version"
 
+# Vite normally empties this directory, but make that contract explicit so an
+# interrupted or hand-copied build can never leave stale assets for rust-embed.
+rm -rf -- web/dist
 npm ci --prefix web
 npm run wasm:build --prefix web
 npm run build --prefix web
 test -f web/dist/index.html
+if find web/dist -type f \( -name '*.map' -o -name '* 2.*' \) -print -quit | grep -q .; then
+  printf 'web/dist contains stale or source-map output\n' >&2
+  exit 1
+fi
 
 binary="target/release/confdock"
 temporary_unembedded="$(mktemp -t confdock-unembedded.XXXXXX)"

@@ -12,6 +12,9 @@ test -x "$binary"
 runtime_dir="$(mktemp -d -t confdock-smoke.XXXXXX)"
 data_dir="$runtime_dir/data"
 mkdir -p "$data_dir"
+runtime_binary="$runtime_dir/confdock"
+install -m 755 "$binary" "$runtime_binary"
+binary="$runtime_binary"
 port="${CONFDOCK_SMOKE_PORT:-18878}"
 base_url="http://127.0.0.1:${port}"
 log_file="$runtime_dir/server.log"
@@ -69,23 +72,31 @@ assert_content_type() {
 assert_content_type "$script_path" "application/javascript; charset=utf-8"
 assert_content_type "$style_path" "text/css; charset=utf-8"
 curl -fsS "$base_url$script_path" -o "$runtime_dir/app.js"
+test -s "$runtime_dir/app.js"
+curl -fsS "$base_url$style_path" -o "$runtime_dir/app.css"
+test -s "$runtime_dir/app.css"
 wasm_module="$(grep -oE 'confdock_wasm-[A-Za-z0-9_.-]+\.js' "$runtime_dir/app.js" | head -1)"
 test -n "$wasm_module"
 curl -fsS "$base_url/assets/$wasm_module" -o "$runtime_dir/wasm.js"
 wasm_name="$(grep -oE 'confdock_wasm_bg-[A-Za-z0-9_.-]+\.wasm' "$runtime_dir/wasm.js" | head -1)"
 test -n "$wasm_name"
 assert_content_type "/assets/$wasm_name" "application/wasm"
-assert_content_type "/client-icons/mihomo.png" "image/png"
+assert_content_type "/client-icons/mihomo-party.png" "image/png"
 
 head_bytes="$(curl -fsS --head -o /dev/null -w '%{size_download}' "$base_url$script_path")"
 test "$head_bytes" = "0"
 test "$(curl -fsS -o "$runtime_dir/spa.html" -w '%{http_code}' "$base_url/p/smoke")" = "200"
 grep -F '<div id="root"></div>' "$runtime_dir/spa.html" >/dev/null
 
-for path in /api/not-found /sub/not-found /assets/missing.js /client-icons/missing.png; do
+for path in /api/not-found /sub/not-found /assets/missing.js /assets/missing.css /assets/missing.wasm /client-icons/missing.png /client-icons/missing.webp; do
   status="$(curl -sS -o "$runtime_dir/missing.body" -w '%{http_code}' "$base_url$path")"
   test "$status" = "404"
   ! grep -F '<div id="root"></div>' "$runtime_dir/missing.body" >/dev/null
+done
+
+for method in POST PUT PATCH DELETE; do
+  status="$(curl -sS -X "$method" -o "$runtime_dir/method.body" -w '%{http_code}' "$base_url/unknown/client-route")"
+  test "$status" = "404"
 done
 
 status="$(curl --path-as-is -sS -o "$runtime_dir/traversal.body" -w '%{http_code}' "$base_url/assets/%2e%2e/Cargo.toml")"

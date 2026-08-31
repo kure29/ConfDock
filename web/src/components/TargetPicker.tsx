@@ -13,7 +13,7 @@ interface TargetPickerProps {
 }
 
 const TARGET_ICON: Record<TargetId, string> = {
-  mihomo: 'mihomo.png',
+  mihomo: 'mihomo-party.png',
   'sing-box': 'sing-box.png',
   surge: 'surge.png',
   loon: 'loon.png',

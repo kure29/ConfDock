@@ -124,7 +124,7 @@ async fn embedded_static_routes_preserve_spa_boundaries_mime_and_cache_contracts
         "public, max-age=31536000, immutable"
     );
 
-    let icon_response = request(&app, Method::GET, "/client-icons/mihomo.png").await;
+    let icon_response = request(&app, Method::GET, "/client-icons/mihomo-party.png").await;
     assert_eq!(icon_response.status(), StatusCode::OK);
     assert_eq!(icon_response.headers()[header::CONTENT_TYPE], "image/png");
     assert_eq!(icon_response.headers()[header::CACHE_CONTROL], "no-cache");
@@ -143,6 +143,12 @@ async fn embedded_static_routes_preserve_spa_boundaries_mime_and_cache_contracts
     assert!(!head.headers()[header::CONTENT_LENGTH].is_empty());
     assert!(body(head).await.is_empty());
 
+    for method in [Method::POST, Method::PUT, Method::PATCH, Method::DELETE] {
+        let response = request(&app, method, "/unknown/client-route").await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    }
+
     let spa = request(&app, Method::GET, "/projects/demo").await;
     assert_eq!(spa.status(), StatusCode::OK);
     assert!(String::from_utf8(body(spa).await)
@@ -154,7 +160,10 @@ async fn embedded_static_routes_preserve_spa_boundaries_mime_and_cache_contracts
         ("/sub/not-found", "no-store"),
         ("/assets/missing.js", "no-store"),
         ("/client-icons/missing.png", "no-store"),
+        ("/assets/missing.webp", "no-store"),
         ("/assets/%2e%2e/Cargo.toml", "no-store"),
+        ("/assets/%252e%252e/Cargo.toml", "no-store"),
+        ("/assets/%5cCargo.toml", "no-store"),
     ] {
         let response = request(&app, Method::GET, path).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
@@ -180,4 +189,32 @@ async fn health_endpoint_checks_sqlite_and_remains_minimal() {
         body(response).await,
         serde_json::to_vec(&json!({"status":"ok"})).unwrap()
     );
+}
+
+#[tokio::test]
+async fn health_endpoint_reports_database_failure_without_details() {
+    let directory = tempfile::tempdir().unwrap();
+    let database_url = format!(
+        "sqlite://{}",
+        directory.path().join("confdock.db").display()
+    );
+    let config = ServiceConfig::new(
+        "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
+        database_url,
+        "http://127.0.0.1:8787".to_owned(),
+        Some("test-only-admin-password-123!".to_owned()),
+        3600,
+        false,
+        1024 * 1024,
+    )
+    .unwrap();
+    let state = AppState::initialize(config).await.unwrap();
+    let app = router(state.clone());
+    state.pool.close().await;
+
+    let response = request(&app, Method::GET, "/healthz").await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body = body(response).await;
+    assert!(!body.windows(3).any(|window| window == b"db/"));
+    assert!(!body.windows(6).any(|window| window == b"sqlite"));
 }

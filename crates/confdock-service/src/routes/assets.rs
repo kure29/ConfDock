@@ -144,7 +144,9 @@ fn is_hashed_asset(path: &str) -> bool {
     let Some(stem) = file_name.rsplit_once('.').map(|(stem, _)| stem) else {
         return false;
     };
-    let Some((_, hash)) = stem.rsplit_once('-') else {
+    // Vite's base64url digest may itself contain `-`, so split at the first
+    // separator rather than treating only the final segment as the hash.
+    let Some((_, hash)) = stem.split_once('-') else {
         return false;
     };
     hash.len() >= 8
@@ -160,8 +162,9 @@ mod tests {
     #[test]
     fn hashed_assets_use_immutable_cache_only_when_the_name_is_hashed() {
         assert!(is_hashed_asset("assets/index-AbCd1234.js"));
+        assert!(is_hashed_asset("assets/index-C0P-BXNx.js"));
         assert!(!is_hashed_asset("assets/index.js"));
-        assert!(!is_hashed_asset("client-icons/mihomo.png"));
+        assert!(!is_hashed_asset("client-icons/mihomo-party.png"));
         assert_eq!(cache_control("index.html"), "no-cache");
     }
 
@@ -170,5 +173,17 @@ mod tests {
         let paths = WebAssets::iter().collect::<Vec<_>>();
         assert!(paths.iter().any(|path| path == "index.html"));
         assert!(paths.iter().any(|path| path.starts_with("assets/")));
+    }
+
+    #[test]
+    fn supported_raster_and_wasm_mime_types_are_explicit() {
+        assert_eq!(
+            content_type("assets/app.js"),
+            "application/javascript; charset=utf-8"
+        );
+        assert_eq!(content_type("assets/app.css"), "text/css; charset=utf-8");
+        assert_eq!(content_type("assets/core.wasm"), "application/wasm");
+        assert_eq!(content_type("client-icons/client.png"), "image/png");
+        assert_eq!(content_type("client-icons/client.webp"), "image/webp");
     }
 }
