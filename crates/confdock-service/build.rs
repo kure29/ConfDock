@@ -53,9 +53,13 @@ fn main() {
 fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
     for entry in fs::read_dir(directory)? {
         let path = entry?.path();
-        if path.is_dir() {
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            panic!("web/dist contains a symlink: {}", path.display());
+        }
+        if metadata.is_dir() {
             collect_files(&path, files)?;
-        } else if path.is_file() {
+        } else if metadata.is_file() {
             files.push(path);
         }
     }
