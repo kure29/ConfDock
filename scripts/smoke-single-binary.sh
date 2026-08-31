@@ -81,7 +81,7 @@ curl -fsS "$base_url/assets/$wasm_module" -o "$runtime_dir/wasm.js"
 wasm_name="$(grep -oE 'confdock_wasm_bg-[A-Za-z0-9_.-]+\.wasm' "$runtime_dir/wasm.js" | head -1)"
 test -n "$wasm_name"
 assert_content_type "/assets/$wasm_name" "application/wasm"
-assert_content_type "/client-icons/mihomo-party.png" "image/png"
+assert_content_type "/client-icons/mihomo.png" "image/png"
 
 head_bytes="$(curl -fsS --head -o /dev/null -w '%{size_download}' "$base_url$script_path")"
 test "$head_bytes" = "0"

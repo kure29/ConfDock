@@ -15,7 +15,7 @@ describe('TargetPicker cards', () => {
     for (const descriptor of descriptors) {
       expect(markup).toContain(descriptor.displayName)
       const icon = descriptor.id === 'mihomo'
-        ? 'mihomo-party.png'
+        ? 'mihomo.png'
         : `${descriptor.id === 'sing-box' ? 'sing-box' : descriptor.id}.png`
       expect(markup).toContain(`/client-icons/${icon}`)
     }

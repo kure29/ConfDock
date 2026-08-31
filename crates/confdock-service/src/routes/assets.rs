@@ -164,7 +164,7 @@ mod tests {
         assert!(is_hashed_asset("assets/index-AbCd1234.js"));
         assert!(is_hashed_asset("assets/index-C0P-BXNx.js"));
         assert!(!is_hashed_asset("assets/index.js"));
-        assert!(!is_hashed_asset("client-icons/mihomo-party.png"));
+        assert!(!is_hashed_asset("client-icons/mihomo.png"));
         assert_eq!(cache_control("index.html"), "no-cache");
     }
 
