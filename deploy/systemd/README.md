@@ -1,7 +1,8 @@
-# Debian 13 + systemd example
+# Linux x86-64 + systemd example
 
-This example targets Debian 13. Keep ConfDock on loopback and terminate HTTPS
-with a distribution-managed Nginx or Caddy reverse proxy. Create a dedicated
+This example targets Linux x86-64 glibc with systemd as the native service
+manager. Debian 13 has been verified; other distributions and ARM64 are not
+claimed. Keep ConfDock on loopback and terminate HTTPS with a distribution-managed Nginx or Caddy reverse proxy. Create a dedicated
 unprivileged `confdock` user and data directory, copy the binary to
 `/usr/local/bin/confdock`, and install the unit and env file:
 
@@ -11,6 +12,7 @@ sudo adduser --system --ingroup confdock --home /var/lib/confdock --no-create-ho
 sudo install -d -o confdock -g confdock -m 700 /var/lib/confdock
 sudo install -m 755 ./confdock /usr/local/bin/confdock
 sudo install -d -m 755 /etc/confdock
+sudo install -m 644 ./config.toml /etc/confdock/config.toml
 sudo install -m 644 deploy/systemd/confdock.service /etc/systemd/system/confdock.service
 sudo install -m 600 deploy/systemd/confdock.env.example /etc/confdock/confdock.env
 sudo systemctl daemon-reload
@@ -18,8 +20,17 @@ sudo systemctl enable --now confdock
 curl -fsS http://127.0.0.1:8787/healthz
 ```
 
-Edit the environment file before starting. Put the first-run bootstrap password
-there only for the initial start and remove it after the administrator exists.
+Before starting systemd, initialize the administrator from an interactive
+terminal (the service itself has no TTY):
+
+```bash
+sudo -u confdock /usr/local/bin/confdock admin init --config /etc/confdock/config.toml
+```
+
+Alternatively, `CONFDOCK_BOOTSTRAP_PASSWORD` remains available for controlled
+automation only; remove it after initialization. Never put a password in
+`config.toml`. A direct interactive `confdock --config ...` start can initialize
+an empty database automatically and continue serving.
 The service writes SQLite, WAL, and SHM files under `/var/lib/confdock`.
 `ProtectSystem=full`, `ReadWritePaths`, and `UMask=0077` are intentionally
 limited to this verified data path; adjust them only after testing your host.

@@ -8,6 +8,15 @@ fi
 
 binary="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 test -x "$binary"
+config_file="$(dirname "$binary")/config.toml"
+if [[ ! -f "$config_file" ]]; then
+  config_file="$(cd "$(dirname "$0")/.." && pwd)/packaging/config.toml"
+fi
+test -f "$config_file"
+
+"$binary" --help >/dev/null
+"$binary" --version >/dev/null
+"$binary" config check --config "$config_file" >/dev/null
 
 runtime_dir="$(mktemp -d -t confdock-smoke.XXXXXX)"
 data_dir="$runtime_dir/data"

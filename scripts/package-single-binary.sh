@@ -19,15 +19,16 @@ cleanup() {
 trap cleanup EXIT
 
 install -m 755 "$binary" "$staging_dir/confdock"
+install -m 644 "$(cd "$(dirname "$0")/.." && pwd)/packaging/config.toml" "$staging_dir/config.toml"
 if command -v sha256sum >/dev/null; then
-  (cd "$staging_dir" && sha256sum confdock > SHA256SUMS)
+  (cd "$staging_dir" && sha256sum confdock config.toml > SHA256SUMS)
 else
-  (cd "$staging_dir" && shasum -a 256 confdock | sed 's#  confdock$#  confdock#' > SHA256SUMS)
+  (cd "$staging_dir" && shasum -a 256 confdock config.toml > SHA256SUMS)
 fi
 
 archive="$output_dir/confdock-linux-x86_64.tar.gz"
 archive_sha="$output_dir/confdock-linux-x86_64.tar.gz.sha256"
-tar -czf "$archive" -C "$staging_dir" confdock SHA256SUMS
+tar -czf "$archive" -C "$staging_dir" confdock config.toml SHA256SUMS
 if command -v sha256sum >/dev/null; then
   (cd "$output_dir" && sha256sum "$(basename "$archive")" > "$(basename "$archive_sha")")
 else
@@ -46,6 +47,7 @@ fi
 # source-free runtime smoke test from the extracted executable.
 tar -xzf "$archive" -C "$verify_dir"
 test -x "$verify_dir/confdock"
+test -f "$verify_dir/config.toml"
 (cd "$verify_dir" && if command -v sha256sum >/dev/null; then sha256sum -c SHA256SUMS; else shasum -a 256 -c SHA256SUMS; fi)
 "$(cd "$(dirname "$0")" && pwd)/smoke-single-binary.sh" "$verify_dir/confdock"
 

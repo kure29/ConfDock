@@ -137,6 +137,36 @@ pub async fn bootstrap_admin(
     Ok(inserted.rows_affected() == 1)
 }
 
+pub async fn admin_exists(pool: &SqlitePool) -> Result<bool, AuthError> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM admins")
+        .fetch_one(pool)
+        .await
+        .map_err(|_| AuthError::Database)?;
+    Ok(count > 0)
+}
+
+/// Change the administrator password for the CLI. Unlike the authenticated
+/// HTTP endpoint there is no current session to preserve, so all sessions are
+/// invalidated atomically with the password update.
+pub async fn set_password_cli(pool: &SqlitePool, next_password: String) -> Result<(), AuthError> {
+    if !valid_password(&next_password) {
+        return Err(AuthError::InvalidBootstrapPassword);
+    }
+    let next_hash = hash_password_async(next_password).await?;
+    let mut transaction = pool.begin().await.map_err(|_| AuthError::Database)?;
+    sqlx::query("UPDATE admins SET password_hash = ?, updated_at = ? WHERE id = 1")
+        .bind(next_hash)
+        .bind(unix_timestamp())
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| AuthError::Database)?;
+    sqlx::query("DELETE FROM sessions")
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| AuthError::Database)?;
+    transaction.commit().await.map_err(|_| AuthError::Database)
+}
+
 pub fn valid_password(password: &str) -> bool {
     (PASSWORD_MIN_BYTES..=MAX_PASSWORD_BYTES).contains(&password.len())
 }
