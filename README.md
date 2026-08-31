@@ -115,7 +115,7 @@ Internet → Nginx/Caddy HTTPS → 127.0.0.1:8787 → confdock → SQLite
 - 不运行代理、不管理客户端进程、不测速、不做跨格式转换。
 - 没有 Rollback、Token Rotation、自动 Publish、Revision 删除或 Native Validator。
 - 不提供 Docker、ARM64、Windows/macOS 安装器、正式 Release、Tag 或自动 Deploy。
-- 代码包元数据使用 Apache-2.0；如需分发请以仓库中的许可证文件和依赖许可证为准。六个客户端名称和图标是各自权利人的商标/版权，仅用于识别支持的 Target，不暗示 ConfDock 获得认证、合作或背书。
+- Cargo package metadata declares Apache-2.0；分发时还需遵守依赖许可证。六个客户端名称和图标是各自权利人的商标/版权，仅用于识别支持的 Target，不暗示 ConfDock 获得认证、合作或背书。
 
 ## 验证
 

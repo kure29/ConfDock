@@ -115,7 +115,7 @@ Management and subscription responses use conservative `Cache-Control: no-store`
 - No proxy runtime, client-process management, node measurements, or cross-format conversion.
 - No Rollback, token rotation, automatic Publish, revision deletion, or Native Validator.
 - No Docker, ARM64, Windows/macOS installer, formal Release, Tag, or automatic Deploy.
-- The code package metadata uses Apache-2.0; consult the repository license file and dependency licenses when redistributing. Client names and icons belong to their respective rights holders and are used only to identify supported Targets; they do not imply certification, partnership, or endorsement by ConfDock.
+- Cargo package metadata declares Apache-2.0; redistributors must also comply with dependency licenses. Client names and icons belong to their respective rights holders and are used only to identify supported Targets; they do not imply certification, partnership, or endorsement by ConfDock.
 
 ## Verification
 

@@ -33,6 +33,14 @@ if command -v sha256sum >/dev/null; then
 else
   (cd "$output_dir" && shasum -a 256 "$(basename "$archive")" > "$(basename "$archive_sha")")
 fi
+(
+  cd "$output_dir"
+  if command -v sha256sum >/dev/null; then
+    sha256sum -c "$(basename "$archive_sha")"
+  else
+    shasum -a 256 -c "$(basename "$archive_sha")"
+  fi
+)
 
 # Verify exactly what will be uploaded, including mode, digest, and a
 # source-free runtime smoke test from the extracted executable.
