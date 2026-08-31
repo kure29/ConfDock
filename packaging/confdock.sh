@@ -233,6 +233,10 @@ partial_file_owned() {
 
 recover_partial_install() {
   local source_binary="$1" answer
+  if [[ ! -e "$BIN_PATH" && ! -e "$CTL_PATH" && ! -e "$UNIT_PATH" ]]; then
+    die "检测到已有配置文件但没有可确认的未完成安装文件；未修改任何文件"
+    return 1
+  fi
   printf '检测到未完成的 ConfDock 安装（部分系统文件仍存在）。\n' >&2
   printf '配置和数据将始终保留；只清理能够确认由当前脚本创建的二进制、管理脚本和未启用的 systemd unit。\n' >&2
   if [[ "${CONFDOCK_RECOVER_PARTIAL:-}" != 1 ]]; then
