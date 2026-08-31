@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 description = "Axum and SQLite service boundary for ConfDock"
 
+[features]
+default = []
+embedded-web = ["dep:rust-embed"]
+
 [lib]
 path = "src/lib.rs"
 
@@ -18,6 +22,7 @@ axum = "0.8"
 base64 = "0.22"
 confdock-core = { path = "../confdock-core" }
 rand_core = { version = "0.6", features = ["getrandom"] }
+rust-embed = { version = "8.7", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"

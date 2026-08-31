@@ -7,7 +7,8 @@ use thiserror::Error;
 use url::Url;
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8787";
-pub const DEFAULT_DATABASE_URL: &str = "sqlite://data/confdock.db";
+pub const DEFAULT_DATA_DIR: &str = "/var/lib/confdock";
+pub const DEFAULT_DATABASE_URL: &str = "sqlite:///var/lib/confdock/confdock.db";
 pub const DEFAULT_PUBLIC_URL: &str = "http://127.0.0.1:8787";
 pub const DEFAULT_SESSION_TTL_SECONDS: i64 = 604_800;
 pub const DEFAULT_MAX_CONFIG_BYTES: usize = 8_388_608;
@@ -32,6 +33,10 @@ pub enum ConfigError {
     InvalidListen,
     #[error("CONFDOCK_DATABASE_URL must be a sqlite:// URL")]
     InvalidDatabaseUrl,
+    #[error("CONFDOCK_DATA_DIR must not be empty")]
+    InvalidDataDirectory,
+    #[error("set only one of CONFDOCK_DATA_DIR and CONFDOCK_DATABASE_URL")]
+    ConflictingDatabaseLocation,
     #[error("CONFDOCK_PUBLIC_URL must be an http(s) URL without credentials, query, or fragment")]
     InvalidPublicUrl,
     #[error("CONFDOCK_SESSION_TTL_SECONDS must be between 1 and 31536000 seconds")]
@@ -54,8 +59,15 @@ impl ServiceConfig {
             .unwrap_or_else(|_| DEFAULT_LISTEN.to_owned())
             .parse()
             .map_err(|_| ConfigError::InvalidListen)?;
-        let database_url =
-            env::var("CONFDOCK_DATABASE_URL").unwrap_or_else(|_| DEFAULT_DATABASE_URL.to_owned());
+        let database_url = match (
+            env::var("CONFDOCK_DATABASE_URL").ok(),
+            env::var("CONFDOCK_DATA_DIR").ok(),
+        ) {
+            (Some(_), Some(_)) => return Err(ConfigError::ConflictingDatabaseLocation),
+            (Some(database_url), None) => database_url,
+            (None, Some(data_dir)) => database_url_from_data_dir(&data_dir)?,
+            (None, None) => DEFAULT_DATABASE_URL.to_owned(),
+        };
         let public_url =
             env::var("CONFDOCK_PUBLIC_URL").unwrap_or_else(|_| DEFAULT_PUBLIC_URL.to_owned());
         let session_ttl_seconds = parse_positive_i64(
@@ -193,6 +205,17 @@ fn normalize_public_url(value: &str) -> Result<String, ConfigError> {
     Ok(value.trim_end_matches('/').to_owned())
 }
 
+fn database_url_from_data_dir(value: &str) -> Result<String, ConfigError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(ConfigError::InvalidDataDirectory);
+    }
+    Ok(format!(
+        "sqlite://{}",
+        PathBuf::from(value).join("confdock.db").display()
+    ))
+}
+
 fn parse_bool(value: Option<&str>, default: bool) -> Result<bool, ConfigError> {
     match value {
         None => Ok(default),
@@ -260,6 +283,18 @@ mod tests {
         assert!(matches!(
             base(1, MAX_CONFIG_BYTES + 1),
             Err(ConfigError::InvalidMaxConfigBytes)
+        ));
+    }
+
+    #[test]
+    fn data_directory_selects_a_predictable_sqlite_path() {
+        assert_eq!(
+            database_url_from_data_dir("/var/lib/confdock").unwrap(),
+            "sqlite:///var/lib/confdock/confdock.db"
+        );
+        assert!(matches!(
+            database_url_from_data_dir("   "),
+            Err(ConfigError::InvalidDataDirectory)
         ));
     }
 

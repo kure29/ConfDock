@@ -13,8 +13,12 @@ pub struct Health {
     status: &'static str,
 }
 
-pub async fn health() -> Json<Health> {
-    Json(Health { status: "ok" })
+pub async fn health(State(state): State<AppState>) -> Result<Json<Health>, ApiError> {
+    sqlx::query_scalar::<_, i64>("SELECT 1")
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|_| ApiError::internal())?;
+    Ok(Json(Health { status: "ok" }))
 }
 
 pub async fn service_info(State(state): State<AppState>) -> Json<ServiceInfoDto> {

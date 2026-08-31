@@ -1,0 +1,22 @@
+[Unit]
+Description=ConfDock single-binary configuration service
+After=network.target
+
+[Service]
+Type=simple
+User=confdock
+Group=confdock
+WorkingDirectory=/var/lib/confdock
+ExecStart=/usr/local/bin/confdock
+EnvironmentFile=/etc/confdock/confdock.env
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/confdock
+
+[Install]
+WantedBy=multi-user.target
