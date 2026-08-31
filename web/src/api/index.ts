@@ -7,5 +7,10 @@ import { createHttpApi } from './httpApi'
  */
 export const api: ConfDockApi = createHttpApi()
 
-export type { ConfDockApi, SaveRevisionInput } from './ConfDockApi'
+export type {
+  ConfDockApi,
+  CreateAccessTokenInput,
+  SaveRevisionInput,
+  UpdateAccessTokenInput,
+} from './ConfDockApi'
 export * from './types'

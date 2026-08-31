@@ -619,8 +619,8 @@ async fn list_tokens_connection(
 ) -> Result<Vec<AccessTokenDto>, ApiError> {
     ensure_project_connection(connection, project_id).await?;
     let rows = sqlx::query(
-        "SELECT id, token_prefix, token_suffix, created_at, last_used_at \
-         FROM access_tokens WHERE project_id = ? AND revoked_at IS NULL ORDER BY created_at DESC, id",
+        "SELECT id, display_name, token_prefix, token_suffix, created_at, last_used_at, \
+         expires_at, revoked_at FROM access_tokens WHERE project_id = ? ORDER BY created_at DESC, id",
     )
     .bind(project_id)
     .fetch_all(&mut **connection)
@@ -632,16 +632,27 @@ async fn list_tokens_connection(
 pub async fn create_token(
     pool: &SqlitePool,
     project_id: &str,
+    display_name: &str,
+    expires_at: Option<i64>,
     public_url: &str,
 ) -> Result<CreatedAccessTokenDto, ApiError> {
     let mut connection = begin_immediate(pool).await?;
-    let result = create_token_inner(&mut connection, project_id, public_url).await;
+    let result = create_token_inner(
+        &mut connection,
+        project_id,
+        display_name,
+        expires_at,
+        public_url,
+    )
+    .await;
     finish_transaction(connection, result).await
 }
 
 async fn create_token_inner(
     connection: &mut PoolConnection<Sqlite>,
     project_id: &str,
+    display_name: &str,
+    expires_at: Option<i64>,
     public_url: &str,
 ) -> Result<CreatedAccessTokenDto, ApiError> {
     ensure_project_connection(connection, project_id).await?;
@@ -650,6 +661,7 @@ async fn create_token_inner(
     let now = unix_timestamp();
     let token = AccessTokenDto {
         id: Uuid::new_v4().to_string(),
+        display_name: display_name.to_owned(),
         prefix: plaintext.chars().take(6).collect(),
         suffix: plaintext
             .chars()
@@ -661,10 +673,13 @@ async fn create_token_inner(
             .collect(),
         created_at: timestamp_to_iso(now).ok_or_else(ApiError::internal)?,
         last_used_at: None,
+        expires_at: expires_at.and_then(timestamp_to_iso),
+        revoked_at: None,
     };
     sqlx::query(
         "INSERT INTO access_tokens (id, project_id, token_hash, token_prefix, token_suffix, \
-         created_at, last_used_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)",
+         created_at, last_used_at, revoked_at, display_name, expires_at) \
+         VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
     )
     .bind(&token.id)
     .bind(project_id)
@@ -672,6 +687,8 @@ async fn create_token_inner(
     .bind(&token.prefix)
     .bind(&token.suffix)
     .bind(now)
+    .bind(&token.display_name)
+    .bind(expires_at)
     .execute(&mut **connection)
     .await
     .map_err(|_| ApiError::internal())?;
@@ -680,6 +697,81 @@ async fn create_token_inner(
         url: format!("{public_url}/sub/{plaintext}"),
         plaintext,
     })
+}
+
+pub async fn update_token(
+    pool: &SqlitePool,
+    project_id: &str,
+    token_id: &str,
+    display_name: &str,
+    expires_at: Option<i64>,
+    expected_display_name: &str,
+    expected_expires_at: Option<i64>,
+) -> Result<AccessTokenDto, ApiError> {
+    let mut connection = begin_immediate(pool).await?;
+    let result = update_token_inner(
+        &mut connection,
+        project_id,
+        token_id,
+        display_name,
+        expires_at,
+        expected_display_name,
+        expected_expires_at,
+    )
+    .await;
+    finish_transaction(connection, result).await
+}
+
+async fn update_token_inner(
+    connection: &mut PoolConnection<Sqlite>,
+    project_id: &str,
+    token_id: &str,
+    display_name: &str,
+    expires_at: Option<i64>,
+    expected_display_name: &str,
+    expected_expires_at: Option<i64>,
+) -> Result<AccessTokenDto, ApiError> {
+    ensure_project_connection(connection, project_id).await?;
+    let result = sqlx::query(
+        "UPDATE access_tokens SET display_name = ?, expires_at = ? \
+         WHERE id = ? AND project_id = ? AND revoked_at IS NULL \
+         AND display_name = ? AND expires_at IS ?",
+    )
+    .bind(display_name)
+    .bind(expires_at)
+    .bind(token_id)
+    .bind(project_id)
+    .bind(expected_display_name)
+    .bind(expected_expires_at)
+    .execute(&mut **connection)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    if result.rows_affected() == 0 {
+        let active_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM access_tokens \
+             WHERE id = ? AND project_id = ? AND revoked_at IS NULL)",
+        )
+        .bind(token_id)
+        .bind(project_id)
+        .fetch_one(&mut **connection)
+        .await
+        .map_err(|_| ApiError::internal())?;
+        return if active_exists {
+            Err(ApiError::token_conflict())
+        } else {
+            Err(ApiError::not_found("token.not_found", "托管地址不存在"))
+        };
+    }
+    let row = sqlx::query(
+        "SELECT id, display_name, token_prefix, token_suffix, created_at, last_used_at, \
+         expires_at, revoked_at FROM access_tokens WHERE id = ? AND project_id = ?",
+    )
+    .bind(token_id)
+    .bind(project_id)
+    .fetch_one(&mut **connection)
+    .await
+    .map_err(|_| ApiError::internal())?;
+    token_from_row(&row)
 }
 
 pub async fn revoke_token(
@@ -714,12 +806,21 @@ async fn revoke_token_inner(
     Ok(())
 }
 
+#[derive(Debug)]
 pub struct Subscription {
     pub source: Vec<u8>,
     pub file_name: String,
 }
 
 pub async fn subscription(pool: &SqlitePool, plaintext: &str) -> Result<Subscription, ApiError> {
+    subscription_at(pool, plaintext, unix_timestamp()).await
+}
+
+pub async fn subscription_at(
+    pool: &SqlitePool,
+    plaintext: &str,
+    now: i64,
+) -> Result<Subscription, ApiError> {
     if plaintext.len() > 256 {
         return Err(ApiError::not_found("token.not_found", "托管地址不存在"));
     }
@@ -728,9 +829,11 @@ pub async fn subscription(pool: &SqlitePool, plaintext: &str) -> Result<Subscrip
         "SELECT t.id, p.file_name, r.source_bytes \
          FROM access_tokens t JOIN projects p ON p.id = t.project_id \
          JOIN config_revisions r ON r.id = p.served_revision_id \
-         WHERE t.token_hash = ? AND t.revoked_at IS NULL",
+         WHERE t.token_hash = ? AND t.revoked_at IS NULL \
+         AND (t.expires_at IS NULL OR t.expires_at > ?)",
     )
     .bind(hash.as_slice())
+    .bind(now)
     .fetch_optional(pool)
     .await
     .map_err(|_| ApiError::internal())?
@@ -921,6 +1024,9 @@ fn token_from_row(row: &SqliteRow) -> Result<AccessTokenDto, ApiError> {
     };
     Ok(AccessTokenDto {
         id: row.try_get("id").map_err(|_| ApiError::internal())?,
+        display_name: row
+            .try_get("display_name")
+            .map_err(|_| ApiError::internal())?,
         prefix: row
             .try_get("token_prefix")
             .map_err(|_| ApiError::internal())?,
@@ -933,6 +1039,16 @@ fn token_from_row(row: &SqliteRow) -> Result<AccessTokenDto, ApiError> {
         )
         .ok_or_else(ApiError::internal)?,
         last_used_at,
+        expires_at: row
+            .try_get::<Option<i64>, _>("expires_at")
+            .map_err(|_| ApiError::internal())?
+            .map(|timestamp| timestamp_to_iso(timestamp).ok_or_else(ApiError::internal))
+            .transpose()?,
+        revoked_at: row
+            .try_get::<Option<i64>, _>("revoked_at")
+            .map_err(|_| ApiError::internal())?
+            .map(|timestamp| timestamp_to_iso(timestamp).ok_or_else(ApiError::internal))
+            .transpose()?,
     })
 }
 

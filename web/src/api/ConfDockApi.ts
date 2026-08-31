@@ -64,7 +64,15 @@ export interface ConfDockApi {
   // -- access tokens ------------------------------------------------------
   listTokens(projectId: string): Promise<Result<AccessToken[], ApiError>>
   /** The only moment the plaintext and the full URL exist. */
-  createToken(projectId: string): Promise<Result<CreatedAccessToken, ApiError>>
+  createToken(
+    projectId: string,
+    input?: CreateAccessTokenInput,
+  ): Promise<Result<CreatedAccessToken, ApiError>>
+  updateToken(
+    projectId: string,
+    tokenId: string,
+    input: UpdateAccessTokenInput,
+  ): Promise<Result<AccessToken, ApiError>>
   revokeToken(projectId: string, tokenId: string): Promise<Result<void, ApiError>>
 
   // -- service ------------------------------------------------------------
@@ -81,4 +89,16 @@ export interface SaveRevisionInput {
   projectId: string
   source: Uint8Array
   expectedRevisionId: string
+}
+
+export interface CreateAccessTokenInput {
+  displayName: string
+  expiresAt: string | null
+}
+
+export interface UpdateAccessTokenInput {
+  displayName: string
+  expiresAt: string | null
+  expectedDisplayName: string
+  expectedExpiresAt: string | null
 }

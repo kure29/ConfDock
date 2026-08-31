@@ -8,7 +8,13 @@ import type {
 } from '../core/types'
 import { err, ok } from '../core/types'
 import { base64ToBytes, bytesToBase64 } from '../lib/bytes'
-import type { ConfDockApi, PublishProjectInput, SaveRevisionInput } from './ConfDockApi'
+import type {
+  ConfDockApi,
+  CreateAccessTokenInput,
+  PublishProjectInput,
+  SaveRevisionInput,
+  UpdateAccessTokenInput,
+} from './ConfDockApi'
 import { API_ERROR } from './types'
 import type {
   AccessToken,
@@ -463,6 +469,84 @@ function invalidResponse(): ApiError {
   return { code: API_ERROR.invalidResponse, message: 'ConfDock 服务返回了无效响应' }
 }
 
+const RFC3339_TIMESTAMP =
+  /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|([+-])(\d{2}):(\d{2}))$/
+
+function decodeIsoTimestamp(value: unknown, nullable: boolean): string | null {
+  if (value === null && nullable) return null
+  if (typeof value !== 'string') {
+    throw new Error('invalid token timestamp')
+  }
+  const match = RFC3339_TIMESTAMP.exec(value)
+  if (match === null || Number.isNaN(Date.parse(value))) {
+    throw new Error('invalid token timestamp')
+  }
+  const year = Number.parseInt(match[1]!, 10)
+  const month = Number.parseInt(match[2]!, 10)
+  const day = Number.parseInt(match[3]!, 10)
+  const hour = Number.parseInt(match[4]!, 10)
+  const minute = Number.parseInt(match[5]!, 10)
+  const second = Number.parseInt(match[6]!, 10)
+  const offsetHour = match[8] === undefined ? 0 : Number.parseInt(match[8], 10)
+  const offsetMinute = match[9] === undefined ? 0 : Number.parseInt(match[9], 10)
+  const calendar = new Date(0)
+  calendar.setUTCFullYear(year, month - 1, day)
+  calendar.setUTCHours(hour, minute, second, 0)
+  if (
+    calendar.getUTCFullYear() !== year ||
+    calendar.getUTCMonth() !== month - 1 ||
+    calendar.getUTCDate() !== day ||
+    calendar.getUTCHours() !== hour ||
+    calendar.getUTCMinutes() !== minute ||
+    calendar.getUTCSeconds() !== second ||
+    offsetHour > 23 ||
+    offsetMinute > 59
+  ) {
+    throw new Error('invalid token timestamp')
+  }
+  return value
+}
+
+function decodeAccessToken(value: unknown): AccessToken {
+  if (
+    !isRecord(value) ||
+    !isRevisionId(value.id) ||
+    typeof value.displayName !== 'string' ||
+    value.displayName.trim() === '' ||
+    value.displayName !== value.displayName.trim() ||
+    Array.from(value.displayName).length > 64 ||
+    /[\u0000-\u001f\u007f-\u009f]/.test(value.displayName) ||
+    typeof value.prefix !== 'string' ||
+    !/^[A-Za-z0-9_-]{6}$/.test(value.prefix) ||
+    typeof value.suffix !== 'string' ||
+    !/^[A-Za-z0-9_-]{6}$/.test(value.suffix) ||
+    typeof value.createdAt !== 'string'
+  ) {
+    throw new Error('invalid access token')
+  }
+  return {
+    id: value.id,
+    displayName: value.displayName,
+    prefix: value.prefix,
+    suffix: value.suffix,
+    createdAt: decodeIsoTimestamp(value.createdAt, false)!,
+    lastUsedAt: decodeIsoTimestamp(value.lastUsedAt, true),
+    expiresAt: decodeIsoTimestamp(value.expiresAt, true),
+    revokedAt: decodeIsoTimestamp(value.revokedAt, true),
+  }
+}
+
+function decodeCreatedAccessToken(value: unknown): CreatedAccessToken {
+  if (!isRecord(value) || typeof value.plaintext !== 'string' || typeof value.url !== 'string') {
+    throw new Error('invalid created token')
+  }
+  return {
+    token: decodeAccessToken(value.token),
+    plaintext: value.plaintext,
+    url: value.url,
+  }
+}
+
 function decodeProjectResult(wire: Wire['project']): Result<Project, ApiError> {
   try {
     return ok(decodeProject(wire))
@@ -738,14 +822,66 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
     },
 
     async listTokens(projectId: string): Promise<Result<AccessToken[], ApiError>> {
-      return request<AccessToken[]>('GET', `/api/projects/${encodeURIComponent(projectId)}/tokens`)
-    },
-
-    async createToken(projectId: string): Promise<Result<CreatedAccessToken, ApiError>> {
-      return request<CreatedAccessToken>(
-        'POST',
+      const result = await request<unknown>(
+        'GET',
         `/api/projects/${encodeURIComponent(projectId)}/tokens`,
       )
+      if (!result.ok) return result
+      try {
+        if (!Array.isArray(result.value)) throw new Error('invalid token list')
+        return ok(result.value.map(decodeAccessToken))
+      } catch {
+        return err(invalidResponse())
+      }
+    },
+
+    async createToken(
+      projectId: string,
+      input?: CreateAccessTokenInput,
+    ): Promise<Result<CreatedAccessToken, ApiError>> {
+      const result = await request<unknown>(
+        'POST',
+        `/api/projects/${encodeURIComponent(projectId)}/tokens`,
+        input,
+      )
+      if (!result.ok) return result
+      try {
+        return ok(decodeCreatedAccessToken(result.value))
+      } catch {
+        return err(invalidResponse())
+      }
+    },
+
+    async updateToken(
+      projectId: string,
+      tokenId: string,
+      input: UpdateAccessTokenInput,
+    ): Promise<Result<AccessToken, ApiError>> {
+      const result = await request<unknown>(
+        'PATCH',
+        `/api/projects/${encodeURIComponent(projectId)}/tokens/${encodeURIComponent(tokenId)}`,
+        input,
+      )
+      if (!result.ok) return result
+      try {
+        const token = decodeAccessToken(result.value)
+        const sameExpiry =
+          token.expiresAt === input.expiresAt ||
+          (token.expiresAt !== null &&
+            input.expiresAt !== null &&
+            Math.floor(Date.parse(token.expiresAt) / 1_000) ===
+              Math.floor(Date.parse(input.expiresAt) / 1_000))
+        if (
+          token.id !== tokenId ||
+          token.displayName !== input.displayName.trim() ||
+          !sameExpiry
+        ) {
+          throw new Error('token update response contradicts request')
+        }
+        return ok(token)
+      } catch {
+        return err(invalidResponse())
+      }
     },
 
     async revokeToken(projectId: string, tokenId: string): Promise<Result<void, ApiError>> {

@@ -334,7 +334,12 @@ export function EditorScreen() {
         </Button>
       </div>
 
-      <ServedUrlDialog open={urlOpen} onClose={() => setUrlOpen(false)} projectId={project.id} />
+      <ServedUrlDialog
+        open={urlOpen}
+        onClose={() => setUrlOpen(false)}
+        projectId={project.id}
+        projectName={project.name}
+      />
 
       <Dialog
         open={deleteOpen}

@@ -45,7 +45,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/projects/{id}/tokens/{token_id}",
-            delete(tokens::revoke),
+            delete(tokens::revoke).patch(tokens::update),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

@@ -153,10 +153,13 @@ export interface RevisionDiff {
  */
 export interface AccessToken {
   id: string
+  displayName: string
   prefix: string
   suffix: string
   createdAt: string
   lastUsedAt: string | null
+  expiresAt: string | null
+  revokedAt: string | null
 }
 
 export interface CreatedAccessToken {
@@ -202,6 +205,7 @@ export const API_ERROR = {
   revisionConflict: 'revision.conflict',
   publishConflict: 'publish.conflict',
   tokenNotFound: 'token.not_found',
+  tokenConflict: 'token.conflict',
   revisionNotFound: 'revision.not_found',
   revisionDiffTooLarge: 'revision.diff_too_large',
   invalidResponse: 'network.invalid_response',

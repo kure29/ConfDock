@@ -850,4 +850,96 @@ describe('HTTP API error boundary', () => {
     expect(revoked.ok).toBe(false)
     if (!deleted.ok) expect(deleted.error.code).not.toBe('auth.unauthorized')
   })
+
+  it('decodes hosted address metadata without exposing token hashes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        id: 't1',
+        displayName: 'iPhone Surge',
+        prefix: 'abc123',
+        suffix: 'xyz789',
+        createdAt: '2026-08-31T00:00:00Z',
+        lastUsedAt: null,
+        expiresAt: '2026-12-31T16:00:00Z',
+        revokedAt: null,
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const token = await createHttpApi().updateToken('p1', 't1', {
+      displayName: 'iPhone Surge',
+      expiresAt: '2026-12-31T16:00:00.750Z',
+      expectedDisplayName: 'Old name',
+      expectedExpiresAt: null,
+    })
+    expect(token.ok).toBe(true)
+    if (token.ok) {
+      expect(token.value.displayName).toBe('iPhone Surge')
+      expect(token.value.expiresAt).toBe('2026-12-31T16:00:00Z')
+      expect(token.value).not.toHaveProperty('hash')
+    }
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body as string)).toEqual({
+      displayName: 'iPhone Surge',
+      expiresAt: '2026-12-31T16:00:00.750Z',
+      expectedDisplayName: 'Old name',
+      expectedExpiresAt: null,
+    })
+  })
+
+  it('rejects hosted address responses with invalid or ambiguous timestamps', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json({
+          id: 't1',
+          displayName: 'Address',
+          prefix: 'abc123',
+          suffix: 'xyz789',
+          createdAt: '2026-08-31T00:00:00',
+          lastUsedAt: null,
+          expiresAt: null,
+          revokedAt: null,
+        }),
+      ),
+    )
+    const token = await createHttpApi().listTokens('p1')
+    expect(token).toEqual({
+      ok: false,
+      error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+    })
+  })
+
+  it.each([
+    ['wrong token ID', { id: 't2' }],
+    ['wrong name', { displayName: 'Different' }],
+    ['wrong expiry', { expiresAt: null }],
+    ['invalid calendar date', { createdAt: '2026-02-30T00:00:00Z' }],
+    ['overlong name', { displayName: '配'.repeat(65) }],
+  ])('rejects a contradictory hosted address update response: %s', async (_label, patch) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json({
+          id: 't1',
+          displayName: 'Updated',
+          prefix: 'abc123',
+          suffix: 'xyz789',
+          createdAt: '2026-08-31T00:00:00Z',
+          lastUsedAt: null,
+          expiresAt: '2026-12-31T16:00:00Z',
+          revokedAt: null,
+          ...patch,
+        }),
+      ),
+    )
+    const result = await createHttpApi().updateToken('p1', 't1', {
+      displayName: 'Updated',
+      expiresAt: '2026-12-31T16:00:00Z',
+      expectedDisplayName: 'Original',
+      expectedExpiresAt: null,
+    })
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+    })
+  })
 })

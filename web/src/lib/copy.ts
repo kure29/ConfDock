@@ -275,3 +275,4 @@ export const REVISION_DIFF_EMPTY_LINE = '空行'
 
 export const TOKEN_ONCE_WARNING = '这串明文只显示这一次，关闭后无法再次查看。'
 export const TOKEN_STORAGE_NOTICE = '服务端只保存它的哈希值。'
+export const TOKEN_EXPIRY_NOTICE = '到期后该地址将停止提供配置，可以稍后延长有效期。'
