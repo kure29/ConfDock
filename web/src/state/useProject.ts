@@ -108,8 +108,13 @@ export function useProject(id: string): ProjectEditor {
   const [publishing, setPublishing] = useState(false)
   const mutationGateRef = useRef<MutationGate>(createMutationGate())
   const activeProjectIdRef = useRef(id)
+  const renameGenerationRef = useRef(0)
+  // Keep stale-response checks correct during the render that observes a new
+  // route, before that route's effect has had a chance to run.
+  activeProjectIdRef.current = id
 
   useEffect(() => {
+    renameGenerationRef.current += 1
     activeProjectIdRef.current = id
     mutationGateRef.current.invalidate()
     setSaving(false)
@@ -229,7 +234,16 @@ export function useProject(id: string): ProjectEditor {
         activeProjectIdRef.current === project.id &&
         token.projectId === project.id
       ) {
-        setProject(result.value.project)
+        setProject((current) => {
+          if (current === null || current.id !== project.id) return current
+          return {
+            ...result.value.project,
+            // A rename may have completed while this request was in flight.
+            // Preserve that newer metadata while adopting the saved bytes and
+            // revision pointers returned by the service.
+            name: current.name,
+          }
+        })
         setWorkingBytes(new Uint8Array(result.value.project.source))
       }
       return result
@@ -265,7 +279,15 @@ export function useProject(id: string): ProjectEditor {
         activeProjectIdRef.current === project.id &&
         token.projectId === project.id
       ) {
-        setProject(result.value.project)
+        setProject((current) => {
+          if (current === null || current.id !== project.id) return current
+          return {
+            ...result.value.project,
+            // Publish responses include the complete project, but must not
+            // erase a name that was renamed concurrently.
+            name: current.name,
+          }
+        })
       }
       return result
     } finally {
@@ -280,8 +302,23 @@ export function useProject(id: string): ProjectEditor {
       if (!project) {
         return err<ApiError, ProjectSummary>({ code: 'project.not_found', message: '项目不存在' })
       }
+      const projectId = project.id
+      const generation = renameGenerationRef.current
       const result = await api.renameProject(project.id, name)
-      if (result.ok) setProject({ ...project, name: result.value.name })
+      if (
+        result.ok &&
+        activeProjectIdRef.current === projectId &&
+        renameGenerationRef.current === generation
+      ) {
+        setProject((current) => {
+          if (current === null || current.id !== projectId) return current
+          return {
+            ...current,
+            name: result.value.name,
+            updatedAt: result.value.updatedAt,
+          }
+        })
+      }
       return result
     },
     [project],

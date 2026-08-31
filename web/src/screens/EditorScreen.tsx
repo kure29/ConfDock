@@ -62,6 +62,8 @@ export function EditorScreen() {
   const [nameDraft, setNameDraft] = useState('')
   const [historyRefresh, setHistoryRefresh] = useState(0)
   const nonce = useRef(0)
+  const activeProjectIdRef = useRef(id)
+  activeProjectIdRef.current = id
 
   const {
     project,
@@ -145,10 +147,14 @@ export function EditorScreen() {
       setNameDraft(project?.name ?? '')
       return
     }
+    const requestedProjectId = project.id
+    const requestedProjectName = project.name
     const result = await editor.rename(nameDraft.trim())
     if (!result.ok) {
       toast.fail(result.error.message)
-      setNameDraft(project.name)
+      if (activeProjectIdRef.current === requestedProjectId) {
+        setNameDraft(requestedProjectName)
+      }
     }
   }
 
