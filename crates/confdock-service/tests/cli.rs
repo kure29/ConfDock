@@ -63,6 +63,45 @@ fn config_check_is_database_free_and_rejects_missing_files() {
 }
 
 #[test]
+fn config_get_allows_only_safe_fields_without_creating_data() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join("config.toml");
+    let data_dir = directory.path().join("data");
+    fs::write(
+        &config,
+        format!(
+            "listen = \"127.0.0.1:9001\"\ndata_dir = \"{}\"\npublic_url = \"https://example.test/\"\n",
+            data_dir.display()
+        ),
+    )
+    .unwrap();
+    for (field, expected) in [
+        ("listen", "127.0.0.1:9001".to_owned()),
+        ("public_url", "https://example.test".to_owned()),
+        ("data_dir", data_dir.to_string_lossy().into_owned()),
+    ] {
+        let output = Command::new(binary())
+            .args(["config", "get", field, "--config"])
+            .arg(&config)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), expected);
+    }
+    let output = Command::new(binary())
+        .args(["config", "get", "database_url", "--config"])
+        .arg(&config)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(!data_dir.exists());
+}
+
+#[test]
 fn non_interactive_first_start_gives_actionable_message() {
     let directory = TempDir::new().unwrap();
     let data_dir = directory.path().join("data");

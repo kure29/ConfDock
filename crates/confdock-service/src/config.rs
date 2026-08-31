@@ -304,6 +304,32 @@ impl ServiceConfig {
             .saturating_add(65_536)
     }
 
+    /// Return a deliberately small, non-sensitive set of values for scripts.
+    /// This method never opens SQLite or creates a directory.
+    pub fn safe_value(&self, field: &str) -> Result<String, String> {
+        let value = match field {
+            "listen" => self.listen.to_string(),
+            "public_url" => self.public_url.clone(),
+            "data_dir" => self
+                .database_path()
+                .and_then(|path| path.parent().map(Path::to_path_buf))
+                .ok_or_else(|| "data_dir is not a filesystem path".to_owned())?
+                .to_string_lossy()
+                .into_owned(),
+            _ => {
+                return Err(format!(
+                    "unsupported config field `{field}` (allowed: data_dir, listen, public_url)"
+                ))
+            }
+        };
+        if value.chars().any(char::is_control) {
+            return Err(format!(
+                "config field `{field}` contains control characters"
+            ));
+        }
+        Ok(value)
+    }
+
     fn database_path(&self) -> Option<PathBuf> {
         let raw = self.database_url.strip_prefix("sqlite://")?;
         let raw = raw.split('?').next().unwrap_or(raw);
@@ -465,6 +491,23 @@ mod tests {
             database_url_from_data_dir("relative-data"),
             Err(ConfigError::InvalidDataDirectory)
         ));
+    }
+
+    #[test]
+    fn safe_config_values_reject_unknown_fields_and_control_characters() {
+        let config = ServiceConfig::new(
+            "127.0.0.1:8787".parse().unwrap(),
+            "sqlite:///tmp/data\n/confdock.db".to_owned(),
+            "http://127.0.0.1:8787".to_owned(),
+            None,
+            60,
+            false,
+            1024,
+        )
+        .unwrap();
+        assert_eq!(config.safe_value("listen").unwrap(), "127.0.0.1:8787");
+        assert!(config.safe_value("database_url").is_err());
+        assert!(config.safe_value("data_dir").is_err());
     }
 
     #[test]

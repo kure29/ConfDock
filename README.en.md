@@ -49,7 +49,7 @@ Run `workflow_dispatch` manually from GitHub Actions to build and upload the
 `confdock-linux-x86_64` artifact (retained for 7 days). Pushes and pull
 requests execute the same package, extraction, and smoke checks without
 retaining an artifact.
-The archive contains `confdock`, a root-level `config.toml`, and `SHA256SUMS`; it
+The archive contains `confdock`, a root-level `config.toml`, `confdock.sh`, and `SHA256SUMS`; it
 does not contain a database, passwords, or source files.
 
 Runtime configuration follows built-in defaults → `config.toml` → `CONFDOCK_*` environment variables → explicit CLI flags. The packaged archive includes [packaging/config.toml](packaging/config.toml); configuration files never contain passwords or tokens, and relative `data_dir` paths resolve relative to the configuration file.
@@ -57,6 +57,7 @@ Runtime configuration follows built-in defaults → `config.toml` → `CONFDOCK_
 ```bash
 ./confdock --help
 ./confdock config check --config ./config.toml
+./confdock config get data_dir --config ./config.toml
 ./confdock admin init --config ./config.toml
 ./confdock --config ./config.toml
 ```
@@ -94,13 +95,41 @@ Vite proxies `/api` and `/sub` to the Rust service during development. The produ
 
 ## Linux Deployment
 
-Examples target Linux x86-64 with glibc, with systemd as the current native service-management target: [deploy/systemd/confdock.service](deploy/systemd/confdock.service), [the environment sample](deploy/systemd/confdock.env.example), and [the systemd notes](deploy/systemd/README.md). Debian 13 has been verified on hardware; this does not claim every distribution or ARM64 support. Recommended topology:
+Install the prebuilt Linux x86-64 archive with:
+
+```bash
+tar -xzf confdock-linux-x86_64.tar.gz
+cd confdock-linux-x86_64
+sudo ./confdock.sh
+```
+
+The installer validates the release binary and configuration, creates the
+dedicated `confdock` system user, and interactively initializes the `admin`
+password. After installation, run `sudo confdockctl` from any directory.
+Source installation uses the same release build and native install path:
+
+```bash
+sudo ./packaging/confdock.sh install source
+```
+
+It requires Git, Rust/Cargo, Node.js 22, npm, and `wasm-bindgen-cli 0.2.127`;
+the installer does not install toolchains or make systemd depend on the source
+tree. Docker, online updates, and backup/restore remain for a later slice.
+
+| Method | Status |
+| --- | --- |
+| Prebuilt Linux x86-64 | Supported |
+| Build from source and native install | Supported |
+| Docker | Next slice |
+| ARM64 artifact | Not supported |
+
+Examples target Linux x86-64 with glibc, with systemd as the current native service-management target: [deploy/systemd/confdock.service](deploy/systemd/confdock.service) and [the systemd notes](deploy/systemd/README.md). Debian 13 has been verified on hardware; this does not claim every distribution or ARM64 support. Recommended topology:
 
 ```text
 Internet → Nginx/Caddy HTTPS → 127.0.0.1:8787 → confdock → SQLite
 ```
 
-Keep the backend on loopback and do not expose the internal port through the firewall. HTTPS is required for public use; set `CONFDOCK_PUBLIC_URL` to the real origin and `CONFDOCK_COOKIE_SECURE=true`. WebSockets are not required. Use the distribution's generic Nginx/Caddy reverse-proxy configuration. The menu installer, Docker installation, and backup/restore are reserved for later slices. Before upgrades, stop the service and back up SQLite (do not copy only the main file while WAL writes are active), replace `/usr/local/bin/confdock`, and start it again. Migrations run at startup; do not downgrade an older binary and continue writing a database after a newer schema migration. Treat the data directory and hosted URLs as sensitive credentials.
+Keep the backend on loopback and do not expose the internal port through the firewall. HTTPS is required for public use; set `CONFDOCK_PUBLIC_URL` to the real origin and `CONFDOCK_COOKIE_SECURE=true`. WebSockets are not required. Use the distribution's generic Nginx/Caddy reverse-proxy configuration. Docker, online updates, and backup/restore are reserved for later slices. Before upgrades, stop the service and back up SQLite (do not copy only the main file while WAL writes are active), replace `/usr/local/bin/confdock`, and start it again. Migrations run at startup; do not downgrade an older binary and continue writing a database after a newer schema migration. Treat the data directory and hosted URLs as sensitive credentials.
 
 ## API overview
 
