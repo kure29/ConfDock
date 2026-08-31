@@ -1,11 +1,15 @@
 # Debian 13 + systemd example
 
-This example keeps ConfDock on loopback and lets 1Panel/OpenResty terminate
-HTTPS. Create a dedicated unprivileged `confdock` user and data directory,
-copy the binary to `/usr/local/bin/confdock`, and install the unit and env file:
+This example targets Debian 13. Keep ConfDock on loopback and terminate HTTPS
+with a distribution-managed Nginx or Caddy reverse proxy. Create a dedicated
+unprivileged `confdock` user and data directory, copy the binary to
+`/usr/local/bin/confdock`, and install the unit and env file:
 
 ```bash
+sudo addgroup --system confdock
+sudo adduser --system --ingroup confdock --home /var/lib/confdock --no-create-home confdock
 sudo install -d -o confdock -g confdock -m 700 /var/lib/confdock
+sudo install -m 755 ./confdock /usr/local/bin/confdock
 sudo install -d -m 755 /etc/confdock
 sudo install -m 644 deploy/systemd/confdock.service /etc/systemd/system/confdock.service
 sudo install -m 600 deploy/systemd/confdock.env.example /etc/confdock/confdock.env

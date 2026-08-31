@@ -35,7 +35,7 @@ Native Config 原始字节是唯一 Source of Truth。Revision 不可变；历�
 
 ## 单二进制运行
 
-Slice 6 提供 `confdock` 单二进制：React/Vite production assets、Rust WASM、SQLx migrations 和 Axum 路由都嵌入其中。运行时不需要 Node.js、npm、Vite、`web/dist` 或外部 Migration/WASM 文件；SQLite 数据库仍保存在数据目录中。
+ConfDock 提供 `confdock` 单二进制：React/Vite production assets、Rust WASM、SQLx migrations 和 Axum 路由都嵌入其中。运行时不需要 Node.js、npm、Vite、`web/dist` 或外部 Migration/WASM 文件；SQLite 数据库仍保存在数据目录中。
 
 本地构建（需要 Node.js 22、Rust stable、`wasm-bindgen-cli 0.2.127`）：
 
@@ -45,13 +45,15 @@ Slice 6 提供 `confdock` 单二进制：React/Vite production assets、Rust WAS
 ```
 
 Smoke Test 会从不含源码和 `web/dist` 的临时目录启动，检查 `/healthz`、SPA、JS/CSS/WASM/PNG MIME、HEAD、API/sub 边界、路径穿越防护和 SIGTERM 退出。
+在 GitHub Actions 页面手动运行 `workflow_dispatch` 会额外生成并上传
+`confdock-linux-x86_64` Artifact（保留 7 天）；普通 Push/PR 只执行同一套打包、解压和 Smoke Test，不会长期保存 Artifact。
 
 运行时配置：
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `CONFDOCK_LISTEN` | `127.0.0.1:8787` | API/Web 监听地址 |
-| `CONFDOCK_DATA_DIR` | `/var/lib/confdock` | 数据目录；自动使用其中的 `confdock.db` |
+| `CONFDOCK_DATA_DIR` | `/var/lib/confdock` | 绝对数据目录；自动使用其中的 `confdock.db` |
 | `CONFDOCK_DATABASE_URL` | `sqlite:///var/lib/confdock/confdock.db` | 与 `CONFDOCK_DATA_DIR` 二选一，保留现有 URL 配置 |
 | `CONFDOCK_PUBLIC_URL` | `http://127.0.0.1:8787` | Stable URL 的公开 origin |
 | `CONFDOCK_BOOTSTRAP_PASSWORD` | 无 | 只在首次初始化管理员时使用 |
@@ -75,15 +77,15 @@ cargo run -p confdock-service --bin confdock
 
 开发时 Vite 将 `/api` 和 `/sub` 代理到 Rust 服务。生产单二进制直接由 Axum 同时提供 `/`、静态资源、`/api/**`、`/sub/**` 和 `/healthz`。
 
-## Debian 13 + systemd / 1Panel
+## Debian 13 + systemd
 
 仓库提供经过当前 CLI 和数据目录约束验证的示例：[deploy/systemd/confdock.service](deploy/systemd/confdock.service)、[环境样例](deploy/systemd/confdock.env.example) 和 [systemd 说明](deploy/systemd/README.md)。推荐拓扑：
 
 ```text
-Internet → 1Panel OpenResty/Nginx HTTPS → 127.0.0.1:8787 → confdock → SQLite
+Internet → Nginx/Caddy HTTPS → 127.0.0.1:8787 → confdock → SQLite
 ```
 
-在 1Panel 创建反向代理时保留正确 Host，后端端口只监听本机，不需要在防火墙直接开放。必须启用 HTTPS，并将 `CONFDOCK_PUBLIC_URL` 设为实际公开 origin、`CONFDOCK_COOKIE_SECURE=true`。WebSocket 不是本服务必需项，不要为它额外放行。
+后端端口只监听本机，不需要在防火墙直接开放。对外服务必须启用 HTTPS，并将 `CONFDOCK_PUBLIC_URL` 设为实际公开 origin、`CONFDOCK_COOKIE_SECURE=true`。WebSocket 不是本服务必需项，不要为它额外放行。仓库中的 systemd 示例只针对 Debian 13；反向代理请使用发行版提供的通用 Nginx/Caddy 配置。
 
 升级前先停止服务并备份 SQLite（WAL 写入期间不要只复制主数据库文件），再替换 `/usr/local/bin/confdock`、启动服务并观察 Migration 日志。不要在新 Schema 已写入后降级旧二进制继续写入。数据目录包含项目内容、Session 和 Token 元数据，应由受限用户读写并纳入备份；托管 URL 是敏感凭据，不要提交到 Issue 或日志。
 

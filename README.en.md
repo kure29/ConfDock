@@ -35,7 +35,7 @@ Native configuration bytes are the only Source of Truth. Revisions are immutable
 
 ## Single-binary distribution
 
-Slice 6 provides a `confdock` binary embedding the React/Vite production assets, Rust WASM, SQLx migrations, and Axum routes. Runtime operation requires no Node.js, npm, Vite, `web/dist`, or external migration/WASM files; SQLite remains persistent data on disk.
+ConfDock provides a `confdock` binary embedding the React/Vite production assets, Rust WASM, SQLx migrations, and Axum routes. Runtime operation requires no Node.js, npm, Vite, `web/dist`, or external migration/WASM files; SQLite remains persistent data on disk.
 
 Build locally with Node.js 22, stable Rust, and `wasm-bindgen-cli 0.2.127`:
 
@@ -45,13 +45,17 @@ Build locally with Node.js 22, stable Rust, and `wasm-bindgen-cli 0.2.127`:
 ```
 
 The smoke test starts from a temporary directory without source or `web/dist`, checks `/healthz`, SPA fallback, JS/CSS/WASM/PNG MIME types, HEAD, API/sub boundaries, traversal protection, and SIGTERM shutdown.
+Run `workflow_dispatch` manually from GitHub Actions to build and upload the
+`confdock-linux-x86_64` artifact (retained for 7 days). Pushes and pull
+requests execute the same package, extraction, and smoke checks without
+retaining an artifact.
 
 Runtime configuration:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `CONFDOCK_LISTEN` | `127.0.0.1:8787` | API/Web listen address |
-| `CONFDOCK_DATA_DIR` | `/var/lib/confdock` | Data directory; uses `confdock.db` inside it |
+| `CONFDOCK_DATA_DIR` | `/var/lib/confdock` | Absolute data directory; uses `confdock.db` inside it |
 | `CONFDOCK_DATABASE_URL` | `sqlite:///var/lib/confdock/confdock.db` | Choose this or `CONFDOCK_DATA_DIR`; existing URL configuration remains supported |
 | `CONFDOCK_PUBLIC_URL` | `http://127.0.0.1:8787` | Public origin for stable URLs |
 | `CONFDOCK_BOOTSTRAP_PASSWORD` | none | First administrator only |
@@ -75,15 +79,15 @@ cargo run -p confdock-service --bin confdock
 
 Vite proxies `/api` and `/sub` to the Rust service during development. The production binary serves `/`, assets, `/api/**`, `/sub/**`, and `/healthz` from Axum.
 
-## Debian 13 + systemd / 1Panel
+## Debian 13 + systemd
 
 Verified examples are provided in [deploy/systemd/confdock.service](deploy/systemd/confdock.service), [the environment sample](deploy/systemd/confdock.env.example), and [the systemd notes](deploy/systemd/README.md). Recommended topology:
 
 ```text
-Internet → 1Panel OpenResty/Nginx HTTPS → 127.0.0.1:8787 → confdock → SQLite
+Internet → Nginx/Caddy HTTPS → 127.0.0.1:8787 → confdock → SQLite
 ```
 
-Keep the backend on loopback, preserve the Host header in the 1Panel reverse proxy, and do not expose the internal port through the firewall. HTTPS is required for public use; set `CONFDOCK_PUBLIC_URL` to the real origin and `CONFDOCK_COOKIE_SECURE=true`. WebSockets are not required. Before upgrades, stop the service and back up SQLite (do not copy only the main file while WAL writes are active), replace `/usr/local/bin/confdock`, and start it again. Migrations run at startup; do not downgrade an older binary and continue writing a database after a newer schema migration. Treat the data directory and hosted URLs as sensitive credentials.
+Keep the backend on loopback and do not expose the internal port through the firewall. HTTPS is required for public use; set `CONFDOCK_PUBLIC_URL` to the real origin and `CONFDOCK_COOKIE_SECURE=true`. WebSockets are not required. The included systemd example targets Debian 13; use the distribution's generic Nginx/Caddy reverse-proxy configuration. Before upgrades, stop the service and back up SQLite (do not copy only the main file while WAL writes are active), replace `/usr/local/bin/confdock`, and start it again. Migrations run at startup; do not downgrade an older binary and continue writing a database after a newer schema migration. Treat the data directory and hosted URLs as sensitive credentials.
 
 ## API overview
 
