@@ -47,8 +47,20 @@ ConfDock 提供 `confdock` 单二进制：React/Vite production assets、Rust WA
 Smoke Test 会从不含源码和 `web/dist` 的临时目录启动，检查 `/healthz`、SPA、JS/CSS/WASM/PNG MIME、HEAD、API/sub 边界、路径穿越防护和 SIGTERM 退出。
 在 GitHub Actions 页面手动运行 `workflow_dispatch` 会额外生成并上传
 `confdock-linux-x86_64` Artifact（保留 7 天）；普通 Push/PR 只执行同一套打包、解压和 Smoke Test，不会长期保存 Artifact。
+归档包含 `confdock`、根目录 `config.toml` 和 `SHA256SUMS`，不包含数据库、密码或源码。
 
-运行时配置：
+运行时配置：内置默认值 → `config.toml` → `CONFDOCK_*` 环境变量 → 明确 CLI 参数。打包归档会携带 [packaging/config.toml](packaging/config.toml)；配置文件不保存密码或 Token，且 `data_dir` 为相对路径时相对于配置文件目录解析。
+
+```bash
+./confdock --help
+./confdock config check --config ./config.toml
+./confdock admin init --config ./config.toml
+./confdock --config ./config.toml
+```
+
+直接在交互式终端启动时，空数据库会提示初始化固定用户名 `admin` 并继续启动。systemd 等非交互环境应先执行 `admin init`；自动化仍可使用 `CONFDOCK_BOOTSTRAP_PASSWORD`，但不要把它写入 `config.toml`。
+
+运行时环境变量（高级兼容入口）：
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -77,15 +89,15 @@ cargo run -p confdock-service --bin confdock
 
 开发时 Vite 将 `/api` 和 `/sub` 代理到 Rust 服务。生产单二进制直接由 Axum 同时提供 `/`、静态资源、`/api/**`、`/sub/**` 和 `/healthz`。
 
-## Debian 13 + systemd
+## Linux Deployment
 
-仓库提供经过当前 CLI 和数据目录约束验证的示例：[deploy/systemd/confdock.service](deploy/systemd/confdock.service)、[环境样例](deploy/systemd/confdock.env.example) 和 [systemd 说明](deploy/systemd/README.md)。推荐拓扑：
+仓库提供面向 Linux x86-64 glibc、以 systemd 为当前原生服务管理目标的示例：[deploy/systemd/confdock.service](deploy/systemd/confdock.service)、[环境样例](deploy/systemd/confdock.env.example) 和 [systemd 说明](deploy/systemd/README.md)。Debian 13 已完成实机验证，但不代表所有发行版或 ARM64 均已验证。推荐拓扑：
 
 ```text
 Internet → Nginx/Caddy HTTPS → 127.0.0.1:8787 → confdock → SQLite
 ```
 
-后端端口只监听本机，不需要在防火墙直接开放。对外服务必须启用 HTTPS，并将 `CONFDOCK_PUBLIC_URL` 设为实际公开 origin、`CONFDOCK_COOKIE_SECURE=true`。WebSocket 不是本服务必需项，不要为它额外放行。仓库中的 systemd 示例只针对 Debian 13；反向代理请使用发行版提供的通用 Nginx/Caddy 配置。
+后端端口只监听本机，不需要在防火墙直接开放。对外服务必须启用 HTTPS，并将 `CONFDOCK_PUBLIC_URL` 设为实际公开 origin、`CONFDOCK_COOKIE_SECURE=true`。WebSocket 不是本服务必需项，不要为它额外放行。反向代理请使用发行版提供的通用 Nginx/Caddy 配置。菜单式安装器、Docker 和备份恢复属于后续 Slice。
 
 升级前先停止服务并备份 SQLite（WAL 写入期间不要只复制主数据库文件），再替换 `/usr/local/bin/confdock`、启动服务并观察 Migration 日志。不要在新 Schema 已写入后降级旧二进制继续写入。数据目录包含项目内容、Session 和 Token 元数据，应由受限用户读写并纳入备份；托管 URL 是敏感凭据，不要提交到 Issue 或日志。
 

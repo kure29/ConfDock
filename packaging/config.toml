@@ -1,0 +1,17 @@
+# ConfDock server address
+listen = "127.0.0.1:8787"
+
+# Persistent data directory (confdock.db is created below it)
+data_dir = "/var/lib/confdock"
+
+# Public address shown and used by ConfDock
+public_url = "http://127.0.0.1:8787"
+
+# Use true when public_url uses HTTPS
+cookie_secure = false
+
+# Session lifetime in seconds
+session_ttl_seconds = 604800
+
+# Maximum imported configuration size in bytes
+max_config_bytes = 8388608

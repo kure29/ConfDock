@@ -48,6 +48,19 @@ pub enum StartError {
 
 impl AppState {
     pub async fn initialize(mut config: ServiceConfig) -> Result<Self, StartError> {
+        let bootstrap_password = config.bootstrap_password.take();
+        let state = Self::initialize_unbootstrapped(config).await?;
+        let created = bootstrap_admin(&state.pool, bootstrap_password).await?;
+        if created {
+            tracing::info!("ConfDock administrator created");
+        }
+        Ok(state)
+    }
+
+    /// Open the database, apply migrations, and construct application state
+    /// without requiring or creating an administrator. CLI first-run flows use
+    /// this boundary so that they can collect a password interactively.
+    pub async fn initialize_unbootstrapped(config: ServiceConfig) -> Result<Self, StartError> {
         let _startup_guard = STARTUP_LOCK.get_or_init(|| Mutex::new(())).lock().await;
         config.prepare_database_parent()?;
         let options = SqliteConnectOptions::from_str(&config.database_url)
@@ -68,11 +81,6 @@ impl AppState {
             .map_err(|_| StartError::Migration)?;
         config.secure_database_permissions()?;
 
-        let bootstrap_password = config.bootstrap_password.take();
-        let created = bootstrap_admin(&pool, bootstrap_password).await?;
-        if created {
-            tracing::info!("ConfDock administrator created");
-        }
         cleanup_expired_sessions(&pool).await?;
 
         Ok(Self {

@@ -1,8 +1,13 @@
-use std::{env, fs, net::SocketAddr, path::PathBuf};
+use std::{
+    env, fs,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+};
 
 #[cfg(unix)]
-use std::{ffi::OsString, os::unix::fs::PermissionsExt, path::Path};
+use std::{ffi::OsString, os::unix::fs::PermissionsExt};
 
+use serde::Deserialize;
 use thiserror::Error;
 use url::Url;
 
@@ -15,6 +20,7 @@ pub const DEFAULT_MAX_CONFIG_BYTES: usize = 8_388_608;
 pub const MAX_SESSION_TTL_SECONDS: i64 = 31_536_000;
 pub const MAX_CONFIG_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_PASSWORD_BYTES: usize = 1_024;
+pub const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct ServiceConfig {
@@ -51,34 +57,160 @@ pub enum ConfigError {
         "the SQLite database files must be regular, non-symlink files with private permissions"
     )]
     DatabasePermissions,
+    #[error("configuration file `{path}` could not be read: {reason}")]
+    ConfigFileRead { path: PathBuf, reason: String },
+    #[error("configuration file `{path}` is too large (maximum {MAX_CONFIG_FILE_BYTES} bytes)")]
+    ConfigFileTooLarge { path: PathBuf },
+    #[error("configuration file `{path}` is invalid: {reason}")]
+    ConfigFileInvalid { path: PathBuf, reason: String },
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileConfig {
+    listen: Option<String>,
+    data_dir: Option<String>,
+    public_url: Option<String>,
+    cookie_secure: Option<bool>,
+    session_ttl_seconds: Option<i64>,
+    max_config_bytes: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ConfigOverrides {
+    pub listen: Option<SocketAddr>,
+    pub data_dir: Option<PathBuf>,
+    pub public_url: Option<String>,
+    pub cookie_secure: Option<bool>,
+    pub session_ttl_seconds: Option<i64>,
+    pub max_config_bytes: Option<usize>,
 }
 
 impl ServiceConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
-        let listen = env::var("CONFDOCK_LISTEN")
-            .unwrap_or_else(|_| DEFAULT_LISTEN.to_owned())
-            .parse()
-            .map_err(|_| ConfigError::InvalidListen)?;
-        let data_dir = env::var("CONFDOCK_DATA_DIR").ok();
-        let database_url = match (env::var("CONFDOCK_DATABASE_URL").ok(), data_dir.as_deref()) {
-            (Some(_), Some(_)) => return Err(ConfigError::ConflictingDatabaseLocation),
-            (Some(database_url), None) => database_url,
-            (None, Some(data_dir)) => database_url_from_data_dir(data_dir)?,
-            (None, None) => DEFAULT_DATABASE_URL.to_owned(),
-        };
-        let public_url =
-            env::var("CONFDOCK_PUBLIC_URL").unwrap_or_else(|_| DEFAULT_PUBLIC_URL.to_owned());
-        let session_ttl_seconds = parse_positive_i64(
-            env::var("CONFDOCK_SESSION_TTL_SECONDS").ok().as_deref(),
-            DEFAULT_SESSION_TTL_SECONDS,
-        )?;
-        let cookie_secure = parse_bool(env::var("CONFDOCK_COOKIE_SECURE").ok().as_deref(), false)?;
-        let max_config_bytes = parse_positive_usize(
-            env::var("CONFDOCK_MAX_CONFIG_BYTES").ok().as_deref(),
-            DEFAULT_MAX_CONFIG_BYTES,
-        )?;
+        Self::from_sources(None, ConfigOverrides::default())
+    }
 
-        Self::new(
+    pub fn from_sources(
+        config_path: Option<&Path>,
+        overrides: ConfigOverrides,
+    ) -> Result<Self, ConfigError> {
+        let file = config_path.map(load_file).transpose()?.unwrap_or_default();
+        let config_base = config_path
+            .map(canonical_config_path)
+            .transpose()?
+            .and_then(|path| path.parent().map(Path::to_path_buf));
+
+        let listen = if let Some(value) = overrides.listen {
+            value
+        } else {
+            let base = if let Some(value) = file.listen.as_deref() {
+                value
+                    .parse()
+                    .map_err(|_| config_file_error(config_path, ConfigError::InvalidListen))?
+            } else {
+                DEFAULT_LISTEN.parse().expect("default listen is valid")
+            };
+            match env::var_os("CONFDOCK_LISTEN") {
+                Some(value) => value
+                    .to_str()
+                    .ok_or(ConfigError::InvalidListen)?
+                    .parse()
+                    .map_err(|_| ConfigError::InvalidListen)?,
+                None => base,
+            }
+        };
+
+        let env_data_dir = env::var("CONFDOCK_DATA_DIR").ok();
+        let env_database_url = env::var("CONFDOCK_DATABASE_URL").ok();
+        if env_data_dir.is_some() && env_database_url.is_some() {
+            return Err(ConfigError::ConflictingDatabaseLocation);
+        }
+        let file_data_dir = file
+            .data_dir
+            .as_deref()
+            .map(|raw| {
+                let path = PathBuf::from(raw.trim());
+                if path.as_os_str().is_empty() {
+                    return Err(config_file_error(
+                        config_path,
+                        ConfigError::InvalidDataDirectory,
+                    ));
+                }
+                if path.is_absolute() {
+                    Ok(path)
+                } else {
+                    config_base
+                        .as_ref()
+                        .map(|base| base.join(path))
+                        .ok_or_else(|| {
+                            config_file_error(config_path, ConfigError::InvalidDataDirectory)
+                        })
+                }
+            })
+            .transpose()?;
+        let data_dir_override = overrides.data_dir.is_some();
+        let selected_data_dir = if let Some(path) = overrides.data_dir {
+            Some(path)
+        } else if let Some(path) = env_data_dir {
+            // Preserve the existing environment-variable contract: DATA_DIR
+            // must be an absolute path.
+            Some(PathBuf::from(path.trim()))
+        } else {
+            file_data_dir
+        };
+        let database_url = if let Some(database_url) = env_database_url {
+            database_url
+        } else if let Some(data_dir) = selected_data_dir {
+            if config_path.is_none()
+                || env::var_os("CONFDOCK_DATA_DIR").is_some()
+                || data_dir_override
+            {
+                database_url_from_data_dir(&data_dir.to_string_lossy())?
+            } else {
+                database_url_from_path(&data_dir)?
+            }
+        } else {
+            DEFAULT_DATABASE_URL.to_owned()
+        };
+
+        let public_url = overrides
+            .public_url
+            .or_else(|| env::var("CONFDOCK_PUBLIC_URL").ok())
+            .or(file.public_url)
+            .unwrap_or_else(|| DEFAULT_PUBLIC_URL.to_owned());
+        let session_ttl_seconds = if let Some(value) = overrides.session_ttl_seconds {
+            value
+        } else if let Some(value) = env::var_os("CONFDOCK_SESSION_TTL_SECONDS") {
+            value
+                .to_str()
+                .ok_or(ConfigError::InvalidSessionTtl)?
+                .parse()
+                .map_err(|_| ConfigError::InvalidSessionTtl)?
+        } else {
+            file.session_ttl_seconds
+                .unwrap_or(DEFAULT_SESSION_TTL_SECONDS)
+        };
+        let cookie_secure = if let Some(value) = overrides.cookie_secure {
+            value
+        } else if env::var_os("CONFDOCK_COOKIE_SECURE").is_some() {
+            parse_env_bool("CONFDOCK_COOKIE_SECURE", false)?
+        } else {
+            file.cookie_secure.unwrap_or(false)
+        };
+        let max_config_bytes = if let Some(value) = overrides.max_config_bytes {
+            value
+        } else if let Some(value) = env::var_os("CONFDOCK_MAX_CONFIG_BYTES") {
+            value
+                .to_str()
+                .ok_or(ConfigError::InvalidMaxConfigBytes)?
+                .parse()
+                .map_err(|_| ConfigError::InvalidMaxConfigBytes)?
+        } else {
+            file.max_config_bytes.unwrap_or(DEFAULT_MAX_CONFIG_BYTES)
+        };
+
+        let result = Self::new(
             listen,
             database_url,
             public_url,
@@ -86,7 +218,17 @@ impl ServiceConfig {
             session_ttl_seconds,
             cookie_secure,
             max_config_bytes,
-        )
+        );
+        match result {
+            Ok(config) => Ok(config),
+            Err(error) => match config_path {
+                Some(path) => Err(ConfigError::ConfigFileInvalid {
+                    path: path.to_path_buf(),
+                    reason: error.to_string(),
+                }),
+                None => Err(error),
+            },
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -138,14 +280,10 @@ impl ServiceConfig {
         self.secure_database_permissions()
     }
 
-    /// Restrict SQLite's primary file and WAL sidecars on Unix. SQLite creates
-    /// these files itself, so this is called both before opening an existing
-    /// database and immediately after opening/migrating a new one.
     pub fn secure_database_permissions(&self) -> Result<(), ConfigError> {
         let Some(path) = self.database_path() else {
             return Ok(());
         };
-
         #[cfg(unix)]
         {
             secure_file_if_exists(&path)?;
@@ -155,10 +293,8 @@ impl ServiceConfig {
                 secure_file_if_exists(Path::new(&sidecar))?;
             }
         }
-
         #[cfg(not(unix))]
         let _ = path;
-
         Ok(())
     }
 
@@ -177,21 +313,6 @@ impl ServiceConfig {
             Some(PathBuf::from(raw))
         }
     }
-}
-
-#[cfg(unix)]
-fn secure_file_if_exists(path: &Path) -> Result<(), ConfigError> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(_) => return Err(ConfigError::DatabasePermissions),
-    };
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-        return Err(ConfigError::DatabasePermissions);
-    }
-    let mut permissions = metadata.permissions();
-    permissions.set_mode(0o600);
-    fs::set_permissions(path, permissions).map_err(|_| ConfigError::DatabasePermissions)
 }
 
 fn normalize_public_url(value: &str) -> Result<String, ConfigError> {
@@ -213,47 +334,90 @@ fn database_url_from_data_dir(value: &str) -> Result<String, ConfigError> {
     if value.is_empty() || !PathBuf::from(value).is_absolute() {
         return Err(ConfigError::InvalidDataDirectory);
     }
-    Ok(format!(
-        "sqlite://{}",
-        PathBuf::from(value).join("confdock.db").display()
-    ))
+    database_url_from_path(&PathBuf::from(value))
 }
 
-fn parse_bool(value: Option<&str>, default: bool) -> Result<bool, ConfigError> {
-    match value {
-        None => Ok(default),
-        Some("true") => Ok(true),
-        Some("false") => Ok(false),
-        Some(_) => Err(ConfigError::InvalidCookieSecure),
+fn database_url_from_path(path: &Path) -> Result<String, ConfigError> {
+    if path.as_os_str().is_empty() {
+        return Err(ConfigError::InvalidDataDirectory);
+    }
+    Ok(format!("sqlite://{}", path.join("confdock.db").display()))
+}
+
+fn canonical_config_path(path: &Path) -> Result<PathBuf, ConfigError> {
+    fs::canonicalize(path).map_err(|error| ConfigError::ConfigFileRead {
+        path: path.to_path_buf(),
+        reason: error.to_string(),
+    })
+}
+
+fn config_file_error(path: Option<&Path>, error: ConfigError) -> ConfigError {
+    match path {
+        Some(path) => ConfigError::ConfigFileInvalid {
+            path: path.to_path_buf(),
+            reason: error.to_string(),
+        },
+        None => error,
     }
 }
 
-fn parse_positive_i64(value: Option<&str>, default: i64) -> Result<i64, ConfigError> {
-    match value {
-        None => Ok(default),
-        Some(value) => value
-            .parse::<i64>()
-            .ok()
-            .filter(|value| *value > 0)
-            .ok_or(ConfigError::InvalidSessionTtl),
+fn load_file(path: &Path) -> Result<FileConfig, ConfigError> {
+    let canonical = canonical_config_path(path)?;
+    let metadata = fs::metadata(&canonical).map_err(|error| ConfigError::ConfigFileRead {
+        path: path.to_path_buf(),
+        reason: error.to_string(),
+    })?;
+    if !metadata.is_file() {
+        return Err(ConfigError::ConfigFileRead {
+            path: path.to_path_buf(),
+            reason: "not a regular file".to_owned(),
+        });
     }
+    if metadata.len() > MAX_CONFIG_FILE_BYTES {
+        return Err(ConfigError::ConfigFileTooLarge {
+            path: path.to_path_buf(),
+        });
+    }
+    let bytes = fs::read(&canonical).map_err(|error| ConfigError::ConfigFileRead {
+        path: path.to_path_buf(),
+        reason: error.to_string(),
+    })?;
+    let text = std::str::from_utf8(&bytes).map_err(|error| ConfigError::ConfigFileInvalid {
+        path: path.to_path_buf(),
+        reason: error.to_string(),
+    })?;
+    toml::from_str(text).map_err(|error| ConfigError::ConfigFileInvalid {
+        path: path.to_path_buf(),
+        reason: error.to_string(),
+    })
 }
 
-fn parse_positive_usize(value: Option<&str>, default: usize) -> Result<usize, ConfigError> {
-    match value {
-        None => Ok(default),
-        Some(value) => value
-            .parse::<usize>()
-            .ok()
-            .filter(|value| *value > 0)
-            .ok_or(ConfigError::InvalidMaxConfigBytes),
+fn parse_env_bool(name: &str, default: bool) -> Result<bool, ConfigError> {
+    match env::var(name) {
+        Ok(value) if value == "true" => Ok(true),
+        Ok(value) if value == "false" => Ok(false),
+        Ok(_) => Err(ConfigError::InvalidCookieSecure),
+        Err(_) => Ok(default),
     }
+}
+#[cfg(unix)]
+fn secure_file_if_exists(path: &Path) -> Result<(), ConfigError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err(ConfigError::DatabasePermissions),
+    };
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+        return Err(ConfigError::DatabasePermissions);
+    }
+    let mut permissions = metadata.permissions();
+    permissions.set_mode(0o600);
+    fs::set_permissions(path, permissions).map_err(|_| ConfigError::DatabasePermissions)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn public_url_is_validated_and_normalized() {
         assert_eq!(
@@ -264,7 +428,6 @@ mod tests {
         assert!(normalize_public_url("https://user@example.test").is_err());
         assert!(normalize_public_url("https://example.test/?token=secret").is_err());
     }
-
     #[test]
     fn resource_limits_have_explicit_upper_bounds() {
         let base = |ttl, max_bytes| {
@@ -288,7 +451,6 @@ mod tests {
             Err(ConfigError::InvalidMaxConfigBytes)
         ));
     }
-
     #[test]
     fn data_directory_selects_a_predictable_sqlite_path() {
         assert_eq!(
@@ -305,11 +467,57 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn toml_configuration_is_strict_and_resolves_relative_data_dir() {
+        let directory = tempfile::tempdir().unwrap();
+        let config_path = directory.path().join("config.toml");
+        fs::write(
+            &config_path,
+            "listen = \"127.0.0.1:9000\"\ndata_dir = \"data\"\npublic_url = \"https://example.test/\"\n",
+        )
+        .unwrap();
+        let config =
+            ServiceConfig::from_sources(Some(&config_path), ConfigOverrides::default()).unwrap();
+        assert_eq!(
+            config.listen,
+            "127.0.0.1:9000".parse::<SocketAddr>().unwrap()
+        );
+        assert_eq!(
+            config.database_url,
+            format!(
+                "sqlite://{}/data/confdock.db",
+                fs::canonicalize(directory.path()).unwrap().display()
+            )
+        );
+        assert_eq!(config.public_url, "https://example.test");
+
+        fs::write(&config_path, "unknown = true\n").unwrap();
+        let error = ServiceConfig::from_sources(Some(&config_path), ConfigOverrides::default())
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("config.toml"));
+        assert!(message.contains("unknown"));
+    }
+
+    #[test]
+    fn missing_and_oversized_config_files_are_rejected() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing.toml");
+        assert!(matches!(
+            ServiceConfig::from_sources(Some(&missing), ConfigOverrides::default()),
+            Err(ConfigError::ConfigFileRead { .. })
+        ));
+        let oversized = directory.path().join("large.toml");
+        fs::write(&oversized, vec![b'#'; (MAX_CONFIG_FILE_BYTES + 1) as usize]).unwrap();
+        assert!(matches!(
+            ServiceConfig::from_sources(Some(&oversized), ConfigOverrides::default()),
+            Err(ConfigError::ConfigFileTooLarge { .. })
+        ));
+    }
     #[cfg(unix)]
     #[test]
     fn existing_database_files_are_restricted_to_owner_only() {
         use std::{fs::OpenOptions, os::unix::fs::PermissionsExt};
-
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("confdock.db");
         for suffix in ["", "-wal", "-shm"] {
@@ -341,12 +549,10 @@ mod tests {
             );
         }
     }
-
     #[cfg(unix)]
     #[test]
     fn database_symlinks_are_rejected() {
         use std::os::unix::fs::symlink;
-
         let directory = tempfile::tempdir().unwrap();
         let target = directory.path().join("target.db");
         fs::write(&target, b"not a database").unwrap();
@@ -367,12 +573,10 @@ mod tests {
             Err(ConfigError::DatabasePermissions)
         ));
     }
-
     #[cfg(unix)]
     #[test]
     fn configured_data_directory_symlinks_are_rejected() {
         use std::os::unix::fs::symlink;
-
         let directory = tempfile::tempdir().unwrap();
         let target = directory.path().join("real-data");
         fs::create_dir(&target).unwrap();
