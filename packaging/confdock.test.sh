@@ -69,6 +69,117 @@ grep -F '检测到非空数据目录' "$test_root/data.log" >/dev/null
 after_hash="$(shasum -a 256 "$data_dir/legacy.db" | awk '{print $1}')"
 test "$before_hash" = "$after_hash"
 
+# Residual-config recovery is explicit and delegates TOML parsing to the
+# current binary's config check/get commands.
+residual_root="$(if [[ -d /private/tmp ]]; then mktemp -d /private/tmp/confdock-residual-test.XXXXXX; else mktemp -d -t confdock-residual-test.XXXXXX; fi)"
+trap 'rm -rf -- "$test_root" "$residual_root"' EXIT
+mkdir -p "$residual_root/etc" "$residual_root/data-valid" "$residual_root/data-old"
+fake_binary="$residual_root/confdock"
+fake_package="$residual_root/package.toml"
+cat >"$fake_binary" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+case "${1:-}:${2:-}:${3:-}" in
+  --version::) printf 'confdock 0.1.0\n' ;;
+  config:check:*)
+    if [[ "${CONFDOCK_FAKE_INVALID:-0}" == 1 ]]; then exit 1; fi
+    if [[ -n "${CONFDOCK_FAKE_COUNT_FILE:-}" ]]; then
+      count=0
+      [[ -f "$CONFDOCK_FAKE_COUNT_FILE" ]] && count="$(<"$CONFDOCK_FAKE_COUNT_FILE")"
+      count=$((count + 1))
+      printf '%s\n' "$count" >"$CONFDOCK_FAKE_COUNT_FILE"
+      [[ "$count" -lt 2 ]] || exit 1
+    fi
+    ;;
+  config:get:data_dir) printf '%s\n' "${CONFDOCK_FAKE_DATA:?}" ;;
+  config:get:listen) printf '127.0.0.1:8787\n' ;;
+  config:get:public_url) printf 'http://127.0.0.1:8787\n' ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod 0755 "$fake_binary"
+printf 'package\n' >"$fake_package"
+residual_env=(CONFDOCK_TEST_MODE=1 CONFDOCK_BIN_PATH="$residual_root/native" CONFDOCK_CTL_PATH="$residual_root/ctl" CONFDOCK_CONFIG_DIR="$residual_root/etc" CONFDOCK_CONFIG_PATH="$residual_root/etc/config.toml" CONFDOCK_UNIT_PATH="$residual_root/unit" CONFDOCK_SYSTEMCTL="$residual_root/systemctl" CONFDOCK_FAKE_DATA="$residual_root/data-valid")
+printf '# old config\n' >"$residual_root/etc/config.toml"
+valid_output="$residual_root/valid.log"
+# shellcheck disable=SC2016 # positional parameters are intentionally expanded by the child bash
+if ! printf '1\n' | env "${residual_env[@]}" bash -c 'source "$1"; prepare_residual_config "$2" "$3"' _ "$script" "$fake_binary" "$fake_package" >"$valid_output" 2>&1; then
+  printf '有效残留配置未能继续\n' >&2
+  exit 1
+fi
+grep -F '检测到上次安装留下的配置文件：' "$valid_output" >/dev/null
+grep -F '监听地址：127.0.0.1:8787' "$valid_output" >/dev/null
+grep -F '公开地址：http://127.0.0.1:8787' "$valid_output" >/dev/null
+test -f "$residual_root/etc/config.toml"
+
+# Invalid config, symlink config, and explicit cancellation all stop without
+# moving or modifying the old file.
+printf '# invalid config\n' >"$residual_root/etc/config.toml"
+# shellcheck disable=SC2016 # positional parameters are intentionally expanded by the child bash
+if printf '1\n' | env "${residual_env[@]}" CONFDOCK_FAKE_INVALID=1 bash -c 'source "$1"; prepare_residual_config "$2" "$3"' _ "$script" "$fake_binary" "$fake_package" >"$residual_root/invalid.log" 2>&1; then
+  printf '无效残留配置意外通过\n' >&2
+  exit 1
+fi
+grep -F '配置校验失败' "$residual_root/invalid.log" >/dev/null
+test -f "$residual_root/etc/config.toml"
+ln -s "$residual_root/etc/config.toml" "$residual_root/etc/config-link.toml"
+# shellcheck disable=SC2016 # positional parameters are intentionally expanded by the child bash
+if printf '1\n' | env "${residual_env[@]}" CONFDOCK_CONFIG_PATH="$residual_root/etc/config-link.toml" bash -c 'source "$1"; prepare_residual_config "$2" "$3"' _ "$script" "$fake_binary" "$fake_package" >"$residual_root/link.log" 2>&1; then
+  printf '符号链接残留配置意外通过\n' >&2
+  exit 1
+fi
+grep -F '必须是普通文件且不能是符号链接' "$residual_root/link.log" >/dev/null
+# shellcheck disable=SC2016 # positional parameters are intentionally expanded by the child bash
+if printf '0\n' | env "${residual_env[@]}" bash -c 'source "$1"; prepare_residual_config "$2" "$3"' _ "$script" "$fake_binary" "$fake_package" >"$residual_root/cancel.log" 2>&1; then
+  printf '取消残留配置意外继续\n' >&2
+  exit 1
+fi
+grep -F '已取消' "$residual_root/cancel.log" >/dev/null
+
+# Backup names are timestamped and get a suffix when the timestamped path is
+# already present; the existing backup is never overwritten.
+printf '# old config\n' >"$residual_root/etc/config.toml"
+printf 'existing backup\n' >"$residual_root/etc/config.toml.backup.20260101000000"
+# shellcheck disable=SC2016 # positional parameters are intentionally expanded by the child bash
+if ! printf '2\n' | env "${residual_env[@]}" CONFDOCK_BACKUP_TIMESTAMP=20260101000000 bash -c 'source "$1"; prepare_residual_config "$2" "$3"' _ "$script" "$fake_binary" "$fake_package" >"$residual_root/backup.log" 2>&1; then
+  printf '残留配置备份失败\n' >&2
+  exit 1
+fi
+test ! -e "$residual_root/etc/config.toml"
+test -f "$residual_root/etc/config.toml.backup.20260101000000.1"
+grep -F 'existing backup' "$residual_root/etc/config.toml.backup.20260101000000" >/dev/null
+grep -F '# old config' "$residual_root/etc/config.toml.backup.20260101000000.1" >/dev/null
+
+# A second package-config validation failure leaves the backup in place.
+printf '# old config\n' >"$residual_root/etc/config.toml"
+count_file="$residual_root/check-count"
+rm -f "$count_file"
+# shellcheck disable=SC2016 # positional parameters are intentionally expanded by the child bash
+if printf '2\n' | env "${residual_env[@]}" CONFDOCK_BACKUP_TIMESTAMP=20260101000001 CONFDOCK_FAKE_COUNT_FILE="$count_file" bash -c 'source "$1"; prepare_residual_config "$2" "$3"' _ "$script" "$fake_binary" "$fake_package" >"$residual_root/revalidate.log" 2>&1; then
+  printf '安装包配置二次校验失败路径意外成功\n' >&2
+  exit 1
+fi
+test -f "$residual_root/etc/config.toml.backup.20260101000001"
+grep -F '残留配置备份：' "$residual_root/revalidate.log" >/dev/null
+
+# Choice 1 never bypasses the unknown non-empty data-directory guard.
+printf '# old config\n' >"$residual_root/etc/config.toml"
+printf 'legacy database\n' >"$residual_root/data-old/legacy.db"
+before_old="$(shasum -a 256 "$residual_root/data-old/legacy.db" | awk '{print $1}')"
+# shellcheck disable=SC2016 # positional parameters are intentionally expanded by the child bash
+if printf '1\n' | env "${residual_env[@]}" CONFDOCK_FAKE_DATA="$residual_root/data-old" bash -c 'source "$1"; prepare_residual_config "$2" "$3"; check_existing_install "$CONFDOCK_FAKE_DATA" "$2"' _ "$script" "$fake_binary" "$fake_package" >"$residual_root/nonempty.log" 2>&1; then
+  printf '非空未知数据目录意外继续\n' >&2
+  exit 1
+fi
+grep -F '检测到非空数据目录' "$residual_root/nonempty.log" >/dev/null
+after_old="$(shasum -a 256 "$residual_root/data-old/legacy.db" | awk '{print $1}')"
+test "$before_old" = "$after_old"
+
+# The main menu reports a residual config instead of pretending the host is
+# completely uninstalled.
+menu_residual="$(printf '0\n' | env "${residual_env[@]}" CONFDOCK_TEST_MODE=0 "$script")"
+grep -F '安装状态：检测到残留配置' <<<"$menu_residual" >/dev/null
+
 # The root check is still fail-fast for a normal non-root invocation.
 error_file="$test_root/root-error.log"
 if "$script" install binary >"$error_file" 2>&1; then

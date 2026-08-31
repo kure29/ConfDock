@@ -33,6 +33,9 @@ UNIT_PATH="${CONFDOCK_UNIT_PATH:-$(rooted_path /etc/systemd/system/confdock.serv
 DATA_DIR_OVERRIDE="${CONFDOCK_DATA_DIR_PATH:-}"
 SYSTEMCTL="${CONFDOCK_SYSTEMCTL:-systemctl}"
 JOURNALCTL="${CONFDOCK_JOURNALCTL:-journalctl}"
+RESIDUAL_CONFIG_ACCEPTED=0
+RESIDUAL_CONFIG_BACKUP=""
+RESIDUAL_CONFIG_SUMMARY_SHOWN=0
 
 # A release archive has its binary/config beside this script.  A source tree
 # has them under target/ and packaging/.  An installed ctl always uses the
@@ -47,8 +50,15 @@ fi
 
 TMP_FILES=()
 TMP_DIRS=()
+report_residual_backup() {
+  if [[ -n "${RESIDUAL_CONFIG_BACKUP:-}" ]]; then
+    printf '残留配置备份：%s\n' "$RESIDUAL_CONFIG_BACKUP" >&2
+    RESIDUAL_CONFIG_BACKUP=""
+  fi
+}
 cleanup() {
   local item
+  report_residual_backup
   for item in "${TMP_FILES[@]:-}"; do
     if [[ -n "$item" ]]; then rm -f -- "$item" 2>/dev/null || true; fi
   done
@@ -207,7 +217,12 @@ show_config_summary() {
 }
 
 native_marker_exists() {
-  [[ -e "$BIN_PATH" || -e "$CTL_PATH" || -e "$CONFIG_PATH" || -e "$UNIT_PATH" ]]
+  [[ -e "$BIN_PATH" || -L "$BIN_PATH" || -e "$CTL_PATH" || -L "$CTL_PATH" || \
+    -e "$CONFIG_PATH" || -L "$CONFIG_PATH" || -e "$UNIT_PATH" || -L "$UNIT_PATH" ]]
+}
+
+residual_config_exists() {
+  [[ -e "$CONFIG_PATH" || -L "$CONFIG_PATH" ]]
 }
 
 data_dir_has_entries() {
@@ -272,16 +287,74 @@ recover_partial_install() {
   printf '已清理可确认的未完成安装文件；配置和数据保持不变。\n'
 }
 
+prepare_residual_config() {
+  local binary="$1" package_config="$2" choice backup_stamp backup_base backup_path suffix
+  RESIDUAL_CONFIG_ACCEPTED=0
+  RESIDUAL_CONFIG_SUMMARY_SHOWN=0
+  if ! residual_config_exists; then return 0; fi
+  if [[ ! -f "$CONFIG_PATH" || -L "$CONFIG_PATH" ]]; then
+    die "残留配置必须是普通文件且不能是符号链接：$CONFIG_PATH"
+    return 1
+  fi
+  if [[ -e "$BIN_PATH" || -L "$BIN_PATH" || -e "$CTL_PATH" || -L "$CTL_PATH" ||
+        -e "$UNIT_PATH" || -L "$UNIT_PATH" ]]; then
+    return 0
+  fi
+  cat <<EOF
+检测到上次安装留下的配置文件：
+$CONFIG_PATH
+
+1. 使用现有配置继续安装
+2. 备份现有配置并使用安装包中的配置
+0. 取消
+EOF
+  read -r -p '请选择：' choice || choice=0
+  case "$choice" in
+    1)
+      validate_config "$binary" "$CONFIG_PATH" || return 1
+      show_config_summary "$binary" "$CONFIG_PATH" || return 1
+      RESIDUAL_CONFIG_ACCEPTED=1
+      RESIDUAL_CONFIG_SUMMARY_SHOWN=1
+      ;;
+    2)
+      validate_config "$binary" "$package_config" || return 1
+      backup_stamp="${CONFDOCK_BACKUP_TIMESTAMP:-}"
+      if [[ -z "$backup_stamp" ]]; then
+        backup_stamp="$(date -u +%Y%m%d%H%M%S)" || { die "无法生成配置备份时间戳"; return 1; }
+      fi
+      backup_base="${CONFIG_PATH}.backup.${backup_stamp}"
+      backup_path="$backup_base"
+      suffix=1
+      while [[ -e "$backup_path" || -L "$backup_path" ]]; do
+        backup_path="${backup_base}.${suffix}"
+        suffix=$((suffix + 1))
+      done
+      if ! mv -n -- "$CONFIG_PATH" "$backup_path"; then
+        die "无法移动残留配置，未修改原配置：$CONFIG_PATH"
+        return 1
+      fi
+      if [[ -e "$CONFIG_PATH" || ! -f "$backup_path" ]]; then
+        die "配置备份未完成，未继续安装；原配置仍需人工确认"
+        return 1
+      fi
+      RESIDUAL_CONFIG_BACKUP="$backup_path"
+      validate_config "$binary" "$package_config" || return 1
+      printf '现有配置已原样备份到：%s\n' "$backup_path"
+      ;;
+    0|'')
+      die "已取消，未修改残留配置或数据"
+      return 1
+      ;;
+    *)
+      die "选择无效，已取消，未修改残留配置或数据"
+      return 1
+      ;;
+  esac
+}
+
 check_existing_install() {
   local data_dir="$1" source_binary="${2:-}"
-  [[ "$BIN_PATH" == /* && "$CTL_PATH" == /* && "$CONFIG_DIR" == /* && "$UNIT_PATH" == /* ]] || {
-    die "原生安装路径必须是绝对路径"
-    return 1
-  }
-  [[ ! -L "$CONFIG_DIR" && ! -L "$(dirname -- "$UNIT_PATH")" && ! -L "$(dirname -- "$BIN_PATH")" && ! -L "$(dirname -- "$CTL_PATH")" ]] || {
-    die "拒绝通过符号链接的系统目录安装"
-    return 1
-  }
+  validate_install_paths || return 1
   if is_installed; then
     die "检测到 ConfDock 已安装，请使用 confdockctl 管理，不能覆盖现有安装"
     return 1
@@ -291,8 +364,25 @@ check_existing_install() {
     return 1
   fi
   if native_marker_exists; then
-    recover_partial_install "$source_binary" || return 1
+    if ((RESIDUAL_CONFIG_ACCEPTED == 1)) &&
+      [[ ! -e "$BIN_PATH" && ! -L "$BIN_PATH" && ! -e "$CTL_PATH" && ! -L "$CTL_PATH" &&
+         ! -e "$UNIT_PATH" && ! -L "$UNIT_PATH" ]]; then
+      :
+    else
+      recover_partial_install "$source_binary" || return 1
+    fi
   fi
+}
+
+validate_install_paths() {
+  [[ "$BIN_PATH" == /* && "$CTL_PATH" == /* && "$CONFIG_DIR" == /* && "$UNIT_PATH" == /* ]] || {
+    die "原生安装路径必须是绝对路径"
+    return 1
+  }
+  [[ ! -L "$CONFIG_DIR" && ! -L "$(dirname -- "$UNIT_PATH")" && ! -L "$(dirname -- "$BIN_PATH")" && ! -L "$(dirname -- "$CTL_PATH")" ]] || {
+    die "拒绝通过符号链接的系统目录安装"
+    return 1
+  }
 }
 
 atomic_copy_safe() {
@@ -428,20 +518,36 @@ edit_config_file() {
 
 install_native() {
   local source_binary="$1" source_config="$2" data_dir public_url listen health_url answer
-  local edited_config="$source_config"
+  local edited_config="$source_config" config_for_values="$source_config"
   detect_platform || return 1
   require_command curl || return 1
+  validate_install_paths || return 1
   validate_binary "$source_binary" || return 1
   validate_config "$source_binary" "$source_config" || return 1
-  if ! data_dir="$(config_value data_dir "$source_binary" "$source_config")"; then
+  prepare_residual_config "$source_binary" "$source_config" || return 1
+  if ((RESIDUAL_CONFIG_ACCEPTED == 1)); then
+    edited_config="$CONFIG_PATH"
+    config_for_values="$CONFIG_PATH"
+  fi
+  if ! data_dir="$(config_value data_dir "$source_binary" "$config_for_values")"; then
     die "无法从配置中读取 data_dir"
     return 1
   fi
   if ! data_dir="$(safe_data_dir "$data_dir")"; then return 1; fi
-  if [[ -n "$DATA_DIR_OVERRIDE" ]] && ! data_dir="$(safe_data_dir "$DATA_DIR_OVERRIDE")"; then return 1; fi
-  check_existing_install "$data_dir" "$source_binary" || return 1
-  show_config_summary "$source_binary" "$source_config" || return 1
-  if [[ -t 0 ]]; then
+  if ((RESIDUAL_CONFIG_ACCEPTED == 0)) && [[ -n "$DATA_DIR_OVERRIDE" ]] &&
+    ! data_dir="$(safe_data_dir "$DATA_DIR_OVERRIDE")"; then
+    return 1
+  fi
+  if ((RESIDUAL_CONFIG_ACCEPTED == 1)); then
+    if ((RESIDUAL_CONFIG_SUMMARY_SHOWN == 0)); then
+      show_config_summary "$source_binary" "$config_for_values" || return 1
+    fi
+    check_existing_install "$data_dir" "$source_binary" || return 1
+  else
+    check_existing_install "$data_dir" "$source_binary" || return 1
+    show_config_summary "$source_binary" "$config_for_values" || return 1
+  fi
+  if [[ -t 0 && RESIDUAL_CONFIG_ACCEPTED -eq 0 ]]; then
     read -r -p '是否使用默认配置？[Y/n] ' answer || answer=''
     if [[ "$answer" =~ ^[Nn]([Oo])?$ ]]; then
       edit_config_file "$source_config" "$source_binary" || return 1
@@ -527,7 +633,8 @@ install_source() {
 }
 
 is_installed() {
-  [[ -f "$BIN_PATH" && -f "$CTL_PATH" && -f "$CONFIG_PATH" && -f "$UNIT_PATH" ]]
+  [[ -f "$BIN_PATH" && ! -L "$BIN_PATH" && -f "$CTL_PATH" && ! -L "$CTL_PATH" &&
+     -f "$CONFIG_PATH" && ! -L "$CONFIG_PATH" && -f "$UNIT_PATH" && ! -L "$UNIT_PATH" ]]
 }
 
 service_status() {
@@ -759,6 +866,8 @@ menu() {
     printf '\n================================\n          ConfDock 管理\n================================\n\n'
     if is_installed; then
       printf '安装状态：已安装\n安装方式：原生二进制\n当前版本：%s\n服务状态：%s\n\n' "$($BIN_PATH --version 2>/dev/null | head -1 || printf '未知')" "$($SYSTEMCTL is-active "$SERVICE_NAME" 2>/dev/null || printf '未运行')"
+    elif residual_config_exists; then
+      printf '安装状态：检测到残留配置\n安装方式：残留配置\n当前版本：—\n服务状态：—\n\n'
     else
       printf '安装状态：未安装\n安装方式：—\n当前版本：—\n服务状态：—\n\n'
     fi
