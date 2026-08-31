@@ -47,14 +47,13 @@ ConfDock 提供 `confdock` 单二进制：React/Vite production assets、Rust WA
 Smoke Test 会从不含源码和 `web/dist` 的临时目录启动，检查 `/healthz`、SPA、JS/CSS/WASM/PNG MIME、HEAD、API/sub 边界、路径穿越防护和 SIGTERM 退出。
 在 GitHub Actions 页面手动运行 `workflow_dispatch` 会额外生成并上传
 `confdock-linux-x86_64` Artifact（保留 7 天）；普通 Push/PR 只执行同一套打包、解压和 Smoke Test，不会长期保存 Artifact。
-归档包含 `confdock`、`config.toml`、`confdock.sh` 和 `SHA256SUMS`，不包含数据库、密码或源码。
+归档包含 `confdock`、根目录 `config.toml` 和 `SHA256SUMS`，不包含数据库、密码或源码。
 
 运行时配置：内置默认值 → `config.toml` → `CONFDOCK_*` 环境变量 → 明确 CLI 参数。打包归档会携带 [packaging/config.toml](packaging/config.toml)；配置文件不保存密码或 Token，且 `data_dir` 为相对路径时相对于配置文件目录解析。
 
 ```bash
 ./confdock --help
 ./confdock config check --config ./config.toml
-./confdock config get data_dir --config ./config.toml
 ./confdock admin init --config ./config.toml
 ./confdock --config ./config.toml
 ```
@@ -92,42 +91,13 @@ cargo run -p confdock-service --bin confdock
 
 ## Linux Deployment
 
-预编译 Linux x86-64 安装：
-
-```bash
-tar -xzf confdock-linux-x86_64.tar.gz
-cd confdock-linux-x86_64
-sudo ./confdock.sh
-```
-
-安装器会验证 Release 二进制和配置，交互式初始化 `admin` 密码，并创建
-`confdock` systemd 服务用户。安装完成后可在任意目录运行 `sudo confdockctl`。
-源码树中的原生安装复用同一 Release 构建流程：
-
-```bash
-sudo ./packaging/confdock.sh install source
-```
-
-源码安装需要 Git、Rust/Cargo、Node.js 22、npm 和
-`wasm-bindgen-cli 0.2.127`；安装器不会自动安装工具链，也不会让 systemd 依赖
-Cargo、Node 或源码目录。Docker、在线更新和备份/恢复留待后续 Slice。
-
-当前支持状态：
-
-| 方式 | 状态 |
-| --- | --- |
-| 预编译 Linux x86-64 | 支持 |
-| 从源码构建并原生安装 | 支持 |
-| Docker | 下一 Slice |
-| ARM64 Artifact | 未支持 |
-
-仓库提供面向 Linux x86-64 glibc、以 systemd 为当前原生服务管理目标的示例：[deploy/systemd/confdock.service](deploy/systemd/confdock.service) 和 [systemd 说明](deploy/systemd/README.md)。Debian 13 已完成实机验证，但不代表所有发行版或 ARM64 均已验证。推荐拓扑：
+仓库提供面向 Linux x86-64 glibc、以 systemd 为当前原生服务管理目标的示例：[deploy/systemd/confdock.service](deploy/systemd/confdock.service)、[环境样例](deploy/systemd/confdock.env.example) 和 [systemd 说明](deploy/systemd/README.md)。Debian 13 已完成实机验证，但不代表所有发行版或 ARM64 均已验证。推荐拓扑：
 
 ```text
 Internet → Nginx/Caddy HTTPS → 127.0.0.1:8787 → confdock → SQLite
 ```
 
-后端端口只监听本机，不需要在防火墙直接开放。对外服务必须启用 HTTPS，并将 `CONFDOCK_PUBLIC_URL` 设为实际公开 origin、`CONFDOCK_COOKIE_SECURE=true`。WebSocket 不是本服务必需项，不要为它额外放行。反向代理请使用发行版提供的通用 Nginx/Caddy 配置。Docker、在线更新和备份恢复属于后续 Slice。
+后端端口只监听本机，不需要在防火墙直接开放。对外服务必须启用 HTTPS，并将 `CONFDOCK_PUBLIC_URL` 设为实际公开 origin、`CONFDOCK_COOKIE_SECURE=true`。WebSocket 不是本服务必需项，不要为它额外放行。反向代理请使用发行版提供的通用 Nginx/Caddy 配置。菜单式安装器、Docker 和备份恢复属于后续 Slice。
 
 升级前先停止服务并备份 SQLite（WAL 写入期间不要只复制主数据库文件），再替换 `/usr/local/bin/confdock`、启动服务并观察 Migration 日志。不要在新 Schema 已写入后降级旧二进制继续写入。数据目录包含项目内容、Session 和 Token 元数据，应由受限用户读写并纳入备份；托管 URL 是敏感凭据，不要提交到 Issue 或日志。
 

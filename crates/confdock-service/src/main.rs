@@ -63,11 +63,6 @@ enum Command {
 enum ConfigCommand {
     /// Validate configuration and exit.
     Check,
-    /// Print one safe, machine-readable configuration value.
-    Get {
-        /// Field to print. Only data_dir, listen, and public_url are allowed.
-        field: String,
-    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -119,21 +114,14 @@ async fn run() -> Result<(), CliError> {
     let command = cli.command.unwrap_or(Command::Serve);
     let config_path = cli.config.clone();
 
-    match &command {
+    if matches!(
+        &command,
         Command::Config {
-            command: ConfigCommand::Check,
-        } => {
-            println!("Configuration is valid.");
-            return Ok(());
+            command: ConfigCommand::Check
         }
-        Command::Config {
-            command: ConfigCommand::Get { field },
-        } => {
-            let value = config.safe_value(field).map_err(CliError::Message)?;
-            println!("{value}");
-            return Ok(());
-        }
-        _ => {}
+    ) {
+        println!("Configuration is valid.");
+        return Ok(());
     }
 
     init_tracing()?;

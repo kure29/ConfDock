@@ -8,14 +8,14 @@ User=confdock
 Group=confdock
 WorkingDirectory=/var/lib/confdock
 ExecStart=/usr/local/bin/confdock --config /etc/confdock/config.toml
+EnvironmentFile=/etc/confdock/confdock.env
 Restart=on-failure
 RestartSec=3
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
+ProtectSystem=full
 ProtectHome=true
-ReadOnlyPaths=/etc/confdock
 ReadWritePaths=/var/lib/confdock
 
 [Install]

@@ -32,18 +32,6 @@ jobs:
       - name: Run workspace tests with temporary SQLite databases
         run: cargo test --workspace
 
-      - name: Install ShellCheck from Ubuntu packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes shellcheck
-          shellcheck --version
-
-      - name: ShellCheck management scripts
-        run: shellcheck packaging/confdock.sh packaging/confdock.test.sh
-
-      - name: Management script tests
-        run: packaging/confdock.test.sh
-
   web-quality:
     name: Web typecheck, test, and build
     runs-on: ubuntu-latest
