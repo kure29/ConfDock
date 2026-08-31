@@ -1861,6 +1861,200 @@ async fn stable_tokens_store_only_hash_serve_exact_bytes_and_revoke_or_cascade()
 }
 
 #[tokio::test]
+async fn hosted_token_names_expiry_and_reactivation_preserve_token_identity() {
+    let service = TestService::new().await;
+    let (cookie, _) = login(&service.app, PASSWORD).await;
+    let project = create_project(
+        &service.app,
+        &cookie,
+        "Hosted expiry",
+        "sing-box",
+        "config.json",
+        br#"{"log":{"level":"info"}}"#,
+    )
+    .await;
+    let project_id = project["id"].as_str().unwrap().to_owned();
+    let token_uri = format!("/api/projects/{project_id}/tokens");
+    let created = request(
+        &service.app,
+        Method::POST,
+        &token_uri,
+        Some(&cookie),
+        Some(json!({
+            "displayName": "  iPhone Surge  ",
+            "expiresAt": "2099-12-31T16:00:00Z",
+        })),
+    )
+    .await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let created = response_json(created).await;
+    assert_eq!(created["token"]["displayName"], "iPhone Surge");
+    assert_eq!(created["token"]["expiresAt"], "2099-12-31T16:00:00Z");
+    assert!(created["token"]["revokedAt"].is_null());
+    let plaintext = created["plaintext"].as_str().unwrap().to_owned();
+    let token_id = created["token"]["id"].as_str().unwrap().to_owned();
+    let prefix = created["token"]["prefix"].as_str().unwrap().to_owned();
+    let suffix = created["token"]["suffix"].as_str().unwrap().to_owned();
+    let hash_before: Vec<u8> =
+        sqlx::query_scalar("SELECT token_hash FROM access_tokens WHERE id = ?")
+            .bind(&token_id)
+            .fetch_one(&service.state.pool)
+            .await
+            .unwrap();
+
+    let now = unix_timestamp();
+    sqlx::query("UPDATE access_tokens SET expires_at = ? WHERE id = ?")
+        .bind(now + 10)
+        .bind(&token_id)
+        .execute(&service.state.pool)
+        .await
+        .unwrap();
+    assert!(
+        storage::subscription_at(&service.state.pool, &plaintext, now + 9)
+            .await
+            .is_ok()
+    );
+    assert_eq!(
+        storage::subscription_at(&service.state.pool, &plaintext, now + 10)
+            .await
+            .unwrap_err()
+            .code,
+        "token.not_found"
+    );
+
+    let expired = request(
+        &service.app,
+        Method::PATCH,
+        &format!("{token_uri}/{token_id}"),
+        Some(&cookie),
+        Some(json!({ "displayName": "家里 Surge", "expiresAt": null })),
+    )
+    .await;
+    assert_eq!(expired.status(), StatusCode::OK);
+    let expired = response_json(expired).await;
+    assert_eq!(expired["displayName"], "家里 Surge");
+    assert!(expired["expiresAt"].is_null());
+    assert_eq!(expired["prefix"], prefix);
+    assert_eq!(expired["suffix"], suffix);
+    let hash_after: Vec<u8> =
+        sqlx::query_scalar("SELECT token_hash FROM access_tokens WHERE id = ?")
+            .bind(&token_id)
+            .fetch_one(&service.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(hash_after, hash_before);
+    assert_eq!(
+        created["url"],
+        format!("http://127.0.0.1:8787/sub/{plaintext}")
+    );
+
+    for body in [
+        json!({ "displayName": "", "expiresAt": null }),
+        json!({ "displayName": "x", "expiresAt": "2000-01-01T00:00:00Z" }),
+        json!({ "displayName": "x", "expiresAt": "2099-12-31T16:00:00" }),
+    ] {
+        let invalid = request(
+            &service.app,
+            Method::PATCH,
+            &format!("{token_uri}/{token_id}"),
+            Some(&cookie),
+            Some(body),
+        )
+        .await;
+        assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    }
+
+    sqlx::query("UPDATE access_tokens SET expires_at = ? WHERE id = ?")
+        .bind(unix_timestamp() - 1)
+        .bind(&token_id)
+        .execute(&service.state.pool)
+        .await
+        .unwrap();
+    let public_expired = request(
+        &service.app,
+        Method::GET,
+        &format!("/sub/{plaintext}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(public_expired.status(), StatusCode::NOT_FOUND);
+
+    let reactivated = request(
+        &service.app,
+        Method::PATCH,
+        &format!("{token_uri}/{token_id}"),
+        Some(&cookie),
+        Some(json!({ "displayName": "家里 Surge", "expiresAt": "2099-12-31T16:00:00Z" })),
+    )
+    .await;
+    assert_eq!(reactivated.status(), StatusCode::OK);
+    assert_eq!(
+        request(
+            &service.app,
+            Method::GET,
+            &format!("/sub/{plaintext}"),
+            None,
+            None,
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+
+    let other = create_project(
+        &service.app,
+        &cookie,
+        "Other",
+        "sing-box",
+        "other.json",
+        br#"{}"#,
+    )
+    .await;
+    let cross_project = request(
+        &service.app,
+        Method::PATCH,
+        &format!(
+            "/api/projects/{}/tokens/{token_id}",
+            other["id"].as_str().unwrap()
+        ),
+        Some(&cookie),
+        Some(json!({ "displayName": "cross", "expiresAt": null })),
+    )
+    .await;
+    assert_eq!(cross_project.status(), StatusCode::NOT_FOUND);
+
+    let revoke = request(
+        &service.app,
+        Method::DELETE,
+        &format!("{token_uri}/{token_id}"),
+        Some(&cookie),
+        None,
+    )
+    .await;
+    assert_eq!(revoke.status(), StatusCode::NO_CONTENT);
+    let revoked_update = request(
+        &service.app,
+        Method::PATCH,
+        &format!("{token_uri}/{token_id}"),
+        Some(&cookie),
+        Some(json!({ "displayName": "cannot restore", "expiresAt": null })),
+    )
+    .await;
+    assert_eq!(revoked_update.status(), StatusCode::NOT_FOUND);
+    let listed =
+        response_json(request(&service.app, Method::GET, &token_uri, Some(&cookie), None).await)
+            .await;
+    assert!(listed[0]["revokedAt"].is_string());
+
+    let legacy_shape =
+        response_json(request(&service.app, Method::POST, &token_uri, Some(&cookie), None).await)
+            .await;
+    assert_eq!(legacy_shape["token"]["displayName"], "未命名地址");
+    assert!(legacy_shape["token"]["expiresAt"].is_null());
+}
+
+#[tokio::test]
 async fn password_change_keeps_current_session_revokes_others_and_bootstrap_does_not_override() {
     let service = TestService::new().await;
     let (first_cookie, _) = login(&service.app, PASSWORD).await;

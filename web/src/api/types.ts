@@ -153,10 +153,13 @@ export interface RevisionDiff {
  */
 export interface AccessToken {
   id: string
+  displayName: string
   prefix: string
   suffix: string
   createdAt: string
   lastUsedAt: string | null
+  expiresAt: string | null
+  revokedAt: string | null
 }
 
 export interface CreatedAccessToken {

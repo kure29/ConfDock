@@ -45,11 +45,13 @@ export function ProjectListScreen() {
           <h1 className={page.title}>配置</h1>
           <p className={page.lead}>{VALIDATION_LEVEL_CAVEAT}</p>
         </div>
-        <div className={page.actions}>
-          <Button variant="primary" onClick={() => void navigate('/new')}>
-            导入配置
-          </Button>
-        </div>
+        {projects !== null && projects.length > 0 && (
+          <div className={page.actions}>
+            <Button variant="primary" onClick={() => void navigate('/new')}>
+              导入配置
+            </Button>
+          </div>
+        )}
       </div>
 
       <Panel flush>
@@ -64,8 +66,7 @@ export function ProjectListScreen() {
             title="还没有配置"
             body={
               <p>
-                导入一份原生配置文件就能开始。ConfDock 保存的是你给它的字节，
-                不会替你重写格式。
+                导入一份原生配置即可开始。ConfDock 会按原始字节保存，不重写格式。
               </p>
             }
             action={

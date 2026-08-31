@@ -850,4 +850,55 @@ describe('HTTP API error boundary', () => {
     expect(revoked.ok).toBe(false)
     if (!deleted.ok) expect(deleted.error.code).not.toBe('auth.unauthorized')
   })
+
+  it('decodes hosted address metadata without exposing token hashes', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json({
+          id: 't1',
+          displayName: 'iPhone Surge',
+          prefix: 'abc123',
+          suffix: 'xyz789',
+          createdAt: '2026-08-31T00:00:00Z',
+          lastUsedAt: null,
+          expiresAt: '2026-12-31T16:00:00Z',
+          revokedAt: null,
+        }),
+      ),
+    )
+    const token = await createHttpApi().updateToken('p1', 't1', {
+      displayName: 'iPhone Surge',
+      expiresAt: '2026-12-31T16:00:00Z',
+    })
+    expect(token.ok).toBe(true)
+    if (token.ok) {
+      expect(token.value.displayName).toBe('iPhone Surge')
+      expect(token.value.expiresAt).toBe('2026-12-31T16:00:00Z')
+      expect(token.value).not.toHaveProperty('hash')
+    }
+  })
+
+  it('rejects hosted address responses with invalid or ambiguous timestamps', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json({
+          id: 't1',
+          displayName: 'Address',
+          prefix: 'abc123',
+          suffix: 'xyz789',
+          createdAt: '2026-08-31T00:00:00',
+          lastUsedAt: null,
+          expiresAt: null,
+          revokedAt: null,
+        }),
+      ),
+    )
+    const token = await createHttpApi().listTokens('p1')
+    expect(token).toEqual({
+      ok: false,
+      error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+    })
+  })
 })

@@ -79,6 +79,20 @@ impl ApiError {
         Self::bad_request("revision.invalid_cursor", "版本游标无效")
     }
 
+    pub fn token_invalid_name() -> Self {
+        Self::bad_request(
+            "token.invalid_name",
+            "托管地址名称必须为 1 到 64 个字符，且不能包含控制字符",
+        )
+    }
+
+    pub fn token_invalid_expiry() -> Self {
+        Self::bad_request(
+            "token.invalid_expiry",
+            "有效期必须是带时区的未来 RFC 3339 时间",
+        )
+    }
+
     pub fn revision_diff_too_large() -> Self {
         Self::new(
             StatusCode::PAYLOAD_TOO_LARGE,

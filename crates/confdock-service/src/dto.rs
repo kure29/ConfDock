@@ -193,10 +193,13 @@ pub struct RevisionDiffDto {
 #[serde(rename_all = "camelCase")]
 pub struct AccessTokenDto {
     pub id: String,
+    pub display_name: String,
     pub prefix: String,
     pub suffix: String,
     pub created_at: String,
     pub last_used_at: Option<String>,
+    pub expires_at: Option<String>,
+    pub revoked_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -205,6 +208,20 @@ pub struct CreatedAccessTokenDto {
     pub token: AccessTokenDto,
     pub plaintext: String,
     pub url: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAccessTokenRequest {
+    pub display_name: Option<String>,
+    pub expires_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAccessTokenRequest {
+    pub display_name: String,
+    pub expires_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
