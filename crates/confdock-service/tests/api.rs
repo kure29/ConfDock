@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{fs, net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -9,12 +9,17 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use confdock_service::{
     auth::{token_hash, unix_timestamp},
     config::ServiceConfig,
+    dto::timestamp_to_iso,
     router,
     state::MAX_CONCURRENT_DIFFS,
     storage, AppState,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use sqlx::{
+    migrate::Migrator,
+    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
@@ -485,6 +490,87 @@ async fn concurrent_initialization_runs_migrations_and_creates_one_admin() {
     assert_eq!(admins, 1);
     first.pool.close().await;
     second.pool.close().await;
+}
+
+#[tokio::test]
+async fn hosted_address_migration_preserves_existing_token_metadata_and_is_restart_safe() {
+    let directory = tempfile::tempdir().unwrap();
+    let migration_directory = directory.path().join("migrations-v1");
+    fs::create_dir(&migration_directory).unwrap();
+    fs::write(
+        migration_directory.join("0001_initial.sql"),
+        include_str!("../migrations/0001_initial.sql"),
+    )
+    .unwrap();
+    let database_url = format!(
+        "sqlite://{}",
+        directory.path().join("upgrade-from-v1.db").display()
+    );
+    let options = SqliteConnectOptions::from_str(&database_url)
+        .unwrap()
+        .create_if_missing(true)
+        .foreign_keys(true);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
+        .unwrap();
+    Migrator::new(migration_directory)
+        .await
+        .unwrap()
+        .run(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO projects (id, name, target_id, file_name, current_revision_id, \
+         served_revision_id, last_validation_level, last_validation_result, created_at, updated_at) \
+         VALUES ('project-v1', 'Legacy', 'sing-box', 'config.json', NULL, NULL, \
+         'syntax', '{\"level\":\"syntax\",\"diagnostics\":[]}', 10, 10)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let original_hash = vec![7_u8; 32];
+    sqlx::query(
+        "INSERT INTO access_tokens (id, project_id, token_hash, token_prefix, token_suffix, \
+         created_at, last_used_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("token-v1")
+    .bind("project-v1")
+    .bind(&original_hash)
+    .bind("legacy")
+    .bind("suffix")
+    .bind(11_i64)
+    .bind(12_i64)
+    .bind(13_i64)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let upgraded = initialize(&database_url, Some(PASSWORD), 1024).await;
+    let row: (Vec<u8>, String, String, Option<i64>, String, Option<i64>) = sqlx::query_as(
+        "SELECT token_hash, token_prefix, token_suffix, revoked_at, display_name, expires_at \
+         FROM access_tokens WHERE id = 'token-v1'",
+    )
+    .fetch_one(&upgraded.pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, original_hash);
+    assert_eq!(row.1, "legacy");
+    assert_eq!(row.2, "suffix");
+    assert_eq!(row.3, Some(13));
+    assert_eq!(row.4, "未命名地址");
+    assert_eq!(row.5, None);
+    upgraded.pool.close().await;
+
+    let restarted = initialize(&database_url, None, 1024).await;
+    let tokens: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM access_tokens")
+        .fetch_one(&restarted.pool)
+        .await
+        .unwrap();
+    assert_eq!(tokens, 1);
+    restarted.pool.close().await;
 }
 
 #[tokio::test]
@@ -1927,7 +2013,12 @@ async fn hosted_token_names_expiry_and_reactivation_preserve_token_identity() {
         Method::PATCH,
         &format!("{token_uri}/{token_id}"),
         Some(&cookie),
-        Some(json!({ "displayName": "家里 Surge", "expiresAt": null })),
+        Some(json!({
+            "displayName": "家里 Surge",
+            "expiresAt": null,
+            "expectedDisplayName": "iPhone Surge",
+            "expectedExpiresAt": timestamp_to_iso(now + 10).unwrap(),
+        })),
     )
     .await;
     assert_eq!(expired.status(), StatusCode::OK);
@@ -1949,9 +2040,24 @@ async fn hosted_token_names_expiry_and_reactivation_preserve_token_identity() {
     );
 
     for body in [
-        json!({ "displayName": "", "expiresAt": null }),
-        json!({ "displayName": "x", "expiresAt": "2000-01-01T00:00:00Z" }),
-        json!({ "displayName": "x", "expiresAt": "2099-12-31T16:00:00" }),
+        json!({
+            "displayName": "",
+            "expiresAt": null,
+            "expectedDisplayName": "家里 Surge",
+            "expectedExpiresAt": null,
+        }),
+        json!({
+            "displayName": "x",
+            "expiresAt": "2000-01-01T00:00:00Z",
+            "expectedDisplayName": "家里 Surge",
+            "expectedExpiresAt": null,
+        }),
+        json!({
+            "displayName": "x",
+            "expiresAt": "2099-12-31T16:00:00",
+            "expectedDisplayName": "家里 Surge",
+            "expectedExpiresAt": null,
+        }),
     ] {
         let invalid = request(
             &service.app,
@@ -1964,8 +2070,9 @@ async fn hosted_token_names_expiry_and_reactivation_preserve_token_identity() {
         assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
     }
 
+    let expired_at = unix_timestamp() - 1;
     sqlx::query("UPDATE access_tokens SET expires_at = ? WHERE id = ?")
-        .bind(unix_timestamp() - 1)
+        .bind(expired_at)
         .bind(&token_id)
         .execute(&service.state.pool)
         .await
@@ -1985,7 +2092,12 @@ async fn hosted_token_names_expiry_and_reactivation_preserve_token_identity() {
         Method::PATCH,
         &format!("{token_uri}/{token_id}"),
         Some(&cookie),
-        Some(json!({ "displayName": "家里 Surge", "expiresAt": "2099-12-31T16:00:00Z" })),
+        Some(json!({
+            "displayName": "家里 Surge",
+            "expiresAt": "2099-12-31T16:00:00Z",
+            "expectedDisplayName": "家里 Surge",
+            "expectedExpiresAt": timestamp_to_iso(expired_at).unwrap(),
+        })),
     )
     .await;
     assert_eq!(reactivated.status(), StatusCode::OK);
@@ -2019,7 +2131,12 @@ async fn hosted_token_names_expiry_and_reactivation_preserve_token_identity() {
             other["id"].as_str().unwrap()
         ),
         Some(&cookie),
-        Some(json!({ "displayName": "cross", "expiresAt": null })),
+        Some(json!({
+            "displayName": "cross",
+            "expiresAt": null,
+            "expectedDisplayName": "家里 Surge",
+            "expectedExpiresAt": "2099-12-31T16:00:00Z",
+        })),
     )
     .await;
     assert_eq!(cross_project.status(), StatusCode::NOT_FOUND);
@@ -2038,7 +2155,12 @@ async fn hosted_token_names_expiry_and_reactivation_preserve_token_identity() {
         Method::PATCH,
         &format!("{token_uri}/{token_id}"),
         Some(&cookie),
-        Some(json!({ "displayName": "cannot restore", "expiresAt": null })),
+        Some(json!({
+            "displayName": "cannot restore",
+            "expiresAt": null,
+            "expectedDisplayName": "家里 Surge",
+            "expectedExpiresAt": "2099-12-31T16:00:00Z",
+        })),
     )
     .await;
     assert_eq!(revoked_update.status(), StatusCode::NOT_FOUND);
@@ -2052,6 +2174,94 @@ async fn hosted_token_names_expiry_and_reactivation_preserve_token_identity() {
             .await;
     assert_eq!(legacy_shape["token"]["displayName"], "未命名地址");
     assert!(legacy_shape["token"]["expiresAt"].is_null());
+}
+
+#[tokio::test]
+async fn hosted_token_updates_reject_stale_metadata_and_require_explicit_expiry() {
+    let service = TestService::new().await;
+    let (cookie, _) = login(&service.app, PASSWORD).await;
+    let project = create_project(
+        &service.app,
+        &cookie,
+        "Hosted conflict",
+        "sing-box",
+        "config.json",
+        br#"{}"#,
+    )
+    .await;
+    let project_id = project["id"].as_str().unwrap();
+    let token_uri = format!("/api/projects/{project_id}/tokens");
+    let created = response_json(
+        request(
+            &service.app,
+            Method::POST,
+            &token_uri,
+            Some(&cookie),
+            Some(json!({
+                "displayName": "Original",
+                "expiresAt": "2099-12-31T16:00:00Z",
+            })),
+        )
+        .await,
+    )
+    .await;
+    let token_id = created["token"]["id"].as_str().unwrap();
+    let update_uri = format!("{token_uri}/{token_id}");
+
+    let renamed = request(
+        &service.app,
+        Method::PATCH,
+        &update_uri,
+        Some(&cookie),
+        Some(json!({
+            "displayName": "Renamed",
+            "expiresAt": "2099-12-31T16:00:00Z",
+            "expectedDisplayName": "Original",
+            "expectedExpiresAt": "2099-12-31T16:00:00Z",
+        })),
+    )
+    .await;
+    assert_eq!(renamed.status(), StatusCode::OK);
+
+    let stale_expiry = request(
+        &service.app,
+        Method::PATCH,
+        &update_uri,
+        Some(&cookie),
+        Some(json!({
+            "displayName": "Original",
+            "expiresAt": null,
+            "expectedDisplayName": "Original",
+            "expectedExpiresAt": "2099-12-31T16:00:00Z",
+        })),
+    )
+    .await;
+    assert_eq!(stale_expiry.status(), StatusCode::CONFLICT);
+    assert_eq!(response_json(stale_expiry).await["code"], "token.conflict");
+
+    let missing_expiry = request(
+        &service.app,
+        Method::PATCH,
+        &update_uri,
+        Some(&cookie),
+        Some(json!({
+            "displayName": "Missing expiry",
+            "expectedDisplayName": "Renamed",
+            "expectedExpiresAt": "2099-12-31T16:00:00Z",
+        })),
+    )
+    .await;
+    assert_eq!(missing_expiry.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_json(missing_expiry).await["code"],
+        "request.invalid"
+    );
+
+    let listed =
+        response_json(request(&service.app, Method::GET, &token_uri, Some(&cookie), None).await)
+            .await;
+    assert_eq!(listed[0]["displayName"], "Renamed");
+    assert_eq!(listed[0]["expiresAt"], "2099-12-31T16:00:00Z");
 }
 
 #[tokio::test]

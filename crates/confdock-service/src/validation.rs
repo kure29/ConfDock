@@ -15,11 +15,18 @@ pub fn token_display_name(value: &str) -> Result<String, ApiError> {
     Ok(value.to_owned())
 }
 
-pub fn token_expiry(value: Option<&str>, now: i64) -> Result<Option<i64>, ApiError> {
+pub fn token_timestamp(value: Option<&str>) -> Result<Option<i64>, ApiError> {
     let Some(value) = value else { return Ok(None) };
-    let parsed =
-        OffsetDateTime::parse(value, &Rfc3339).map_err(|_| ApiError::token_invalid_expiry())?;
-    let timestamp = parsed.unix_timestamp();
+    OffsetDateTime::parse(value, &Rfc3339)
+        .map(|parsed| Some(parsed.unix_timestamp()))
+        .map_err(|_| ApiError::token_invalid_expiry())
+}
+
+pub fn token_expiry(value: Option<&str>, now: i64) -> Result<Option<i64>, ApiError> {
+    let timestamp = token_timestamp(value)?;
+    let Some(timestamp) = timestamp else {
+        return Ok(None);
+    };
     if timestamp <= now {
         return Err(ApiError::token_invalid_expiry());
     }
@@ -128,6 +135,9 @@ mod tests {
         assert_eq!(token_display_name("  iPhone  ").unwrap(), "iPhone");
         assert!(token_display_name("").is_err());
         assert!(token_display_name(&"x".repeat(65)).is_err());
+        assert!(token_display_name(&"配".repeat(64)).is_ok());
+        assert!(token_display_name(&"配".repeat(65)).is_err());
+        assert!(token_display_name("\u{2003}\u{3000}").is_err());
         assert!(token_display_name("bad\nname").is_err());
         assert_eq!(
             token_expiry(Some("2026-01-01T00:00:01Z"), 1_767_225_600).unwrap(),
@@ -135,6 +145,10 @@ mod tests {
         );
         assert!(token_expiry(Some("2026-01-01T00:00:00"), 0).is_err());
         assert!(token_expiry(Some("2025-12-31T23:59:59Z"), 1_767_225_600).is_err());
+        assert_eq!(
+            token_timestamp(Some("2025-12-31T23:59:59Z")).unwrap(),
+            Some(1_767_225_599)
+        );
         assert_eq!(token_expiry(None, 1_767_225_600).unwrap(), None);
     }
 }

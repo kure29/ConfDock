@@ -221,7 +221,25 @@ pub struct CreateAccessTokenRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAccessTokenRequest {
     pub display_name: String,
-    pub expires_at: Option<String>,
+    pub expires_at: NullableTokenExpiry,
+    pub expected_display_name: String,
+    pub expected_expires_at: NullableTokenExpiry,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum NullableTokenExpiry {
+    Timestamp(String),
+    Never(()),
+}
+
+impl NullableTokenExpiry {
+    pub fn as_deref(&self) -> Option<&str> {
+        match self {
+            Self::Timestamp(value) => Some(value),
+            Self::Never(()) => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

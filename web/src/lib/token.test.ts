@@ -19,6 +19,29 @@ describe('hosted token expiry helpers', () => {
     expect(expiryFromPreset('custom', '2026-09-01T08:30')).toBe(
       new Date('2026-09-01T08:30').toISOString(),
     )
+    expect(expiryFromPreset('custom', '2026-02-30T12:00')).toBeNull()
+    expect(expiryFromPreset('custom', '2026-09-01T24:00')).toBeNull()
+    expect(expiryFromPreset('custom', 'not-a-date')).toBeNull()
+  })
+
+  it('rejects skipped and repeated wall-clock times in a DST timezone', () => {
+    const processEnv = (
+      globalThis as typeof globalThis & {
+        process: { env: Record<string, string | undefined> }
+      }
+    ).process.env
+    const originalTimezone = processEnv.TZ
+    processEnv.TZ = 'America/New_York'
+    try {
+      expect(expiryFromPreset('custom', '2026-03-08T02:30')).toBeNull()
+      expect(expiryFromPreset('custom', '2026-11-01T01:30')).toBeNull()
+      expect(expiryFromPreset('custom', '2026-03-08T03:30')).toBe(
+        '2026-03-08T07:30:00.000Z',
+      )
+    } finally {
+      if (originalTimezone === undefined) delete processEnv.TZ
+      else processEnv.TZ = originalTimezone
+    }
   })
 
   it('uses the now >= expiry boundary and local display formatting', () => {

@@ -12,7 +12,7 @@ use crate::{
     error::ApiError,
     state::AppState,
     storage,
-    validation::{token_display_name, token_expiry, DEFAULT_TOKEN_DISPLAY_NAME},
+    validation::{token_display_name, token_expiry, token_timestamp, DEFAULT_TOKEN_DISPLAY_NAME},
 };
 
 use super::json;
@@ -57,8 +57,19 @@ pub async fn update(
     let input = json(input)?;
     let display_name = token_display_name(&input.display_name)?;
     let expires_at = token_expiry(input.expires_at.as_deref(), unix_timestamp())?;
+    let expected_display_name = token_display_name(&input.expected_display_name)?;
+    let expected_expires_at = token_timestamp(input.expected_expires_at.as_deref())?;
     Ok(Json(
-        storage::update_token(&state.pool, &id, &token_id, &display_name, expires_at).await?,
+        storage::update_token(
+            &state.pool,
+            &id,
+            &token_id,
+            &display_name,
+            expires_at,
+            &expected_display_name,
+            expected_expires_at,
+        )
+        .await?,
     ))
 }
 

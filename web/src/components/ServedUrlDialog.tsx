@@ -32,6 +32,12 @@ interface ServedUrlDialogProps {
 }
 
 const DEFAULT_NAME = '未命名地址'
+const MAX_TIMER_DELAY = 2_147_000_000
+
+interface BusyToken {
+  id: number
+  generation: number
+}
 
 function expiryForEdit(token: AccessToken): { preset: HostedExpiryPreset; custom: string } {
   return token.expiresAt === null
@@ -52,33 +58,53 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
   const [editCustomExpiry, setEditCustomExpiry] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [statusNow, setStatusNow] = useState(() => Date.now())
   const toast = useToast()
   const generationRef = useRef(0)
   const projectRef = useRef(projectId)
-  const busyTokenRef = useRef<number | null>(null)
+  const openRef = useRef(open)
+  const busyTokenRef = useRef<BusyToken | null>(null)
   const busySequenceRef = useRef(0)
+  const listRequestRef = useRef(0)
+  const editExpectedRef = useRef<{
+    tokenId: string
+    displayName: string
+    expiresAt: string | null
+  } | null>(null)
 
   if (projectRef.current !== projectId) {
     projectRef.current = projectId
     generationRef.current += 1
   }
+  if (openRef.current !== open) {
+    openRef.current = open
+    generationRef.current += 1
+  }
   const isCurrent = useCallback(
     (requestedProjectId: string, requestedGeneration: number) =>
-      projectRef.current === requestedProjectId && generationRef.current === requestedGeneration,
+      openRef.current &&
+      projectRef.current === requestedProjectId &&
+      generationRef.current === requestedGeneration,
     [],
   )
 
-  const beginBusy = useCallback((): number | null => {
-    if (busyTokenRef.current !== null) return null
+  const beginBusy = useCallback((): BusyToken | null => {
+    if (!openRef.current || busyTokenRef.current !== null) return null
     busySequenceRef.current += 1
-    const token = busySequenceRef.current
+    const token = { id: busySequenceRef.current, generation: generationRef.current }
     busyTokenRef.current = token
     setBusy(true)
     return token
   }, [])
 
-  const finishBusy = useCallback((token: number) => {
-    if (busyTokenRef.current !== token) return
+  const finishBusy = useCallback((token: BusyToken) => {
+    if (
+      busyTokenRef.current !== token ||
+      !openRef.current ||
+      generationRef.current !== token.generation
+    ) {
+      return
+    }
     busyTokenRef.current = null
     setBusy(false)
   }, [])
@@ -86,11 +112,17 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
   const reload = useCallback(async () => {
     const requestedProjectId = projectId
     const requestedGeneration = generationRef.current
+    listRequestRef.current += 1
+    const requestSerial = listRequestRef.current
     const result = await api.listTokens(requestedProjectId)
-    if (isCurrent(requestedProjectId, requestedGeneration)) {
+    if (
+      isCurrent(requestedProjectId, requestedGeneration) &&
+      listRequestRef.current === requestSerial
+    ) {
       if (result.ok) {
         setTokens(result.value)
         setError(null)
+        setStatusNow(Date.now())
       } else {
         setTokens(null)
         setError(result.error.message)
@@ -102,7 +134,9 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
   useEffect(() => {
     generationRef.current += 1
     projectRef.current = projectId
+    listRequestRef.current += 1
     busyTokenRef.current = null
+    editExpectedRef.current = null
     setBusy(false)
     setTokens(null)
     setCreated(null)
@@ -115,12 +149,48 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
 
   useEffect(() => {
     if (!open) {
+      listRequestRef.current += 1
+      busyTokenRef.current = null
+      editExpectedRef.current = null
+      setBusy(false)
       setCreated(null)
+      setEditingId(null)
       return
     }
+    setTokens(null)
+    setError(null)
     setCreated(null)
+    setStatusNow(Date.now())
     void reload()
   }, [open, reload])
+
+  useEffect(
+    () => () => {
+      generationRef.current += 1
+      listRequestRef.current += 1
+      openRef.current = false
+      busyTokenRef.current = null
+      editExpectedRef.current = null
+    },
+    [],
+  )
+
+  useEffect(() => {
+    if (!open || tokens === null) return
+    const now = Date.now()
+    const nextExpiry = tokens.reduce<number | null>((next, token) => {
+      if (token.revokedAt !== null || token.expiresAt === null) return next
+      const expiresAt = Date.parse(token.expiresAt)
+      if (!Number.isFinite(expiresAt) || expiresAt <= now) return next
+      const upcomingAt = expiresAt - 24 * 60 * 60 * 1000
+      const transition = upcomingAt > now ? upcomingAt : expiresAt
+      return next === null || transition < next ? transition : next
+    }, null)
+    if (nextExpiry === null) return
+    const delay = Math.min(Math.max(0, nextExpiry - now) + 1, MAX_TIMER_DELAY)
+    const timer = globalThis.setTimeout(() => setStatusNow(Date.now()), delay)
+    return () => globalThis.clearTimeout(timer)
+  }, [open, statusNow, tokens])
 
   function expiryPayload(preset: HostedExpiryPreset, custom: string): string | null {
     return expiryFromPreset(preset, custom)
@@ -139,7 +209,7 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
     if (busyToken === null) return
     const requestedProjectId = projectId
     const requestedGeneration = generationRef.current
-    const name = tokenName(displayName, tokenName(projectName ?? '', DEFAULT_NAME))
+    const name = displayName.trim()
     const expiresAt = expiryPayload(expiryPreset, customExpiry)
     if (name.length === 0 || Array.from(name).length > 64) {
       toast.fail('地址名称必须为 1 到 64 个字符')
@@ -169,6 +239,11 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
 
   function beginEdit(token: AccessToken) {
     const expiry = expiryForEdit(token)
+    editExpectedRef.current = {
+      tokenId: token.id,
+      displayName: token.displayName,
+      expiresAt: token.expiresAt,
+    }
     setEditingId(token.id)
     setEditName(token.displayName)
     setEditPreset(expiry.preset)
@@ -180,6 +255,11 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
     if (busyToken === null) return
     const requestedProjectId = projectId
     const requestedGeneration = generationRef.current
+    const expected = editExpectedRef.current
+    if (expected === null || expected.tokenId !== tokenId) {
+      finishBusy(busyToken)
+      return
+    }
     const name = editName.trim()
     const expiresAt = expiryPayload(editPreset, editCustomExpiry)
     if (name.length === 0 || Array.from(name).length > 64) {
@@ -197,14 +277,23 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
       const result = await api.updateToken(requestedProjectId, tokenId, {
         displayName: name,
         expiresAt,
+        expectedDisplayName: expected.displayName,
+        expectedExpiresAt: expected.expiresAt,
       })
       if (isCurrent(requestedProjectId, requestedGeneration) && result.ok) {
         setTokens((current) =>
           current?.map((token) => (token.id === tokenId ? result.value : token)) ?? current,
         )
+        setStatusNow(Date.now())
+        editExpectedRef.current = null
         setEditingId(null)
       } else if (isCurrent(requestedProjectId, requestedGeneration) && !result.ok) {
         toast.fail(result.error.message)
+        if (result.error.code === 'token.conflict') {
+          editExpectedRef.current = null
+          setEditingId(null)
+          await reload()
+        }
       }
     } finally {
       finishBusy(busyToken)
@@ -231,15 +320,20 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
     }
   }
 
+  function closeDialog() {
+    if (busyTokenRef.current !== null) return
+    onClose()
+  }
+
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={closeDialog}
       title="托管地址"
       description="客户端用这个地址拉取最近一次发布的配置内容。"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" disabled={busy} onClick={closeDialog}>
             关闭
           </Button>
           <Button variant="primary" loading={busy} onClick={() => void generate()}>
@@ -328,7 +422,14 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
                       <Button variant="primary" loading={busy} onClick={() => void saveEdit(token.id)}>
                         保存
                       </Button>
-                      <Button variant="ghost" disabled={busy} onClick={() => setEditingId(null)}>
+                      <Button
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => {
+                          editExpectedRef.current = null
+                          setEditingId(null)
+                        }}
+                      >
                         取消
                       </Button>
                     </div>
@@ -341,7 +442,7 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
                         {token.prefix}…{token.suffix}
                       </span>
                       <span className={styles.itemMeta}>
-                        {hostedExpiryStatus(token.expiresAt, token.revokedAt)} · 创建于{' '}
+                        {hostedExpiryStatus(token.expiresAt, token.revokedAt, statusNow)} · 创建于{' '}
                         {absoluteDateTime(token.createdAt)} ·{' '}
                         {token.lastUsedAt === null
                           ? '还没有被使用过'

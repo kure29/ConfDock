@@ -705,6 +705,8 @@ pub async fn update_token(
     token_id: &str,
     display_name: &str,
     expires_at: Option<i64>,
+    expected_display_name: &str,
+    expected_expires_at: Option<i64>,
 ) -> Result<AccessTokenDto, ApiError> {
     let mut connection = begin_immediate(pool).await?;
     let result = update_token_inner(
@@ -713,6 +715,8 @@ pub async fn update_token(
         token_id,
         display_name,
         expires_at,
+        expected_display_name,
+        expected_expires_at,
     )
     .await;
     finish_transaction(connection, result).await
@@ -724,21 +728,39 @@ async fn update_token_inner(
     token_id: &str,
     display_name: &str,
     expires_at: Option<i64>,
+    expected_display_name: &str,
+    expected_expires_at: Option<i64>,
 ) -> Result<AccessTokenDto, ApiError> {
     ensure_project_connection(connection, project_id).await?;
     let result = sqlx::query(
         "UPDATE access_tokens SET display_name = ?, expires_at = ? \
-         WHERE id = ? AND project_id = ? AND revoked_at IS NULL",
+         WHERE id = ? AND project_id = ? AND revoked_at IS NULL \
+         AND display_name = ? AND expires_at IS ?",
     )
     .bind(display_name)
     .bind(expires_at)
     .bind(token_id)
     .bind(project_id)
+    .bind(expected_display_name)
+    .bind(expected_expires_at)
     .execute(&mut **connection)
     .await
     .map_err(|_| ApiError::internal())?;
     if result.rows_affected() == 0 {
-        return Err(ApiError::not_found("token.not_found", "托管地址不存在"));
+        let active_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM access_tokens \
+             WHERE id = ? AND project_id = ? AND revoked_at IS NULL)",
+        )
+        .bind(token_id)
+        .bind(project_id)
+        .fetch_one(&mut **connection)
+        .await
+        .map_err(|_| ApiError::internal())?;
+        return if active_exists {
+            Err(ApiError::token_conflict())
+        } else {
+            Err(ApiError::not_found("token.not_found", "托管地址不存在"))
+        };
     }
     let row = sqlx::query(
         "SELECT id, display_name, token_prefix, token_suffix, created_at, last_used_at, \

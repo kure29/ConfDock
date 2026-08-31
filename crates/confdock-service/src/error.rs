@@ -93,6 +93,14 @@ impl ApiError {
         )
     }
 
+    pub fn token_conflict() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            "token.conflict",
+            "托管地址已被其他页面更新，请重新加载后再编辑",
+        )
+    }
+
     pub fn revision_diff_too_large() -> Self {
         Self::new(
             StatusCode::PAYLOAD_TOO_LARGE,
@@ -167,6 +175,7 @@ mod tests {
         assert_eq!(ApiError::unauthorized().status, StatusCode::UNAUTHORIZED);
         assert_eq!(ApiError::conflict().status, StatusCode::CONFLICT);
         assert_eq!(ApiError::publish_conflict().code, "publish.conflict");
+        assert_eq!(ApiError::token_conflict().status, StatusCode::CONFLICT);
         assert_eq!(ApiError::revision_not_found().code, "revision.not_found");
         assert_eq!(
             ApiError::revision_invalid_cursor().code,

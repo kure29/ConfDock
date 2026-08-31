@@ -469,23 +469,57 @@ function invalidResponse(): ApiError {
   return { code: API_ERROR.invalidResponse, message: 'ConfDock 服务返回了无效响应' }
 }
 
+const RFC3339_TIMESTAMP =
+  /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|([+-])(\d{2}):(\d{2}))$/
+
 function decodeIsoTimestamp(value: unknown, nullable: boolean): string | null {
   if (value === null && nullable) return null
-  if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) {
+  if (typeof value !== 'string') {
     throw new Error('invalid token timestamp')
   }
-  if (!/[zZ]|[+-]\d{2}:\d{2}$/.test(value)) throw new Error('timestamp must include timezone')
+  const match = RFC3339_TIMESTAMP.exec(value)
+  if (match === null || Number.isNaN(Date.parse(value))) {
+    throw new Error('invalid token timestamp')
+  }
+  const year = Number.parseInt(match[1]!, 10)
+  const month = Number.parseInt(match[2]!, 10)
+  const day = Number.parseInt(match[3]!, 10)
+  const hour = Number.parseInt(match[4]!, 10)
+  const minute = Number.parseInt(match[5]!, 10)
+  const second = Number.parseInt(match[6]!, 10)
+  const offsetHour = match[8] === undefined ? 0 : Number.parseInt(match[8], 10)
+  const offsetMinute = match[9] === undefined ? 0 : Number.parseInt(match[9], 10)
+  const calendar = new Date(0)
+  calendar.setUTCFullYear(year, month - 1, day)
+  calendar.setUTCHours(hour, minute, second, 0)
+  if (
+    calendar.getUTCFullYear() !== year ||
+    calendar.getUTCMonth() !== month - 1 ||
+    calendar.getUTCDate() !== day ||
+    calendar.getUTCHours() !== hour ||
+    calendar.getUTCMinutes() !== minute ||
+    calendar.getUTCSeconds() !== second ||
+    offsetHour > 23 ||
+    offsetMinute > 59
+  ) {
+    throw new Error('invalid token timestamp')
+  }
   return value
 }
 
 function decodeAccessToken(value: unknown): AccessToken {
   if (
     !isRecord(value) ||
-    typeof value.id !== 'string' ||
+    !isRevisionId(value.id) ||
     typeof value.displayName !== 'string' ||
     value.displayName.trim() === '' ||
+    value.displayName !== value.displayName.trim() ||
+    Array.from(value.displayName).length > 64 ||
+    /[\u0000-\u001f\u007f-\u009f]/.test(value.displayName) ||
     typeof value.prefix !== 'string' ||
+    !/^[A-Za-z0-9_-]{6}$/.test(value.prefix) ||
     typeof value.suffix !== 'string' ||
+    !/^[A-Za-z0-9_-]{6}$/.test(value.suffix) ||
     typeof value.createdAt !== 'string'
   ) {
     throw new Error('invalid access token')
@@ -830,7 +864,21 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
       )
       if (!result.ok) return result
       try {
-        return ok(decodeAccessToken(result.value))
+        const token = decodeAccessToken(result.value)
+        const sameExpiry =
+          token.expiresAt === input.expiresAt ||
+          (token.expiresAt !== null &&
+            input.expiresAt !== null &&
+            Math.floor(Date.parse(token.expiresAt) / 1_000) ===
+              Math.floor(Date.parse(input.expiresAt) / 1_000))
+        if (
+          token.id !== tokenId ||
+          token.displayName !== input.displayName.trim() ||
+          !sameExpiry
+        ) {
+          throw new Error('token update response contradicts request')
+        }
+        return ok(token)
       } catch {
         return err(invalidResponse())
       }

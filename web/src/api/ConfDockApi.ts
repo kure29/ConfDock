@@ -99,4 +99,6 @@ export interface CreateAccessTokenInput {
 export interface UpdateAccessTokenInput {
   displayName: string
   expiresAt: string | null
+  expectedDisplayName: string
+  expectedExpiresAt: string | null
 }

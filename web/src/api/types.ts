@@ -205,6 +205,7 @@ export const API_ERROR = {
   revisionConflict: 'revision.conflict',
   publishConflict: 'publish.conflict',
   tokenNotFound: 'token.not_found',
+  tokenConflict: 'token.conflict',
   revisionNotFound: 'revision.not_found',
   revisionDiffTooLarge: 'revision.diff_too_large',
   invalidResponse: 'network.invalid_response',
