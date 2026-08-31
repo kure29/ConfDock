@@ -21,8 +21,8 @@ unit="$(cd -- "$(dirname -- "$script")/../deploy/systemd" && pwd)/confdock.servi
 grep -F 'User=confdock' "$unit" >/dev/null
 grep -F 'Group=confdock' "$unit" >/dev/null
 grep -F 'ExecStart=/usr/local/bin/confdock --config /etc/confdock/config.toml' "$unit" >/dev/null
-! grep -F 'EnvironmentFile=' "$unit" >/dev/null
-! grep -F 'BOOTSTRAP_PASSWORD' "$unit" >/dev/null
+if grep -F 'EnvironmentFile=' "$unit" >/dev/null; then exit 1; fi
+if grep -F 'BOOTSTRAP_PASSWORD' "$unit" >/dev/null; then exit 1; fi
 
 error_file="$(mktemp -t confdock-test-error.XXXXXX)"
 trap 'rm -f -- "$error_file"' EXIT

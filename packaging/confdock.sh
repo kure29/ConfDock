@@ -50,10 +50,10 @@ TMP_DIRS=()
 cleanup() {
   local item
   for item in "${TMP_FILES[@]:-}"; do
-    [[ -n "$item" ]] && rm -f -- "$item" 2>/dev/null || true
+    if [[ -n "$item" ]]; then rm -f -- "$item" 2>/dev/null || true; fi
   done
   for item in "${TMP_DIRS[@]:-}"; do
-    [[ -n "$item" ]] && rm -rf -- "$item" 2>/dev/null || true
+    if [[ -n "$item" ]]; then rm -rf -- "$item" 2>/dev/null || true; fi
   done
 }
 trap cleanup EXIT
@@ -290,7 +290,7 @@ health_url_for_config() {
 
 wait_for_health() {
   local url="$1" attempt
-  for attempt in $(seq 1 40); do
+  for _ in $(seq 1 40); do
     if health_check "$url" 2>/dev/null; then return 0; fi
     sleep 0.25
   done
@@ -323,7 +323,8 @@ edit_config_file() {
 }
 
 install_native() {
-  local source_binary="$1" source_config="$2" data_dir public_url listen health_url edited_config="$source_config" answer
+  local source_binary="$1" source_config="$2" data_dir public_url listen health_url answer
+  local edited_config="$source_config"
   detect_platform
   validate_binary "$source_binary"
   validate_config "$source_binary" "$source_config"
