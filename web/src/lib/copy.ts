@@ -191,16 +191,20 @@ export const VALUE_TYPE_COPY: Record<SchemaValueType, string> = {
 }
 
 // ---------------------------------------------------------------------------
-// Save semantics (ADR-004)
+// Draft / publish semantics (ADR-005)
 // ---------------------------------------------------------------------------
 
-export const SAVE_ACTION = '校验并保存'
-export const SAVE_SUCCESS = '已保存 · 托管地址已指向新版本'
+export const SAVE_ACTION = '检查并保存草稿'
+export const SAVE_SUCCESS = '草稿已保存，等待发布'
 export const SAVE_BLOCKED = '有错误诊断，无法保存'
 
 /** Explains why there is no publish step, shown once in the editor footer. */
 export const SERVED_POINTER_NOTICE =
-  '保存即生效：托管地址总是指向最新一次保存成功的内容，没有单独的发布步骤。'
+  '托管地址始终返回最近一次发布的版本；保存草稿不会立即改变客户端看到的内容。'
+export const PUBLISH_ACTION = '发布草稿'
+export const PUBLISH_SUCCESS = '已发布'
+export const PUBLISH_UNCHANGED = '当前版本已经发布'
+export const PUBLISH_DIRTY_NOTICE = '请先保存或撤销当前修改，再发布已保存的草稿'
 
 // ---------------------------------------------------------------------------
 // Revision history (read-only Slice 2)

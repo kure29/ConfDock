@@ -38,15 +38,14 @@ export interface ProjectSummary {
   /** Recorded at the last successful save. Never recomputed for the list — the
    * list must not imply a fresh check happened. */
   lastValidation: ValidationResult
+  hasUnpublishedChanges: boolean
 }
 
 export interface Project extends ProjectSummary {
-  /** Bytes of the served revision. The single source of truth (ADR-001). */
+  /** Bytes of the current revision, including a saved draft not yet published. */
   source: Uint8Array
   /**
-   * Both pointers exist in the schema and advance together on save (ADR-004).
-   * They are exposed here so the history view can identify the two live
-   * pointers without inventing a second publication state.
+   * Current is the editable saved draft; served is what stable URLs return.
    */
   currentRevisionId: string
   servedRevisionId: string
@@ -64,6 +63,11 @@ export interface SaveResult {
   /** The validation that gated the save. */
   validation: ValidationResult
   /** True when the bytes were identical and no revision was created. */
+  unchanged: boolean
+}
+
+export interface PublishResult {
+  project: Project
   unchanged: boolean
 }
 
@@ -196,6 +200,7 @@ export const API_ERROR = {
   unsupportedEncoding: 'encoding.unsupported',
   invalidName: 'project.invalid_name',
   revisionConflict: 'revision.conflict',
+  publishConflict: 'publish.conflict',
   tokenNotFound: 'token.not_found',
   revisionNotFound: 'revision.not_found',
   revisionDiffTooLarge: 'revision.diff_too_large',

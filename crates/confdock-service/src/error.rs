@@ -63,6 +63,14 @@ impl ApiError {
         )
     }
 
+    pub fn publish_conflict() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            "publish.conflict",
+            "发布状态已被其他页面更新，请重新加载",
+        )
+    }
+
     pub fn revision_not_found() -> Self {
         Self::not_found("revision.not_found", "版本不存在")
     }
@@ -144,6 +152,7 @@ mod tests {
     fn stable_errors_map_to_expected_statuses() {
         assert_eq!(ApiError::unauthorized().status, StatusCode::UNAUTHORIZED);
         assert_eq!(ApiError::conflict().status, StatusCode::CONFLICT);
+        assert_eq!(ApiError::publish_conflict().code, "publish.conflict");
         assert_eq!(ApiError::revision_not_found().code, "revision.not_found");
         assert_eq!(
             ApiError::revision_invalid_cursor().code,

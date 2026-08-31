@@ -1,6 +1,6 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
-import type { ApiError, Project, ProjectSummary, SaveResult } from '../api'
+import type { ApiError, Project, ProjectSummary, PublishResult, SaveResult } from '../api'
 import { core } from '../core'
 import type {
   DocumentInfo,
@@ -46,8 +46,54 @@ export interface ProjectEditor {
   applyEdit: (edit: StructuredEdit) => Result<void, EditError>
   saving: boolean
   save: () => Promise<Result<SaveResult, ApiError>>
+  publishing: boolean
+  publish: () => Promise<Result<PublishResult, ApiError>>
   rename: (name: string) => Promise<Result<ProjectSummary, ApiError>>
   remove: () => Promise<Result<void, ApiError>>
+}
+
+type MutationKind = 'save' | 'publish'
+
+export interface MutationToken {
+  kind: MutationKind
+  generation: number
+  projectId: string
+}
+
+export interface MutationGate {
+  invalidate: () => void
+  begin: (kind: MutationKind, projectId: string) => MutationToken | null
+  isCurrent: (token: MutationToken) => boolean
+  finish: (token: MutationToken) => boolean
+}
+
+/**
+ * A synchronous single-flight gate for all project writes. React state is only
+ * presentation; admission and stale-response checks happen against this gate.
+ */
+export function createMutationGate(): MutationGate {
+  let generation = 0
+  let active: MutationToken | null = null
+  return {
+    invalidate() {
+      generation += 1
+      active = null
+    },
+    begin(kind, projectId) {
+      if (active !== null) return null
+      const token = { kind, projectId, generation }
+      active = token
+      return token
+    },
+    isCurrent(token) {
+      return active === token && token.generation === generation
+    },
+    finish(token) {
+      if (active !== token || token.generation !== generation) return false
+      active = null
+      return true
+    },
+  }
 }
 
 const EMPTY = new Uint8Array()
@@ -59,8 +105,20 @@ export function useProject(id: string): ProjectEditor {
   const [rawLineEndingPreference, setRawLineEndingPreference] = useState<Exclude<LineEnding, 'none'>>('lf')
   const [loadError, setLoadError] = useState<ApiError | null>(null)
   const [saving, setSaving] = useState(false)
+  const [publishing, setPublishing] = useState(false)
+  const mutationGateRef = useRef<MutationGate>(createMutationGate())
+  const activeProjectIdRef = useRef(id)
+  const renameGenerationRef = useRef(0)
+  // Keep stale-response checks correct during the render that observes a new
+  // route, before that route's effect has had a chance to run.
+  activeProjectIdRef.current = id
 
   useEffect(() => {
+    renameGenerationRef.current += 1
+    activeProjectIdRef.current = id
+    mutationGateRef.current.invalidate()
+    setSaving(false)
+    setPublishing(false)
     let live = true
     setStatus('loading')
     setProject(null)
@@ -148,10 +206,21 @@ export function useProject(id: string): ProjectEditor {
     [project, workingBytes],
   )
 
+  const mutationBusy = useCallback(
+    (): Result<never, ApiError> =>
+      err<ApiError, never>({
+        code: 'mutation.busy',
+        message: '已有保存或发布正在进行，请稍候',
+      }),
+    [],
+  )
+
   const save = useCallback(async (): Promise<Result<SaveResult, ApiError>> => {
     if (!project) {
       return err<ApiError, SaveResult>({ code: 'project.not_found', message: '项目不存在' })
     }
+    const token = mutationGateRef.current.begin('save', project.id)
+    if (token === null) return mutationBusy()
     setSaving(true)
     try {
       const result = await api.saveRevision({
@@ -159,23 +228,97 @@ export function useProject(id: string): ProjectEditor {
         source: workingBytes,
         expectedRevisionId: project.currentRevisionId,
       })
-      if (result.ok) {
-        setProject(result.value.project)
+      if (
+        result.ok &&
+        mutationGateRef.current.isCurrent(token) &&
+        activeProjectIdRef.current === project.id &&
+        token.projectId === project.id
+      ) {
+        setProject((current) => {
+          if (current === null || current.id !== project.id) return current
+          return {
+            ...result.value.project,
+            // A rename may have completed while this request was in flight.
+            // Preserve that newer metadata while adopting the saved bytes and
+            // revision pointers returned by the service.
+            name: current.name,
+          }
+        })
         setWorkingBytes(new Uint8Array(result.value.project.source))
       }
       return result
     } finally {
-      setSaving(false)
+      if (mutationGateRef.current.finish(token)) {
+        setSaving(false)
+      }
     }
-  }, [project, workingBytes])
+  }, [mutationBusy, project, workingBytes])
+
+  const publish = useCallback(async (): Promise<Result<PublishResult, ApiError>> => {
+    if (!project) {
+      return err<ApiError, PublishResult>({ code: 'project.not_found', message: '项目不存在' })
+    }
+    if (dirty) {
+      return err<ApiError, PublishResult>({
+        code: 'publish.dirty',
+        message: '请先保存或撤销当前修改，再发布已保存的草稿',
+      })
+    }
+    const token = mutationGateRef.current.begin('publish', project.id)
+    if (token === null) return mutationBusy()
+    setPublishing(true)
+    try {
+      const result = await api.publishProject({
+        projectId: project.id,
+        expectedCurrentRevisionId: project.currentRevisionId,
+        expectedServedRevisionId: project.servedRevisionId,
+      })
+      if (
+        result.ok &&
+        mutationGateRef.current.isCurrent(token) &&
+        activeProjectIdRef.current === project.id &&
+        token.projectId === project.id
+      ) {
+        setProject((current) => {
+          if (current === null || current.id !== project.id) return current
+          return {
+            ...result.value.project,
+            // Publish responses include the complete project, but must not
+            // erase a name that was renamed concurrently.
+            name: current.name,
+          }
+        })
+      }
+      return result
+    } finally {
+      if (mutationGateRef.current.finish(token)) {
+        setPublishing(false)
+      }
+    }
+  }, [dirty, mutationBusy, project])
 
   const rename = useCallback(
     async (name: string): Promise<Result<ProjectSummary, ApiError>> => {
       if (!project) {
         return err<ApiError, ProjectSummary>({ code: 'project.not_found', message: '项目不存在' })
       }
+      const projectId = project.id
+      const generation = renameGenerationRef.current
       const result = await api.renameProject(project.id, name)
-      if (result.ok) setProject({ ...project, name: result.value.name })
+      if (
+        result.ok &&
+        activeProjectIdRef.current === projectId &&
+        renameGenerationRef.current === generation
+      ) {
+        setProject((current) => {
+          if (current === null || current.id !== projectId) return current
+          return {
+            ...current,
+            name: result.value.name,
+            updatedAt: result.value.updatedAt,
+          }
+        })
+      }
       return result
     },
     [project],
@@ -202,6 +345,8 @@ export function useProject(id: string): ProjectEditor {
     applyEdit,
     saving,
     save,
+    publishing,
+    publish,
     rename,
     remove,
   }

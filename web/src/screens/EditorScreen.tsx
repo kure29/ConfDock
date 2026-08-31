@@ -17,6 +17,10 @@ import type { RevealRequest } from '../components'
 import {
   SAVE_ACTION,
   SAVE_SUCCESS,
+  PUBLISH_ACTION,
+  PUBLISH_DIRTY_NOTICE,
+  PUBLISH_SUCCESS,
+  PUBLISH_UNCHANGED,
   SERVED_POINTER_NOTICE,
   VALIDATION_LEVEL_CAVEAT,
   VALIDATION_LEVEL_COPY,
@@ -24,6 +28,7 @@ import {
 import { useProject } from '../state/useProject'
 import { useToast } from '../state/ToastContext'
 import { Button } from '../ui/Button'
+import { Badge } from '../ui/Badge'
 import { Dialog } from '../ui/Dialog'
 import { Panel } from '../ui/Panel'
 import { TabPanel, Tabs } from '../ui/Tabs'
@@ -41,9 +46,8 @@ type EditorTab = 'raw' | 'fields' | 'check' | 'history'
  * fields view is a convenience over the same bytes, not a separate model, and it
  * can only reach what `editCapabilities()` actually promises.
  *
- * There is one write action. Saving validates and advances both
- * `current_revision_id` and `served_revision_id` together (ADR-004), so there is
- * no draft state to reason about and no publish button to forget to press.
+ * Saving validates and advances the current draft pointer. Publishing advances
+ * the served pointer only after the administrator explicitly confirms it.
  */
 export function EditorScreen() {
   const { id = '' } = useParams<{ id: string }>()
@@ -58,8 +62,20 @@ export function EditorScreen() {
   const [nameDraft, setNameDraft] = useState('')
   const [historyRefresh, setHistoryRefresh] = useState(0)
   const nonce = useRef(0)
+  const activeProjectIdRef = useRef(id)
+  activeProjectIdRef.current = id
 
-  const { project, text, info, bytes, dirty, validation, validating, saving } = editor
+  const {
+    project,
+    text,
+    info,
+    bytes,
+    dirty,
+    validation,
+    validating,
+    saving,
+    publishing,
+  } = editor
 
   useEffect(() => {
     if (project) setNameDraft(project.name)
@@ -99,16 +115,26 @@ export function EditorScreen() {
     if (result.error.validation !== undefined) setTab('check')
   }
 
+  async function publish() {
+    const result = await editor.publish()
+    if (result.ok) {
+      setHistoryRefresh((value) => value + 1)
+      toast.notify(result.value.unchanged ? PUBLISH_UNCHANGED : PUBLISH_SUCCESS)
+      return
+    }
+    toast.fail(result.error.message)
+  }
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key !== 's') return
       event.preventDefault()
-      if (!saving) void save()
+      if (!saving && !publishing) void save()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
     // `save` closes over the current bytes; re-bind whenever they change.
-  }, [bytes, saving])
+  }, [bytes, publishing, saving])
 
   function onReveal(span: SourceSpan) {
     nonce.current += 1
@@ -121,10 +147,14 @@ export function EditorScreen() {
       setNameDraft(project?.name ?? '')
       return
     }
+    const requestedProjectId = project.id
+    const requestedProjectName = project.name
     const result = await editor.rename(nameDraft.trim())
     if (!result.ok) {
       toast.fail(result.error.message)
-      setNameDraft(project.name)
+      if (activeProjectIdRef.current === requestedProjectId) {
+        setNameDraft(requestedProjectName)
+      }
     }
   }
 
@@ -185,14 +215,31 @@ export function EditorScreen() {
         />
         <TargetBadge id={project.targetId} />
         <span className={styles.file}>{project.fileName}</span>
+        {project.hasUnpublishedChanges && <Badge tone="accent">未发布</Badge>}
         {dirty && <span className={styles.dirty} title="有未保存的改动" />}
         <div className={styles.actions}>
           <Button variant="secondary" onClick={() => setUrlOpen(true)}>
             托管地址
           </Button>
-          <Button variant="primary" loading={saving} onClick={() => void save()}>
+          <Button
+            variant="primary"
+            loading={saving}
+            disabled={publishing}
+            onClick={() => void save()}
+          >
             {SAVE_ACTION}
           </Button>
+          {project.hasUnpublishedChanges && (
+            <Button
+              variant="secondary"
+              loading={publishing}
+              disabled={dirty || saving || publishing}
+              title={dirty ? PUBLISH_DIRTY_NOTICE : undefined}
+              onClick={() => void publish()}
+            >
+              {PUBLISH_ACTION}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -270,7 +317,15 @@ export function EditorScreen() {
         )}
       </div>
 
-      <p className={styles.notice}>{SERVED_POINTER_NOTICE}</p>
+      <p className={styles.notice}>
+        {SERVED_POINTER_NOTICE}
+        {project.hasUnpublishedChanges && dirty && (
+          <>
+            {' '}
+            {PUBLISH_DIRTY_NOTICE}
+          </>
+        )}
+      </p>
 
       <div className={styles.danger}>
         <p className={styles.dangerText}>删除后，托管地址会立刻失效，内容也无法恢复。</p>

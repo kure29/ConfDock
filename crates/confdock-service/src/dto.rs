@@ -59,6 +59,7 @@ pub struct ProjectSummaryDto {
     pub updated_at: String,
     pub byte_length: usize,
     pub last_validation: ValidationResultDto,
+    pub has_unpublished_changes: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -76,6 +77,13 @@ pub struct ProjectDto {
 pub struct SaveResultDto {
     pub project: ProjectDto,
     pub validation: ValidationResultDto,
+    pub unchanged: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishResultDto {
+    pub project: ProjectDto,
     pub unchanged: bool,
 }
 
@@ -239,6 +247,13 @@ pub struct RenameProjectRequest {
 pub struct SaveRevisionRequest {
     pub source: String,
     pub expected_revision_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishProjectRequest {
+    pub expected_current_revision_id: String,
+    pub expected_served_revision_id: String,
 }
 
 pub fn timestamp_to_iso(timestamp: i64) -> Option<String> {

@@ -4,6 +4,7 @@ import { formatBytes } from '../lib/copy'
 import { relativeTime } from '../lib/time'
 import { targetName } from './TargetBadge'
 import { ValidationLevelBadge } from './ValidationLevelBadge'
+import { Badge } from '../ui/Badge'
 import styles from './ProjectRow.module.css'
 
 /**
@@ -28,6 +29,7 @@ export function ProjectRow({ project }: { project: ProjectSummary }) {
           </span>
         </span>
         <span className={styles.status}>
+          {project.hasUnpublishedChanges && <Badge tone="accent">未发布</Badge>}
           <span className={styles.statusLabel}>上次保存</span>
           <ValidationLevelBadge result={project.lastValidation} />
         </span>

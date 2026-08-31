@@ -190,8 +190,9 @@ describe('HTTP API error boundary', () => {
         fileName: 'config.json',
         updatedAt: '2026-08-30T00:00:00Z',
         byteLength: 4,
-        lastValidation: { level: 'syntax', diagnostics: [] },
-        source: '77u/AQ==',
+          lastValidation: { level: 'syntax', diagnostics: [] },
+          hasUnpublishedChanges: false,
+          source: '77u/AQ==',
         currentRevisionId: 'r1',
         servedRevisionId: 'r1',
       }),
@@ -208,6 +209,186 @@ describe('HTTP API error boundary', () => {
     expect(JSON.parse(fetchMock.mock.calls[0]![1].body as string).source).toBe('77u/AQ==')
     expect(fetchMock.mock.calls[0]![1].credentials).toBe('same-origin')
     expect(fetchMock.mock.calls[0]![1].cache).toBe('no-store')
+  })
+
+  it('decodes project summaries and requires the unpublished flag', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json([
+          {
+            id: 'p1',
+            name: 'Draft',
+            targetId: 'sing-box',
+            fileName: 'config.json',
+            updatedAt: '2026-08-30T00:00:00Z',
+            byteLength: 2,
+            lastValidation: { level: 'syntax', diagnostics: [] },
+            hasUnpublishedChanges: true,
+          },
+        ]),
+      ),
+    )
+    const result = await createHttpApi().listProjects()
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.value[0]?.hasUnpublishedChanges).toBe(true)
+  })
+
+  it('rejects a project summary without a pointer divergence flag', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json([
+          {
+            id: 'p1',
+            name: 'Draft',
+            targetId: 'sing-box',
+            fileName: 'config.json',
+            updatedAt: '2026-08-30T00:00:00Z',
+            byteLength: 2,
+            lastValidation: { level: 'syntax', diagnostics: [] },
+          },
+        ]),
+      ),
+    )
+    const result = await createHttpApi().listProjects()
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+    })
+  })
+
+  it('publishes a project with both expected pointers and decodes the result', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        project: {
+          id: 'p1',
+          name: 'Draft',
+          targetId: 'sing-box',
+          fileName: 'config.json',
+          updatedAt: '2026-08-30T00:00:00Z',
+          byteLength: 1,
+          lastValidation: { level: 'syntax', diagnostics: [] },
+          hasUnpublishedChanges: false,
+          source: 'AQ==',
+          currentRevisionId: 'r2',
+          servedRevisionId: 'r2',
+        },
+        unchanged: false,
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await createHttpApi().publishProject({
+      projectId: 'p/1',
+      expectedCurrentRevisionId: 'r2',
+      expectedServedRevisionId: 'r1',
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.unchanged).toBe(false)
+      expect(Array.from(result.value.project.source)).toEqual([1])
+    }
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/projects/p%2F1/publish')
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body as string)).toEqual({
+      expectedCurrentRevisionId: 'r2',
+      expectedServedRevisionId: 'r1',
+    })
+  })
+
+  it('preserves publish idempotence and publish conflicts', async () => {
+    const project = {
+      id: 'p1',
+      name: 'Draft',
+      targetId: 'sing-box',
+      fileName: 'config.json',
+      updatedAt: '2026-08-30T00:00:00Z',
+      byteLength: 1,
+      lastValidation: { level: 'syntax', diagnostics: [] },
+      hasUnpublishedChanges: false,
+      source: 'AQ==',
+      currentRevisionId: 'r1',
+      servedRevisionId: 'r1',
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(Response.json({ project, unchanged: true })),
+    )
+    const unchanged = await createHttpApi().publishProject({
+      projectId: 'p1',
+      expectedCurrentRevisionId: 'r1',
+      expectedServedRevisionId: 'r1',
+    })
+    expect(unchanged.ok).toBe(true)
+    if (unchanged.ok) expect(unchanged.value.unchanged).toBe(true)
+
+    for (const code of ['publish.conflict', 'revision.conflict'] as const) {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(Response.json({ code, message: 'conflict' }, { status: 409 })),
+      )
+      const conflict = await createHttpApi().publishProject({
+        projectId: 'p1',
+        expectedCurrentRevisionId: 'r1',
+        expectedServedRevisionId: 'r0',
+      })
+      expect(conflict.ok).toBe(false)
+      if (!conflict.ok) expect(conflict.error.code).toBe(code)
+    }
+  })
+
+  it('rejects publish success responses that do not prove the requested revision was served', async () => {
+    const baseProject = {
+      id: 'p1',
+      name: 'Draft',
+      targetId: 'sing-box',
+      fileName: 'config.json',
+      updatedAt: '2026-08-30T00:00:00Z',
+      byteLength: 1,
+      lastValidation: { level: 'syntax', diagnostics: [] },
+      source: 'AQ==',
+    }
+    const responses = [
+      {
+        ...baseProject,
+        hasUnpublishedChanges: false,
+        currentRevisionId: 'r3',
+        servedRevisionId: 'r3',
+      },
+      {
+        ...baseProject,
+        hasUnpublishedChanges: true,
+        currentRevisionId: 'r2',
+        servedRevisionId: 'r1',
+      },
+    ]
+    for (const project of responses) {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(Response.json({ project, unchanged: false })),
+      )
+      const result = await createHttpApi().publishProject({
+        projectId: 'p1',
+        expectedCurrentRevisionId: 'r2',
+        expectedServedRevisionId: 'r1',
+      })
+      expect(result).toEqual({
+        ok: false,
+        error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+      })
+    }
+  })
+
+  it('maps malformed successful publish responses to network.invalid_response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(null)))
+    const result = await createHttpApi().publishProject({
+      projectId: 'p1',
+      expectedCurrentRevisionId: 'r1',
+      expectedServedRevisionId: 'r1',
+    })
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+    })
   })
 
   it('decodes ordered revision history metadata without loading source bytes', async () => {
@@ -620,6 +801,7 @@ describe('HTTP API error boundary', () => {
           updatedAt: '2026-08-30T00:00:00Z',
           byteLength: 1,
           lastValidation: { level: 'syntax', diagnostics: [] },
+          hasUnpublishedChanges: false,
           source: 'not base64',
           currentRevisionId: 'r1',
           servedRevisionId: 'r1',
@@ -631,6 +813,30 @@ describe('HTTP API error boundary', () => {
       ok: false,
       error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
     })
+  })
+
+  it('rejects contradictory project pointer state at the HTTP boundary', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json({
+          id: 'p1',
+          name: 'Broken pointers',
+          targetId: 'sing-box',
+          fileName: 'config.json',
+          updatedAt: '2026-08-30T00:00:00Z',
+          byteLength: 1,
+          lastValidation: { level: 'syntax', diagnostics: [] },
+          hasUnpublishedChanges: true,
+          source: 'AQ==',
+          currentRevisionId: 'r1',
+          servedRevisionId: 'r1',
+        }),
+      ),
+    )
+    const result = await createHttpApi().getProject('p1')
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('network.invalid_response')
   })
 
   it('does not report failed deletes or token revocations as success', async () => {

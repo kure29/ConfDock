@@ -538,10 +538,33 @@ async fn project_revision_transactions_conflicts_and_persistence_are_real() {
         .as_str()
         .unwrap()
         .to_owned();
-    assert_eq!(
-        saved["project"]["servedRevisionId"],
-        saved["project"]["currentRevisionId"]
-    );
+    assert_eq!(saved["project"]["servedRevisionId"], first_revision);
+    assert_eq!(saved["project"]["hasUnpublishedChanges"], true);
+    let managed = response_json(
+        request(
+            &service.app,
+            Method::GET,
+            &format!("/api/projects/{project_id}"),
+            Some(&cookie),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(managed["source"], STANDARD.encode(second_source));
+    let listed = response_json(
+        request(
+            &service.app,
+            Method::GET,
+            "/api/projects",
+            Some(&cookie),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(listed[0]["byteLength"], second_source.len());
+    assert_eq!(listed[0]["hasUnpublishedChanges"], true);
 
     let parent: Option<String> =
         sqlx::query_scalar("SELECT parent_revision_id FROM config_revisions WHERE id = ?")
@@ -572,7 +595,9 @@ async fn project_revision_transactions_conflicts_and_persistence_are_real() {
         })),
     )
     .await;
-    assert_eq!(response_json(unchanged).await["unchanged"], true);
+    let unchanged = response_json(unchanged).await;
+    assert_eq!(unchanged["unchanged"], true);
+    assert_eq!(unchanged["project"]["servedRevisionId"], first_revision);
     let count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM config_revisions WHERE project_id = ?")
             .bind(project_id)
@@ -580,6 +605,52 @@ async fn project_revision_transactions_conflicts_and_persistence_are_real() {
             .await
             .unwrap();
     assert_eq!(count, 2);
+
+    let published = request(
+        &service.app,
+        Method::POST,
+        &format!("/api/projects/{project_id}/publish"),
+        Some(&cookie),
+        Some(json!({
+            "expectedCurrentRevisionId": second_revision,
+            "expectedServedRevisionId": first_revision,
+        })),
+    )
+    .await;
+    assert_eq!(published.status(), StatusCode::OK);
+    assert_eq!(published.headers()[header::CACHE_CONTROL], "no-store");
+    let published = response_json(published).await;
+    assert_eq!(published["unchanged"], false);
+    assert_eq!(published["project"]["currentRevisionId"], second_revision);
+    assert_eq!(published["project"]["servedRevisionId"], second_revision);
+    assert_eq!(published["project"]["hasUnpublishedChanges"], false);
+
+    let revision_count_before_publish: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM config_revisions WHERE project_id = ?")
+            .bind(project_id)
+            .fetch_one(&service.state.pool)
+            .await
+            .unwrap();
+    let idempotent = request(
+        &service.app,
+        Method::POST,
+        &format!("/api/projects/{project_id}/publish"),
+        Some(&cookie),
+        Some(json!({
+            "expectedCurrentRevisionId": second_revision,
+            "expectedServedRevisionId": second_revision,
+        })),
+    )
+    .await;
+    assert_eq!(idempotent.status(), StatusCode::OK);
+    assert_eq!(response_json(idempotent).await["unchanged"], true);
+    let revision_count_after_publish: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM config_revisions WHERE project_id = ?")
+            .bind(project_id)
+            .fetch_one(&service.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(revision_count_after_publish, revision_count_before_publish);
 
     let stale = request(
         &service.app,
@@ -737,7 +808,7 @@ async fn revision_history_is_ordered_metadata_and_explicit_byte_preserving_detai
     assert_eq!(history["items"][0]["revisionNo"], 2);
     assert_eq!(history["items"][0]["parentRevisionId"], first_revision);
     assert_eq!(history["items"][0]["isCurrent"], true);
-    assert_eq!(history["items"][0]["isServed"], true);
+    assert_eq!(history["items"][0]["isServed"], false);
     assert_eq!(history["nextCursor"], second_revision);
 
     let older = response_json(
@@ -754,7 +825,7 @@ async fn revision_history_is_ordered_metadata_and_explicit_byte_preserving_detai
     assert_eq!(older["items"].as_array().unwrap().len(), 1);
     assert_eq!(older["items"][0]["id"], first_revision);
     assert_eq!(older["items"][0]["isCurrent"], false);
-    assert_eq!(older["items"][0]["isServed"], false);
+    assert_eq!(older["items"][0]["isServed"], true);
     assert_eq!(older["nextCursor"], Value::Null);
 
     let invalid_limit = request(
@@ -860,6 +931,310 @@ async fn revision_history_is_ordered_metadata_and_explicit_byte_preserving_detai
         response_json(cross_project).await["code"],
         "revision.not_found"
     );
+}
+
+#[tokio::test]
+async fn publish_separates_pointers_and_handles_conflicts_idempotently() {
+    let service = TestService::new().await;
+    let (cookie, _) = login(&service.app, PASSWORD).await;
+    let initial = create_project(
+        &service.app,
+        &cookie,
+        "Publish",
+        "sing-box",
+        "config.json",
+        br#"{"log":{"level":"info"}}"#,
+    )
+    .await;
+    let project_id = initial["id"].as_str().unwrap().to_owned();
+    let first_revision = initial["currentRevisionId"].as_str().unwrap().to_owned();
+    let token = response_json(
+        request(
+            &service.app,
+            Method::POST,
+            &format!("/api/projects/{project_id}/tokens"),
+            Some(&cookie),
+            None,
+        )
+        .await,
+    )
+    .await;
+    let token_id = token["token"]["id"].as_str().unwrap().to_owned();
+    let token_prefix = token["token"]["prefix"].as_str().unwrap().to_owned();
+    let token_suffix = token["token"]["suffix"].as_str().unwrap().to_owned();
+    let token_hash_before: Vec<u8> =
+        sqlx::query_scalar("SELECT token_hash FROM access_tokens WHERE id = ?")
+            .bind(&token_id)
+            .fetch_one(&service.state.pool)
+            .await
+            .unwrap();
+    for (expected_current, expected_served) in [
+        (String::new(), first_revision.clone()),
+        ("r1\n".to_owned(), first_revision.clone()),
+        ("x".repeat(129), first_revision.clone()),
+    ] {
+        let invalid = request(
+            &service.app,
+            Method::POST,
+            &format!("/api/projects/{project_id}/publish"),
+            Some(&cookie),
+            Some(json!({
+                "expectedCurrentRevisionId": expected_current,
+                "expectedServedRevisionId": expected_served,
+            })),
+        )
+        .await;
+        assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    }
+    let draft_source = br#"{"log":{"level":"debug"}}"#;
+    let saved = response_json(
+        request(
+            &service.app,
+            Method::POST,
+            &format!("/api/projects/{project_id}/revisions"),
+            Some(&cookie),
+            Some(json!({
+                "source": STANDARD.encode(draft_source),
+                "expectedRevisionId": first_revision,
+            })),
+        )
+        .await,
+    )
+    .await;
+    let current_revision = saved["project"]["currentRevisionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(saved["project"]["servedRevisionId"], first_revision);
+    assert_eq!(saved["project"]["source"], STANDARD.encode(draft_source));
+
+    let stale_current = request(
+        &service.app,
+        Method::POST,
+        &format!("/api/projects/{project_id}/publish"),
+        Some(&cookie),
+        Some(json!({
+            "expectedCurrentRevisionId": first_revision,
+            "expectedServedRevisionId": first_revision,
+        })),
+    )
+    .await;
+    assert_eq!(stale_current.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(stale_current).await["code"],
+        "revision.conflict"
+    );
+
+    let stale_served = request(
+        &service.app,
+        Method::POST,
+        &format!("/api/projects/{project_id}/publish"),
+        Some(&cookie),
+        Some(json!({
+            "expectedCurrentRevisionId": current_revision,
+            "expectedServedRevisionId": "stale-served",
+        })),
+    )
+    .await;
+    assert_eq!(stale_served.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(stale_served).await["code"],
+        "publish.conflict"
+    );
+    let pointers_after_conflict: (String, String) =
+        sqlx::query_as("SELECT current_revision_id, served_revision_id FROM projects WHERE id = ?")
+            .bind(&project_id)
+            .fetch_one(&service.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(pointers_after_conflict.0, current_revision);
+    assert_eq!(pointers_after_conflict.1, first_revision);
+
+    let unauthenticated = request(
+        &service.app,
+        Method::POST,
+        &format!("/api/projects/{project_id}/publish"),
+        None,
+        Some(json!({
+            "expectedCurrentRevisionId": current_revision,
+            "expectedServedRevisionId": first_revision,
+        })),
+    )
+    .await;
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+    let publish_uri = format!("/api/projects/{project_id}/publish");
+    let publish_a = request(
+        &service.app,
+        Method::POST,
+        &publish_uri,
+        Some(&cookie),
+        Some(json!({
+            "expectedCurrentRevisionId": current_revision,
+            "expectedServedRevisionId": first_revision,
+        })),
+    );
+    let publish_b = request(
+        &service.app,
+        Method::POST,
+        &publish_uri,
+        Some(&cookie),
+        Some(json!({
+            "expectedCurrentRevisionId": current_revision,
+            "expectedServedRevisionId": first_revision,
+        })),
+    );
+    let (publish_a, publish_b) = tokio::join!(publish_a, publish_b);
+    assert_eq!(publish_a.status(), StatusCode::OK);
+    assert_eq!(publish_b.status(), StatusCode::OK);
+    let result_a = response_json(publish_a).await;
+    let result_b = response_json(publish_b).await;
+    let unchanged_values = [
+        result_a["unchanged"].as_bool(),
+        result_b["unchanged"].as_bool(),
+    ];
+    assert!(unchanged_values.contains(&Some(false)));
+    assert!(unchanged_values.contains(&Some(true)));
+    assert_eq!(result_a["project"]["source"], STANDARD.encode(draft_source));
+    assert_eq!(result_b["project"]["source"], STANDARD.encode(draft_source));
+    let tokens = response_json(
+        request(
+            &service.app,
+            Method::GET,
+            &format!("/api/projects/{project_id}/tokens"),
+            Some(&cookie),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(tokens[0]["id"], token_id);
+    assert_eq!(tokens[0]["prefix"], token_prefix);
+    assert_eq!(tokens[0]["suffix"], token_suffix);
+    let token_hash_after: Vec<u8> =
+        sqlx::query_scalar("SELECT token_hash FROM access_tokens WHERE id = ?")
+            .bind(&token_id)
+            .fetch_one(&service.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(token_hash_after, token_hash_before);
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM config_revisions WHERE project_id = ?")
+            .bind(&project_id)
+            .fetch_one(&service.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(count, 2);
+}
+
+#[tokio::test]
+async fn publish_then_save_and_save_then_stale_publish_keep_pointer_order() {
+    let service = TestService::new().await;
+    let (cookie, _) = login(&service.app, PASSWORD).await;
+    let project = create_project(
+        &service.app,
+        &cookie,
+        "Interleaving",
+        "sing-box",
+        "config.json",
+        br#"{"log":{"level":"info"}}"#,
+    )
+    .await;
+    let project_id = project["id"].as_str().unwrap().to_owned();
+    let first = project["currentRevisionId"].as_str().unwrap().to_owned();
+    let save_two = response_json(
+        request(
+            &service.app,
+            Method::POST,
+            &format!("/api/projects/{project_id}/revisions"),
+            Some(&cookie),
+            Some(json!({
+                "source": STANDARD.encode(br#"{"log":{"level":"debug"}}"#),
+                "expectedRevisionId": first,
+            })),
+        )
+        .await,
+    )
+    .await;
+    let second = save_two["project"]["currentRevisionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let publish_two = request(
+        &service.app,
+        Method::POST,
+        &format!("/api/projects/{project_id}/publish"),
+        Some(&cookie),
+        Some(json!({
+            "expectedCurrentRevisionId": second,
+            "expectedServedRevisionId": first,
+        })),
+    )
+    .await;
+    assert_eq!(publish_two.status(), StatusCode::OK);
+    let save_three = response_json(
+        request(
+            &service.app,
+            Method::POST,
+            &format!("/api/projects/{project_id}/revisions"),
+            Some(&cookie),
+            Some(json!({
+                "source": STANDARD.encode(br#"{"log":{"level":"warn"}}"#),
+                "expectedRevisionId": second,
+            })),
+        )
+        .await,
+    )
+    .await;
+    let third = save_three["project"]["currentRevisionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(save_three["project"]["servedRevisionId"], second);
+
+    let save_four = response_json(
+        request(
+            &service.app,
+            Method::POST,
+            &format!("/api/projects/{project_id}/revisions"),
+            Some(&cookie),
+            Some(json!({
+                "source": STANDARD.encode(br#"{"log":{"level":"error"}}"#),
+                "expectedRevisionId": third,
+            })),
+        )
+        .await,
+    )
+    .await;
+    let fourth = save_four["project"]["currentRevisionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(fourth, third);
+    let stale_publish = request(
+        &service.app,
+        Method::POST,
+        &format!("/api/projects/{project_id}/publish"),
+        Some(&cookie),
+        Some(json!({
+            "expectedCurrentRevisionId": third,
+            "expectedServedRevisionId": second,
+        })),
+    )
+    .await;
+    assert_eq!(stale_publish.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(stale_publish).await["code"],
+        "revision.conflict"
+    );
+    let pointers: (String, String) =
+        sqlx::query_as("SELECT current_revision_id, served_revision_id FROM projects WHERE id = ?")
+            .bind(&project_id)
+            .fetch_one(&service.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(pointers.0, fourth);
+    assert_eq!(pointers.1, second);
 }
 
 #[tokio::test]
@@ -999,7 +1374,7 @@ async fn revision_diff_is_authenticated_static_read_only_and_source_preserving()
             .await
             .unwrap();
     assert_eq!(pointers.0, to_revision);
-    assert_eq!(pointers.1, to_revision);
+    assert_eq!(pointers.1, from_revision);
 }
 
 #[tokio::test]
@@ -1419,6 +1794,28 @@ async fn stable_tokens_store_only_hash_serve_exact_bytes_and_revoke_or_cascade()
     )
     .await;
     assert_eq!(saved.status(), StatusCode::OK);
+    let served_before_publish = request(
+        &service.app,
+        Method::GET,
+        &format!("/sub/{second_plaintext}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(response_bytes(served_before_publish).await, source);
+    let saved_project = response_json(saved).await;
+    let publish = request(
+        &service.app,
+        Method::POST,
+        &format!("/api/projects/{project_id}/publish"),
+        Some(&cookie),
+        Some(json!({
+            "expectedCurrentRevisionId": saved_project["project"]["currentRevisionId"],
+            "expectedServedRevisionId": project["servedRevisionId"],
+        })),
+    )
+    .await;
+    assert_eq!(publish.status(), StatusCode::OK);
     let served_updated = request(
         &service.app,
         Method::GET,

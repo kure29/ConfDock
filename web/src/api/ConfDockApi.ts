@@ -12,6 +12,7 @@ import type {
   RevisionListOptions,
   RevisionPage,
   SaveResult,
+  PublishResult,
   ServiceInfo,
 } from './types'
 
@@ -41,13 +42,9 @@ export interface ConfDockApi {
   listProjects(): Promise<Result<ProjectSummary[], ApiError>>
   getProject(id: string): Promise<Result<Project, ApiError>>
   createProject(input: NewProject): Promise<Result<Project, ApiError>>
-  /**
-   * Validate, then store — one action, no separate publish (ADR-004). On
-   * success `current_revision_id` and `served_revision_id` both advance.
-   * Rejected saves come back with `error.validation` so the editor can show
-   * exactly what blocked them.
-   */
+  /** Validate, then store a draft revision. */
   saveRevision(input: SaveRevisionInput): Promise<Result<SaveResult, ApiError>>
+  publishProject(input: PublishProjectInput): Promise<Result<PublishResult, ApiError>>
   /** List one bounded page of immutable revision metadata, newest first. */
   listRevisions(
     projectId: string,
@@ -72,6 +69,12 @@ export interface ConfDockApi {
 
   // -- service ------------------------------------------------------------
   serviceInfo(): Promise<Result<ServiceInfo, ApiError>>
+}
+
+export interface PublishProjectInput {
+  projectId: string
+  expectedCurrentRevisionId: string
+  expectedServedRevisionId: string
 }
 
 export interface SaveRevisionInput {
