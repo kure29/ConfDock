@@ -1,3 +1,5 @@
+#[cfg(feature = "embedded-web")]
+mod assets;
 mod projects;
 mod public;
 mod session;
@@ -52,7 +54,7 @@ pub fn router(state: AppState) -> Router {
             require_session,
         ));
 
-    Router::new()
+    let app = Router::new()
         .route("/healthz", get(public::health))
         .route("/sub/{token}", get(public::subscription))
         .route("/api/service", get(public::service_info))
@@ -65,7 +67,18 @@ pub fn router(state: AppState) -> Router {
         .merge(protected)
         .layer(DefaultBodyLimit::max(state.config.max_json_body_bytes()))
         .layer(middleware::from_fn(no_store_api_responses))
-        .with_state(state)
+        .with_state(state);
+
+    #[cfg(feature = "embedded-web")]
+    let app = app
+        .route("/", get(assets::index))
+        .route("/index.html", get(assets::index))
+        .route("/assets/{*path}", get(assets::file))
+        .route("/client-icons/{*path}", get(assets::icon))
+        .route("/favicon.svg", get(assets::favicon))
+        .fallback(assets::fallback);
+
+    app
 }
 
 /// Management responses contain session and configuration metadata. Browsers
@@ -73,8 +86,11 @@ pub fn router(state: AppState) -> Router {
 /// produced by authentication, routing, or body-limit middleware.
 async fn no_store_api_responses(request: Request, next: Next) -> Response {
     let path = request.uri().path();
-    let is_sensitive_endpoint =
-        path == "/api" || path.starts_with("/api/") || path == "/sub" || path.starts_with("/sub/");
+    let is_sensitive_endpoint = path == "/healthz"
+        || path == "/api"
+        || path.starts_with("/api/")
+        || path == "/sub"
+        || path.starts_with("/sub/");
     let mut response = next.run(request).await;
     if is_sensitive_endpoint {
         response

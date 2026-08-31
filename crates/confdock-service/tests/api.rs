@@ -172,6 +172,7 @@ async fn health_service_login_cookie_session_and_logout_contract() {
 
     let health = request(&service.app, Method::GET, "/healthz", None, None).await;
     assert_eq!(health.status(), StatusCode::OK);
+    assert_eq!(health.headers()[header::CACHE_CONTROL], "no-store");
     assert_eq!(response_json(health).await, json!({ "status": "ok" }));
 
     let info = request(&service.app, Method::GET, "/api/service", None, None).await;
@@ -288,6 +289,16 @@ async fn health_service_login_cookie_session_and_logout_contract() {
         .status(),
         StatusCode::NOT_FOUND
     );
+}
+
+#[tokio::test]
+async fn health_fails_when_the_sqlite_pool_is_closed() {
+    let service = TestService::new().await;
+    service.state.pool.close().await;
+    let response = request(&service.app, Method::GET, "/healthz", None, None).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    assert_eq!(response_json(response).await["code"], "internal.error");
 }
 
 #[tokio::test]

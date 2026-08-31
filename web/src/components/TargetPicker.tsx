@@ -12,30 +12,29 @@ interface TargetPickerProps {
   detections?: readonly DetectionResult[]
 }
 
-const TARGET_MARK: Record<TargetId, string> = {
-  mihomo: 'MI',
-  'sing-box': 'SB',
-  surge: 'SG',
-  loon: 'LO',
-  'quantumult-x': 'QX',
-  shadowrocket: 'SR',
+const TARGET_ICON: Record<TargetId, string> = {
+  mihomo: 'mihomo.png',
+  'sing-box': 'sing-box.png',
+  surge: 'surge.png',
+  loon: 'loon.png',
+  'quantumult-x': 'quantumult-x.png',
+  shadowrocket: 'shadowrocket.png',
 }
 
-/** Small project-owned marks avoid an icon dependency and uncertain artwork licenses. */
+/** Local raster assets keep rendering deterministic and avoid remote hotlinks. */
 function TargetIcon({ id }: { id: TargetId }) {
   return (
-    <svg
+    <img
       className={styles.icon}
-      viewBox="0 0 40 40"
+      src={`/client-icons/${TARGET_ICON[id]}`}
+      alt=""
       aria-hidden="true"
-      focusable="false"
       data-target-icon={id}
-    >
-      <rect width="40" height="40" rx="11" className={styles.iconSurface} />
-      <text x="20" y="22" textAnchor="middle" dominantBaseline="central" className={styles.iconMark}>
-        {TARGET_MARK[id]}
-      </text>
-    </svg>
+      loading="lazy"
+      onError={(event) => {
+        event.currentTarget.hidden = true
+      }}
+    />
   )
 }
 

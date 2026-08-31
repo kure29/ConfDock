@@ -4,12 +4,21 @@ import { core } from '../core'
 import { TargetPicker } from './TargetPicker'
 
 describe('TargetPicker cards', () => {
-  it('renders a project-owned icon and accessible text for every registry target', () => {
+  it('renders a local raster icon and accessible text for every registry target', () => {
     const markup = renderToStaticMarkup(<TargetPicker value={null} onChange={() => {}} />)
     const descriptors = core.targets()
     expect(descriptors).toHaveLength(6)
     expect((markup.match(/data-target-icon=/g) ?? []).length).toBe(descriptors.length)
-    for (const descriptor of descriptors) expect(markup).toContain(descriptor.displayName)
+    expect((markup.match(/<img /g) ?? []).length).toBe(descriptors.length)
+    expect(markup).not.toContain('<svg')
+    expect(markup).not.toMatch(/https?:\/\//)
+    for (const descriptor of descriptors) {
+      expect(markup).toContain(descriptor.displayName)
+      const icon = descriptor.id === 'mihomo'
+        ? 'mihomo.png'
+        : `${descriptor.id === 'sing-box' ? 'sing-box' : descriptor.id}.png`
+      expect(markup).toContain(`/client-icons/${icon}`)
+    }
     expect(markup).not.toContain('最深校验')
     expect(markup).not.toContain('.yaml')
     expect(markup).not.toContain('.yml')
