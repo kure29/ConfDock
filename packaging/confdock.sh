@@ -289,7 +289,7 @@ health_url_for_config() {
 }
 
 wait_for_health() {
-  local url="$1" attempt
+  local url="$1"
   for _ in $(seq 1 40); do
     if health_check "$url" 2>/dev/null; then return 0; fi
     sleep 0.25
