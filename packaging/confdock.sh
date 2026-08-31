@@ -118,6 +118,7 @@ require_command() {
 validate_binary() {
   local binary="$1" description
   [[ -f "$binary" ]] || die "binary not found: $binary"
+  [[ ! -L "$binary" ]] || die "binary must not be a symbolic link: $binary"
   [[ -x "$binary" ]] || die "binary is not executable: $binary"
   require_command file
   description="$(file -Lb -- "$binary" 2>/dev/null || true)"
@@ -188,6 +189,8 @@ data_dir_has_entries() {
 
 check_existing_install() {
   local data_dir="$1"
+  [[ "$BIN_PATH" == /* && "$CTL_PATH" == /* && "$CONFIG_DIR" == /* && "$UNIT_PATH" == /* ]] || \
+    die "native install paths must be absolute"
   [[ ! -L "$CONFIG_DIR" && ! -L "$(dirname -- "$UNIT_PATH")" && ! -L "$(dirname -- "$BIN_PATH")" && ! -L "$(dirname -- "$CTL_PATH")" ]] || \
     die "refusing to install through a symbolic-link system directory"
   if native_marker_exists; then
@@ -326,6 +329,7 @@ install_native() {
   local source_binary="$1" source_config="$2" data_dir public_url listen health_url answer
   local edited_config="$source_config"
   detect_platform
+  require_command curl
   validate_binary "$source_binary"
   validate_config "$source_binary" "$source_config"
   data_dir="$(config_value data_dir "$source_binary" "$source_config")"
@@ -372,6 +376,8 @@ install_native() {
     return 1
   fi
   if ! wait_for_health "$health_url"; then
+    "$SYSTEMCTL" stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+    "$SYSTEMCTL" disable "$SERVICE_NAME" >/dev/null 2>&1 || true
     printf 'Service started but /healthz did not become ready. Inspect systemctl status %s and journalctl -u %s.\n' "$SERVICE_NAME" "$SERVICE_NAME" >&2
     return 1
   fi
@@ -546,6 +552,25 @@ dangerous_delete_path() {
   [[ "$path" == /* && "$path" != *$'\n'* && ! -L "$path" ]]
 }
 
+remove_owned_files() {
+  local directory="$1" entry name allowed allowed_name
+  [[ -d "$directory" && ! -L "$directory" ]] || die "refusing to delete an unknown directory: $directory"
+  while IFS= read -r -d '' entry; do
+    name="${entry##*/}"
+    allowed=0
+    for allowed_name in "${@:2}"; do
+      if [[ "$name" == "$allowed_name" ]]; then allowed=1; break; fi
+    done
+    if [[ "$allowed" -ne 1 || -L "$entry" || ! -f "$entry" ]]; then
+      die "refusing to delete unrecognized data in $directory: $name"
+    fi
+  done < <(find "$directory" -mindepth 1 -maxdepth 1 -print0)
+  while IFS= read -r -d '' entry; do
+    rm -f -- "$entry"
+  done < <(find "$directory" -mindepth 1 -maxdepth 1 -type f -print0)
+  rmdir -- "$directory" 2>/dev/null || true
+}
+
 uninstall() {
   local answer data_dir delete_answer confirm
   is_installed || { printf 'ConfDock is not installed; no files were removed.\n'; return 0; }
@@ -559,6 +584,9 @@ uninstall() {
   fi
   "$SYSTEMCTL" stop "$SERVICE_NAME" >/dev/null 2>&1 || true
   "$SYSTEMCTL" disable "$SERVICE_NAME" >/dev/null 2>&1 || true
+  if [[ "$($SYSTEMCTL is-active "$SERVICE_NAME" 2>/dev/null || true)" == active ]]; then
+    die "service is still active; refusing to remove files"
+  fi
   rm -f -- "$UNIT_PATH" "$BIN_PATH" "$CTL_PATH"
   "$SYSTEMCTL" daemon-reload >/dev/null 2>&1 || true
   printf 'Configuration and data were preserved.\nConfig: %s\n' "$CONFIG_PATH"
@@ -569,9 +597,8 @@ uninstall() {
       confirm=''
       read -r -p 'This cannot be undone. Type DELETE again: ' confirm || confirm=''
       if [[ "$confirm" == DELETE ]] && dangerous_delete_path "$CONFIG_DIR" && { [[ -z "$data_dir" ]] || dangerous_delete_path "$data_dir"; }; then
-        [[ ! -L "$CONFIG_DIR" ]] && rm -rf -- "$CONFIG_DIR"
-        [[ -z "$data_dir" || ! -L "$data_dir" ]] || die 'refusing to delete a symlink data directory'
-        [[ -z "$data_dir" ]] || rm -rf -- "$data_dir"
+        remove_owned_files "$CONFIG_DIR" config.toml config.toml.previous
+        [[ -z "$data_dir" ]] || remove_owned_files "$data_dir" confdock.db confdock.db-wal confdock.db-shm
         printf 'Configuration and data were permanently deleted. They are not recoverable.\n'
       else
         printf 'Permanent deletion refused; configuration and data remain.\n'
