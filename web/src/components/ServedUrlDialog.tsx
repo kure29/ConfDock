@@ -111,7 +111,7 @@ export function ServedUrlDialog({ open, onClose, projectId, projectName }: Serve
     setDisplayName(tokenName(projectName ?? '', DEFAULT_NAME))
     setExpiryPreset('never')
     setCustomExpiry('')
-  }, [projectId, projectName])
+  }, [projectId])
 
   useEffect(() => {
     if (!open) {

@@ -177,4 +177,21 @@ describe('ServedUrlDialog hosted address controls', () => {
     expect(JSON.stringify(renderer!.toJSON())).toContain('新项目地址')
     expect(JSON.stringify(renderer!.toJSON())).not.toContain('旧项目地址')
   })
+
+  it('keeps the loaded token list when the current project name changes', async () => {
+    mocks.api.listTokens.mockResolvedValue(ok([token({ displayName: '现有地址' })]))
+    await act(async () => {
+      renderer = create(
+        <ServedUrlDialog open onClose={() => {}} projectId="p1" projectName="旧名称" />,
+      )
+    })
+    expect(JSON.stringify(renderer!.toJSON())).toContain('现有地址')
+    await act(async () => {
+      renderer!.update(
+        <ServedUrlDialog open onClose={() => {}} projectId="p1" projectName="新名称" />,
+      )
+    })
+    expect(JSON.stringify(renderer!.toJSON())).toContain('现有地址')
+    expect(JSON.stringify(renderer!.toJSON())).not.toContain('正在读取')
+  })
 })
