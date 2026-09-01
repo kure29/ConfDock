@@ -1,0 +1,63 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "esbuild": {
+      "name": "esbuild",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1102341,
+          "name": "esbuild",
+          "dependency": "esbuild",
+          "title": "esbuild enables any website to send any requests to the development server and read the response",
+          "url": "https://github.com/advisories/GHSA-67mh-4wv8-2f99",
+          "severity": "moderate",
+          "range": "<=0.24.2"
+        }
+      ],
+      "effects": ["vite"],
+      "range": "<=0.24.2",
+      "nodes": ["node_modules/esbuild"],
+      "fixAvailable": false
+    },
+    "vite": {
+      "name": "vite",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": ["esbuild"],
+      "effects": ["vitepress"],
+      "range": "<=5.4.21",
+      "nodes": ["node_modules/vite"],
+      "fixAvailable": false
+    },
+    "vitepress": {
+      "name": "vitepress",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": ["vite"],
+      "effects": [],
+      "range": "<=1.6.4",
+      "nodes": ["node_modules/vitepress"],
+      "fixAvailable": false
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 3,
+      "high": 0,
+      "critical": 0,
+      "total": 3
+    },
+    "dependencies": {
+      "prod": 1,
+      "dev": 173,
+      "optional": 50,
+      "peer": 1,
+      "peerOptional": 0,
+      "total": 173
+    }
+  }
+}

@@ -83,7 +83,7 @@ The unit writes SQLite, WAL, and SHM files under `/var/lib/confdock`.
 are intentional boundaries; change them only after testing the resulting
 permissions on your host.
 
-See [the backup and restore runbook](../../docs/backup-and-restore.md) before
+See [the backup and restore runbook](../../docs/operations/backup-and-restore.md) before
 upgrades or migrations. In particular, stop the service before backing up the
 data directory so a live SQLite WAL cannot be missed.
 

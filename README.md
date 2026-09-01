@@ -1,154 +1,80 @@
 # ConfDock
 
-> 面向原生代理客户端配置的自托管管理与稳定订阅地址服务。
+> 管理原生配置，发布稳定订阅地址。
 
-[English](README.en.md) · [架构说明](docs/architecture.md) · [Web 开发说明](web/README.md) · [备份与恢复](docs/backup-and-restore.md)
+[在线文档](https://kure29.github.io/ConfDock/) · [使用指南](docs/guide/introduction.md) · [English](README.en.md) · [Web 开发说明](web/README.md)
 
-ConfDock 在浏览器中管理一份代理客户端的原生配置文件：导入、编辑、校验、保存、发布和只读查看历史。它保留 Native Config 的原始字节，不运行代理流量，也不把配置强行转换成另一种格式。
+ConfDock 是一个自托管的配置管理服务：在浏览器中导入、编辑、校验、保存和发布某个代理客户端的原生配置，并为已发布版本生成稳定订阅地址。原始字节是唯一事实来源；ConfDock 不运行代理流量、不测速、不管理客户端进程，也不做跨格式转换。
 
-## 当前功能
+## 主要能力
 
-- 原生字节保真：保留 BOM、行尾、注释、字段顺序和未知字段。
-- 浏览器即时反馈 + Rust 服务端权威校验；保存前不会只信任前端结果。
-- 单管理员登录、SQLite 持久化、不可变 Revision 历史和项目内分页 Diff。
-- Save 只推进 `currentRevisionId`；Publish 只推进 `servedRevisionId`。Stable URL 永远只返回最近一次发布的 Revision，Draft 不会泄露。
-- 托管地址只在创建成功时返回一次明文 URL，可设置名称和有效期；Token 数据库只保存 Hash。已撤销地址可在确认后永久删除。
-- 结构化编辑只修改明确的 Source Span；无法安全识别的内容继续使用 Raw Editor。
+- 保留 BOM、行尾、注释、字段顺序和未知字段；结构化编辑只做明确的局部 Source Span Patch。
+- Revision 不可变，支持历史元数据、只读详情和有限 Diff。
+- Save 只推进 Current Revision；Publish 才推进 Served Revision，Stable URL 不会泄露草稿。
+- 单管理员、SQLite 持久化、高熵 Hosted Address Token；Token 明文只在创建成功时显示一次，数据库只保存 Hash。
 
 ## 支持的客户端
 
-Mihomo、sing-box、Surge、Loon、Quantumult X 和 Shadowrocket。每个 Target 都保留原始编辑入口，并显示当前实际支持的结构化编辑与校验边界。当前没有接入 Native Validator；Static/Syntax/Basic 是 ConfDock 已完成的层级，不代表官方校验器。
+Mihomo、sing-box、Surge、Loon、Quantumult X 和 Shadowrocket。当前校验层级为 Basic、Syntax、Static；尚未接入 Native Validator。六个 Target 都显示 ConfDock 自有的完整纯文字名称，不包含第三方 Logo、图片、Emoji、缩写徽章或 CSS 客户端标识。
 
-## 架构与数据语义
+## 数据语义
+
+一个 Project 只对应一个 Target 和一份 Native Config。Revision 保存原始 SQLite BLOB，历史、Diff 和 Hosted Address 读取都不会修改编辑器内容。
+
+- `currentRevisionId` 是管理界面的已保存草稿；`servedRevisionId` 是 Stable URL 实际返回的版本。
+- Save 创建新的 Current Revision；Publish 只切换 Served Revision，不会自动发布或轮换 Token。
+- `expires_at = null` 表示 Hosted Address 永不过期；撤销后不能恢复，但可确认永久删除。
+
+## 快速开始
+
+当前只验证 Linux x86-64 glibc Artifact。项目还没有正式 Release；请在 GitHub Actions 中手动运行 `workflow_dispatch`，下载临时的 `confdock-linux-x86_64` Artifact（保留 7 天）。解压内容为：
 
 ```text
-React / Vite（开发时 :5173，单二进制中由 Axum 提供）
-├── confdock-wasm → confdock-core  （浏览器即时校验和 Source Span 编辑）
-└── same-origin /api 请求
-        ↓
-Axum → confdock-core              （服务端权威校验和事务）
-        ↓
-SQLite / SQLx                     （管理员、会话、项目、Revision、Token）
+confdock
+config.toml
+SHA256SUMS
 ```
 
-Native Config 原始字节是唯一 Source of Truth。Revision 不可变；历史查看、Diff 和托管地址都不会修改工作区内容。`expiresAt = null` 表示永不过期；到期后服务端拒绝后续订阅请求，但不会删除 Project、Revision 或 Token。过期 Token 可以延长或改为永不过期，已撤销 Token 不能恢复，但可在管理界面确认后永久删除。
-
-## 单二进制运行
-
-ConfDock 提供 `confdock` 单二进制：React/Vite production assets、Rust WASM、SQLx migrations 和 Axum 路由都嵌入其中。运行时不需要 Node.js、npm、Vite、`web/dist` 或外部 Migration/WASM 文件；SQLite 数据库仍保存在数据目录中。
-
-本地构建（需要 Node.js 22、Rust 1.88.0、`wasm-bindgen-cli 0.2.127`）：
-
 ```bash
-./scripts/build-single-binary.sh
-./scripts/smoke-single-binary.sh target/confdock-rust-1.88.0/native/release/confdock
-```
-
-Smoke Test 会从不含源码和 `web/dist` 的临时目录启动，检查 `/healthz`、SPA、JS/CSS/WASM MIME、HEAD、API/sub 边界、路径穿越防护和 SIGTERM 退出。
-在 GitHub Actions 页面手动运行 `workflow_dispatch` 会额外生成并上传
-`confdock-linux-x86_64` Artifact（保留 7 天）；普通 Push/PR 只执行同一套打包、解压和 Smoke Test，不会长期保存 Artifact。
-归档包含 `confdock`、根目录 `config.toml` 和 `SHA256SUMS`，不包含数据库、密码或源码。
-
-运行时配置：内置默认值 → `config.toml` → `CONFDOCK_*` 环境变量 → 明确 CLI 参数。打包归档会携带 [packaging/config.toml](packaging/config.toml)；配置文件不保存密码或 Token，且 `data_dir` 为相对路径时相对于配置文件目录解析。
-
-首次启动时，解析并验证后的公开地址仅用于初始化 `instance_settings.id=1`。该单例一旦存在，数据库中的值就是运行时权威值：设置页保存的值会在重启后继续生效，之后修改 `config.toml` 或 `CONFDOCK_PUBLIC_URL` 不会覆盖它。配置文件、环境变量和 CLI 仍会在每次启动完整解析和验证；即使数据库已有值，非法配置也会阻止启动。要改变已初始化实例的公开地址，请使用已认证的设置页。
-
-```bash
-./confdock --help
+sha256sum -c SHA256SUMS
 ./confdock config check --config ./config.toml
 ./confdock admin init --config ./config.toml
 ./confdock --config ./config.toml
 ```
 
-直接在交互式终端启动时，空数据库会提示初始化固定用户名 `admin` 并继续启动。systemd 等非交互环境应先执行 `admin init`；自动化仍可使用 `CONFDOCK_BOOTSTRAP_PASSWORD`，但不要把它写入 `config.toml`。
+`admin init` 需要交互式终端，会创建固定用户名 `admin`。systemd 或其他无 TTY 环境必须先完成初始化。首次部署请把 `public_url` 设置为真实 HTTPS origin；后端推荐监听 `127.0.0.1:8787`，外部通过 Nginx/Caddy HTTPS 访问。
 
-运行时环境变量（高级兼容入口）：
+推荐先阅读 [二进制部署](docs/deployment/binary.md) 和 [systemd 步骤](docs/deployment/systemd.md)，再配置 [反向代理](docs/deployment/reverse-proxy.md)。
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `CONFDOCK_LISTEN` | `127.0.0.1:8787` | API/Web 监听地址 |
-| `CONFDOCK_DATA_DIR` | `/var/lib/confdock` | 绝对数据目录；自动使用其中的 `confdock.db` |
-| `CONFDOCK_DATABASE_URL` | `sqlite:///var/lib/confdock/confdock.db` | 与 `CONFDOCK_DATA_DIR` 二选一，保留现有 URL 配置 |
-| `CONFDOCK_PUBLIC_URL` | `http://127.0.0.1:8787` | Stable URL 的公开 origin |
-| `CONFDOCK_BOOTSTRAP_PASSWORD` | 无 | 只在首次初始化管理员时使用 |
-| `CONFDOCK_COOKIE_SECURE` | `false` | HTTPS 反向代理时设为 `true` |
-| `CONFDOCK_SESSION_TTL_SECONDS` | `604800` | Session 有效期，最长一年 |
-| `CONFDOCK_MAX_CONFIG_BYTES` | `8388608` | 解码后的配置上限，最大 64 MiB |
-| `RUST_LOG` | `info` | 日志过滤器 |
+## 当前状态与边界
 
-`CONFDOCK_DATA_DIR` 与 `CONFDOCK_DATABASE_URL` 同时设置会明确报错，避免用户误写到不可预测的当前目录。服务启动时自动创建数据目录并运行 Migration；Unix 下 SQLite 主文件及 WAL/SHM sidecar 尽可能限制为 owner-only 权限。
+- 生产形态是独立 Rust 单二进制，内含 React/Vite 产物、WASM、SQLx migrations 和 Axum 路由；运行时不需要 Node.js 或文档站。
+- Docker、ARM64 Artifact、Windows/macOS 安装器、正式 Release、Tag、自动备份、自动 Deploy、Rollback、Token Rotation、集群和多管理员均尚未实现。
+- 稳定地址只返回 Served Revision；Save 不会自动 Publish。公开地址设置持久化在 `instance_settings.id=1`，不会改变服务监听地址。
+- 备份必须在停止服务后同时覆盖完整数据目录、SQLite WAL/SHM 和实际配置目录。
 
-## 本地开发
+运行时公开地址保存在数据库单例中，修改 `config.toml` 不会覆盖已保存的设置；需要从认证后的设置页更新。
 
-```bash
-npm ci --prefix web
-npm run dev --prefix web
+## 文档与开发
 
-CONFDOCK_BOOTSTRAP_PASSWORD='local-development-password' \
-CONFDOCK_DATABASE_URL='sqlite://data/confdock-dev.db' \
-cargo run -p confdock-service --bin confdock
-```
+完整内容已拆到 [VitePress 文档站](https://kure29.github.io/ConfDock/)：
 
-开发时 Vite 将 `/api` 和 `/sub` 代理到 Rust 服务。生产单二进制直接由 Axum 同时提供 `/`、静态资源、`/api/**`、`/sub/**` 和 `/healthz`。
+- [快速开始与核心概念](docs/guide/getting-started.md)
+- [二进制、配置、systemd 与反向代理](docs/deployment/binary.md)
+- [备份、恢复、升级与故障排查](docs/operations/backup-and-restore.md)
+- [CLI、API 与安全边界](docs/reference/cli.md)
+- [架构、ADR 与本地开发](docs/development/architecture.md)
 
-## Linux Deployment
-
-仓库提供面向 Linux x86-64 glibc、以 systemd 为当前原生服务管理目标的示例：[deploy/systemd/confdock.service](deploy/systemd/confdock.service)、[环境样例](deploy/systemd/confdock.env.example) 和 [systemd 说明](deploy/systemd/README.md)。Debian/Ubuntu 命令仅作为示例；ARM64 和其他服务管理器不在本 Slice 的验证范围。推荐拓扑：
-
-```text
-Internet → Nginx/Caddy HTTPS → 127.0.0.1:8787 → confdock → SQLite
-```
-
-后端端口只监听本机，不需要在防火墙直接开放。设置页的“对外访问地址”会持久化反向代理公开 origin；也可在初次启动前用 `CONFDOCK_PUBLIC_URL` 设置默认值。地址仅允许 `http://` 或 `https://` 加域名和可选端口，不包含路径、查询参数或片段。该字段只用于生成外部托管地址，不改变监听地址，也不改变 Cookie 安全配置。对外服务必须启用 HTTPS，并将公开地址设为实际 HTTPS origin、`CONFDOCK_COOKIE_SECURE=true`。WebSocket 不是本服务必需项，不要为它额外放行。反向代理请使用发行版提供的通用 Nginx/Caddy 配置。Docker 和正式 Release 属于后续 Slice；手动备份与恢复请参阅[运行手册](docs/backup-and-restore.md)。
-
-升级前先停止服务并备份 SQLite（WAL 写入期间不要只复制主数据库文件），再替换 `/usr/local/bin/confdock`、启动服务并观察 Migration 日志。不要在新 Schema 已写入后降级旧二进制继续写入。数据目录包含项目内容、Session 和 Token 元数据，应由受限用户读写并纳入备份；托管 URL 是敏感凭据，不要提交到 Issue 或日志。
-
-## API 速览
-
-管理 API 需要 Session；订阅接口不需要登录但使用不可猜测的 Stable Token：
-
-| 方法 | 路径 | 用途 |
-| --- | --- | --- |
-| `GET` | `/healthz` | 检查服务与 SQLite 基本可用性 |
-| `POST` / `DELETE` | `/api/session` | 登录 / 登出 |
-| `GET` / `POST` | `/api/projects` | 项目列表 / 创建 |
-| `GET` / `PATCH` / `DELETE` | `/api/projects/:id` | 查看、重命名、删除 |
-| `POST` | `/api/projects/:id/revisions` | 校验并 Save 新 Revision |
-| `POST` | `/api/projects/:id/publish` | Publish 已保存 Draft |
-| `GET` | `/api/projects/:id/revisions` | 分页历史元数据 |
-| `GET` | `/api/projects/:id/revisions/:revisionId` | 按需读取历史字节 |
-| `GET` / `POST` | `/api/projects/:id/tokens` | 查看 / 创建托管地址 |
-| `PATCH` / `DELETE` | `/api/projects/:id/tokens/:tokenId` | 更新名称/有效期 / 撤销 |
-| `POST` | `/api/projects/:id/tokens/:tokenId/purge` | 永久删除已撤销托管地址 |
-| `GET` / `PATCH` | `/api/settings` | 读取 / 更新对外访问地址 |
-| `GET` | `/sub/:token` | 返回 served Revision 原始字节 |
-
-管理和订阅响应使用保守的 `Cache-Control: no-store`；静态 Hash assets 可长期缓存，`index.html` 使用重新验证策略。服务端统一拒绝不存在、无效、撤销或过期 Token，不暴露原因差异。
-
-## 限制与安全边界
-
-- 单管理员、单机 SQLite；不支持多实例集群、对象存储或自动备份服务。
-- 不运行代理、不管理客户端进程、不测速、不做跨格式转换。
-- 没有 Rollback、Token Rotation、自动 Publish、Revision 删除或 Native Validator。
-- 不提供 Docker、ARM64、Windows/macOS 安装器、正式 Release、Tag 或自动 Deploy。
-- 项目许可证为 [Apache License 2.0](LICENSE)；当前的[第三方许可证清单](THIRD_PARTY_LICENSE_INVENTORY.md)仅用于开发和 Release 准备，不是完整的发行通知。六个客户端均使用 ConfDock 自有的中性 CSS 文字标识，不包含第三方客户端 Logo 或图标图片。
-- 当前 Session Cookie 使用 HttpOnly、SameSite=Strict、Host-only 和可选 Secure；不启用 CORS。显式 Origin/CSRF 防护仍属于 V1 最终安全审查事项，管理端不应直接暴露给不可信来源。
-
-## 验证
+Web 内部说明仍保留在 [`web/README.md`](web/README.md)。常用验证：
 
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo test -p confdock-service --features embedded-web --test embedded_web
-npm ci --prefix web
 npm run typecheck --prefix web
 npm run test --prefix web
 npm run build --prefix web
-npm audit --prefix web
-npm audit --prefix web --omit=dev
-./scripts/build-single-binary.sh
-./scripts/smoke-single-binary.sh target/confdock-rust-1.88.0/native/release/confdock
+npm run docs:build --prefix docs
 ```
 
-欢迎提交 Issue 和 Pull Request。新增客户端时请同时补充 Rust adapter、fixture、能力矩阵、中性 CSS 文字标识和测试，并保持原始字节保真约束。开发构建要求 rustup，并固定使用仓库中的 `rust-toolchain.toml`（Rust 1.88.0 + `wasm32-unknown-unknown`）；单二进制脚本在工具链专属目录复用缓存，再明确复制成 `target/release/confdock` 兼容输出。
+ConfDock 以 [Apache License 2.0](LICENSE) 发布。依赖范围与待完成的正式发行通知要求见 [第三方许可证清单](THIRD_PARTY_LICENSE_INVENTORY.md)。欢迎提交 Issue 和 Pull Request。

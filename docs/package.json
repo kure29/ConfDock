@@ -1,0 +1,17 @@
+{
+  "name": "confdock-docs",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "ConfDock documentation site",
+  "scripts": {
+    "docs:dev": "vitepress .",
+    "docs:build": "vitepress build .",
+    "docs:preview": "vitepress preview .",
+    "docs:audit": "node scripts/audit.mjs",
+    "docs:audit:test": "node --test scripts/audit.test.mjs"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  }
+}

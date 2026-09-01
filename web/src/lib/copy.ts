@@ -16,7 +16,7 @@ import type {
  * Centralized on purpose. The previous prototype rendered `Basic` as a green
  * check mark, which is precisely the kind of drift that happens when copy lives
  * inline in components. The level explanations below are translations of
- * `docs/architecture.md` §Validation levels, and they must stay that.
+ * `docs/development/architecture.md` §Validation levels, and they must stay that.
  */
 
 // ---------------------------------------------------------------------------

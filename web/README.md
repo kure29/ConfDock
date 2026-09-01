@@ -221,7 +221,7 @@ Token repointing 或 Native Validator。
 
 ## 安全约束
 
-来自 `docs/architecture.md`，在前端同样成立：
+来自 `docs/development/architecture.md`，在前端同样成立：
 
 - access token 明文和完整订阅 URL **只在生成后显示一次**。列表里只有 `abc1…f9x2` 形式的前后缀
 - 服务端只存 token 的 SHA-256 哈希。关掉对话框就再也取不回来

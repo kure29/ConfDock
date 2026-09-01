@@ -1,0 +1,60 @@
+name: Documentation CI
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'README.md'
+      - 'README.en.md'
+      - '.github/workflows/docs-ci.yml'
+      - '.github/workflows/docs-pages.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'README.md'
+      - 'README.en.md'
+      - '.github/workflows/docs-ci.yml'
+      - '.github/workflows/docs-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build VitePress site
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install documentation dependencies
+        run: npm ci --prefix docs
+
+      - name: Build documentation
+        run: npm run docs:build --prefix docs
+
+      - name: Test audit parser fixtures
+        run: npm run docs:audit:test --prefix docs
+
+      - name: Audit documentation dependencies
+        # VitePress 1.6.4 currently pulls four advisories through
+        # vite -> esbuild. The audit script allows only their exact GHSA IDs
+        # and fails closed for every other advisory, package, dependency chain,
+        # Critical finding, or malformed report. Remove the whitelist after
+        # upstream stable fixes land.
+        run: npm run docs:audit --prefix docs
+
+      - name: Audit production dependency tree
+        # VitePress is a devDependency, so this is not a complete security
+        # proof; it is a separate blocking check for the runtime tree.
+        run: npm audit --prefix docs --omit=dev

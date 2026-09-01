@@ -7,7 +7,7 @@
  *
  * Rust enums become discriminated unions so components can exhaustively match
  * without knowing which target they are looking at. That is what
- * `docs/architecture.md` means by "no target conditionals scattered through
+ * `docs/development/architecture.md` means by "no target conditionals scattered through
  * React".
  */
 
@@ -77,7 +77,7 @@ export type DiagnosticSeverity = 'info' | 'warning' | 'error'
 
 /**
  * Validation is layered. A failure reports the *deepest layer actually
- * reached*, so `basic` is not a synonym for "passed" — see `docs/architecture.md`.
+ * reached*, so `basic` is not a synonym for "passed" — see `docs/development/architecture.md`.
  */
 export type ValidationLevel = 'basic' | 'syntax' | 'static' | 'native'
 

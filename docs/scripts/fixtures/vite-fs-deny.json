@@ -1,0 +1,36 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "vite": {
+      "name": "vite",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1123525,
+          "name": "vite",
+          "dependency": "vite",
+          "title": "vite: `server.fs.deny` bypass on Windows alternate paths",
+          "url": "https://github.com/advisories/GHSA-fx2h-pf6j-xcff",
+          "severity": "high",
+          "range": "<=6.4.2"
+        }
+      ],
+      "effects": ["vitepress"],
+      "range": "<=6.4.2",
+      "nodes": ["node_modules/vite"],
+      "fixAvailable": false
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 1,
+      "critical": 0,
+      "total": 1
+    },
+    "dependencies": {"prod": 1, "dev": 173, "optional": 50, "peer": 1, "peerOptional": 0, "total": 173}
+  }
+}
