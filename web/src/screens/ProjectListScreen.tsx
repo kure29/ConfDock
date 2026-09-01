@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import type { ProjectSummary } from '../api'
 import { ProjectRow } from '../components'
-import { VALIDATION_LEVEL_CAVEAT } from '../lib/copy'
 import { Button } from '../ui/Button'
 import { EmptyState } from '../ui/EmptyState'
 import { Panel } from '../ui/Panel'
@@ -43,7 +42,7 @@ export function ProjectListScreen() {
       <div className={page.header}>
         <div className={page.heading}>
           <h1 className={page.title}>配置</h1>
-          <p className={page.lead}>{VALIDATION_LEVEL_CAVEAT}</p>
+          <p className={page.lead}>管理已导入的客户端配置。</p>
         </div>
         {projects !== null && projects.length > 0 && (
           <div className={page.actions}>
@@ -66,7 +65,7 @@ export function ProjectListScreen() {
             title="还没有配置"
             body={
               <p>
-                导入一份原生配置即可开始。ConfDock 会按原始字节保存，不重写格式。
+                导入一份配置即可开始。
               </p>
             }
             action={

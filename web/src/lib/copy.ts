@@ -7,6 +7,7 @@ import type {
   SourceEncoding,
   StructuredEditScope,
   ValidationLevel,
+  ValidationResult,
 } from '../core/types'
 
 /**
@@ -34,30 +35,70 @@ export interface ValidationLevelCopy {
 
 export const VALIDATION_LEVEL_COPY: Record<ValidationLevel, ValidationLevelCopy> = {
   basic: {
-    label: '基础',
-    detail: '只检查了编码，以及最保守的结构与启发式规则。没有解析器读过这份文档。',
+    label: '基础检查',
+    detail: '已检查文件编码和基础结构。当前暂不支持对这份配置进行更深入的检查。',
     depth: 1,
   },
   syntax: {
-    label: '语法',
-    detail: '真正的格式解析器接受了这份文档，根节点类型也符合要求。',
+    label: '语法检查',
+    detail: '已检查配置语法。',
     depth: 2,
   },
   static: {
-    label: '静态',
-    detail: '在语法之上，还跑了这个客户端专属的 schema 与语义检查。',
+    label: '静态检查',
+    detail: '已检查配置语法和已支持的配置规则。',
     depth: 3,
   },
   native: {
-    label: '原生',
-    detail: '由固定版本的客户端原生校验器实际执行过一次校验。',
+    label: '客户端检查',
+    detail: '已使用客户端校验器完成检查。',
     depth: 4,
   },
 }
 
 /** Shown wherever a level badge appears without room for the full detail. */
 export const VALIDATION_LEVEL_CAVEAT =
-  '校验分层进行；失败时报告的是实际到达的最深一层，因此「基础」不等于「通过」。'
+  '显示的是已完成的检查范围，不代表所有问题都已排除。'
+
+export type ValidationStatus = 'error' | 'warning' | 'clean'
+
+export const VALIDATION_STATUS_COPY: Record<
+  ValidationStatus,
+  { title: string; detail: string }
+> = {
+  error: { title: '检查发现问题', detail: '请处理下面的问题后重新检查。' },
+  warning: { title: '检查完成，有需要注意的内容', detail: '请查看下面的提示。' },
+  clean: { title: '检查完成', detail: '' },
+}
+
+export function validationStatus(result: Pick<ValidationResult, 'diagnostics'>): ValidationStatus {
+  if (result.diagnostics.some((diagnostic) => diagnostic.severity === 'error')) return 'error'
+  if (result.diagnostics.some((diagnostic) => diagnostic.severity === 'warning')) return 'warning'
+  return 'clean'
+}
+
+/** Add the selected client's name only where the basic-check limitation needs
+ * to be explained. The name is supplied by the target registry. */
+export function validationScopeCopy(
+  level: ValidationLevel,
+  displayName?: string,
+  nativeValidation = true,
+): ValidationLevelCopy {
+  const copy = VALIDATION_LEVEL_COPY[level]
+  if (level === 'basic' && displayName !== undefined) {
+    return {
+      ...copy,
+      detail: `已检查文件编码和基础结构。当前暂不支持对这份 ${displayName} 配置进行更深入的检查。`,
+    }
+  }
+  if (level === 'native' && !nativeValidation) {
+    return {
+      ...copy,
+      detail: '当前客户端暂不支持更深入的检查。',
+    }
+  }
+  return copy
+}
 
 // ---------------------------------------------------------------------------
 // Diagnostics
@@ -83,7 +124,7 @@ export interface EditErrorCopy {
 export const EDIT_ERROR_COPY: Record<EditErrorKind, EditErrorCopy> = {
   unsupportedEncoding: {
     title: '不支持的编码',
-    hint: '只支持 UTF-8 与带 BOM 的 UTF-8。源文件未被改动。',
+    hint: '只支持 UTF-8 文件。源文件未被改动。',
   },
   parseFailed: {
     title: '无法安全解析文档',
@@ -91,7 +132,7 @@ export const EDIT_ERROR_COPY: Record<EditErrorKind, EditErrorCopy> = {
   },
   fieldNotFound: {
     title: '文档里没有这个字段',
-    hint: '结构化编辑只替换已存在的值，不会新增字段。需要新增请用「原始」。',
+    hint: '字段编辑只修改已存在的内容；需要新增请用「原始」。',
   },
   ambiguousField: {
     title: '这个字段出现了多次，无法判断改哪一个',
@@ -103,7 +144,7 @@ export const EDIT_ERROR_COPY: Record<EditErrorKind, EditErrorCopy> = {
   },
   unsupportedEdit: {
     title: '这一处不在可编辑范围内',
-    hint: '适配器只承诺改它能确定边界的地方。用「原始」编辑，字节仍然由你掌控。',
+    hint: '这一处暂时不能在字段编辑中修改，请用「原始」编辑。',
   },
 }
 
@@ -116,13 +157,13 @@ export const EDIT_ERROR_COPY: Record<EditErrorKind, EditErrorCopy> = {
 export function describeScope(scope: StructuredEditScope): string {
   switch (scope.kind) {
     case 'exactPaths':
-      return `仅限这些路径：${scope.paths.join('、')}`
+      return `可以修改这些配置项：${scope.paths.join('、')}`
     case 'existingJsonPointerValues':
-      return '任意已存在的 JSON Pointer（RFC 6901）对应的值，替换其原位字节'
+      return '可以修改配置中已经存在的内容'
     case 'existingSectionKeys': {
       const sections = scope.sections.map((section) => `[${section}]`).join('、')
-      const sensitivity = scope.caseSensitive ? '区分大小写' : '不区分大小写'
-      return `仅限 ${sections} 段内已存在的键（${sensitivity}）`
+      const sensitivity = scope.caseSensitive ? '，名称需完全一致' : ''
+      return `可以修改 ${sections} 段内已有的内容${sensitivity}`
     }
   }
 }
@@ -131,7 +172,7 @@ export const SCOPE_HEADING = '可编辑范围'
 
 /** Shown where a target exposes no schema at all. */
 export function noSchemaNotice(displayName: string): string {
-  return `${displayName} 适配器不暴露 schema 字段。`
+  return `${displayName} 暂不支持字段编辑。`
 }
 
 // ---------------------------------------------------------------------------
@@ -140,22 +181,22 @@ export function noSchemaNotice(displayName: string): string {
 
 export const ENCODING_COPY: Record<SourceEncoding, string> = {
   utf8: 'UTF-8',
-  'utf8-bom': 'UTF-8（含 BOM）',
+  'utf8-bom': 'UTF-8（保留文件标记）',
   unsupported: '不支持的编码',
 }
 
 export const LINE_ENDING_COPY: Record<LineEnding, string> = {
-  lf: 'LF',
-  crlf: 'CRLF',
-  mixed: '混用 LF 与 CRLF',
+  lf: '标准换行',
+  crlf: 'Windows 换行',
+  mixed: '换行格式不一致',
   none: '无换行',
 }
 
 /** The one case where a save cannot be byte-exact, so it is stated up front. */
 export const MIXED_LINE_ENDING_WARNING =
-  '该文件混合使用 LF 与 CRLF，为避免破坏原始字节，原始编辑暂不可用。结构化编辑仍会只修改目标字段。'
+  '这份文件的换行格式不一致，为避免改坏内容，原始编辑暂不可用。你仍可使用字段编辑。'
 
-export const BOM_NOTICE = '保存时会写回文件开头的 BOM。'
+export const BOM_NOTICE = '文件开头的特殊标记会在保存时保留。'
 
 export function formatBytes(byteLength: number): string {
   if (byteLength < 1024) return `${byteLength} B`
@@ -196,11 +237,11 @@ export const VALUE_TYPE_COPY: Record<SchemaValueType, string> = {
 
 export const SAVE_ACTION = '检查并保存草稿'
 export const SAVE_SUCCESS = '草稿已保存，等待发布'
-export const SAVE_BLOCKED = '有错误诊断，无法保存'
+export const SAVE_BLOCKED = '发现错误，无法保存'
 
-/** Explains why there is no publish step, shown once in the editor footer. */
+/** Explains why saving and publishing are separate, shown beside the editor actions. */
 export const SERVED_POINTER_NOTICE =
-  '托管地址始终返回最近一次发布的版本；保存草稿不会立即改变客户端看到的内容。'
+  '保存只会更新草稿；发布后客户端才会获取新内容。'
 export const PUBLISH_ACTION = '发布草稿'
 export const PUBLISH_SUCCESS = '已发布'
 export const PUBLISH_UNCHANGED = '当前版本已经发布'
@@ -218,11 +259,11 @@ export const REVISION_HISTORY_LOAD_MORE = '加载更早版本'
 export const REVISION_HISTORY_LOADING_MORE = '正在加载更早版本…'
 export const REVISION_HISTORY_PAGINATION_ERROR =
   '版本历史返回了重复或循环的分页游标，已停止加载更早版本。'
-export const REVISION_HISTORY_SELECT = '选择一个版本查看原始字节。'
+export const REVISION_HISTORY_SELECT = '选择一个版本查看配置内容。'
 export const REVISION_HISTORY_DETAIL_LOADING = '正在读取这个版本…'
 export const REVISION_HISTORY_RETRY = '重试'
 export const REVISION_HISTORY_SOURCE_NOTICE =
-  '这是历史版本的原始字节，只读查看；它不会替换当前编辑内容。'
+  '这是历史版本的只读内容，不会替换当前编辑内容。'
 export const REVISION_CURRENT_LABEL = '当前'
 export const REVISION_SERVED_LABEL = '托管中'
 export const REVISION_PARENT_LABEL = '父版本'
@@ -231,7 +272,7 @@ export const REVISION_LIST_LABEL = '版本列表'
 export const REVISION_DETAIL_LABEL = '版本详情'
 export const REVISION_NUMBER_PREFIX = '版本 '
 export const REVISION_CREATED_LABEL = '创建时间'
-export const REVISION_BYTES_LABEL = '字节数'
+export const REVISION_BYTES_LABEL = '文件大小'
 export const REVISION_NO_PARENT = '无（初始版本）'
 export const REVISION_VALIDATOR_VERSION_LABEL = '校验器版本'
 export const REVISION_SOURCE_TITLE_SUFFIX = ' 的源码'
@@ -246,16 +287,16 @@ export const REVISION_DIFF_SHOW_DIFF = '查看差异'
 export const REVISION_DIFF_INITIAL = '这是初始版本，没有上一版本可比较。'
 export const REVISION_DIFF_LOADING = '正在读取版本差异…'
 export const REVISION_DIFF_RETRY = '重试差异读取'
-export const REVISION_DIFF_IDENTICAL = '两个版本的原始字节完全一致。'
-export const REVISION_DIFF_NO_LINE_CHANGES = '只有 BOM 或元数据不同，没有行内容差异。'
+export const REVISION_DIFF_IDENTICAL = '两个版本的配置内容完全一致。'
+export const REVISION_DIFF_NO_LINE_CHANGES = '只有文件标记或其他文件信息不同，没有内容差异。'
 export const REVISION_DIFF_ADDITIONS = '新增行'
 export const REVISION_DIFF_DELETIONS = '删除行'
 export const REVISION_DIFF_FROM = '从'
 export const REVISION_DIFF_TO = '到'
-export const REVISION_DIFF_METADATA = '原始字节摘要'
+export const REVISION_DIFF_METADATA = '文件信息'
 export const REVISION_DIFF_VIEW_MODE = '版本查看方式'
-export const REVISION_DIFF_BOM = 'BOM'
-export const REVISION_DIFF_LINE_ENDING = '行尾'
+export const REVISION_DIFF_BOM = '文件标记'
+export const REVISION_DIFF_LINE_ENDING = '换行格式'
 export const REVISION_DIFF_TRAILING_NEWLINE = '尾部换行'
 export const REVISION_DIFF_YES = '有'
 export const REVISION_DIFF_NO = '无'
@@ -263,8 +304,8 @@ export const REVISION_DIFF_HUNK_PREFIX = '差异块'
 export const REVISION_DIFF_OLD_LINE = '旧行'
 export const REVISION_DIFF_NEW_LINE = '新行'
 export const REVISION_DIFF_EOF = 'EOF'
-export const REVISION_DIFF_LF = 'LF'
-export const REVISION_DIFF_CRLF = 'CRLF'
+export const REVISION_DIFF_LF = '标准换行'
+export const REVISION_DIFF_CRLF = 'Windows 换行'
 export const REVISION_DIFF_NONE = '无换行'
 export const REVISION_DIFF_CONTEXT_LINE = '上下文行'
 export const REVISION_DIFF_EMPTY_LINE = '空行'

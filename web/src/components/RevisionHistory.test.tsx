@@ -198,7 +198,7 @@ describe('RevisionHistory view states', () => {
         })}
       />,
     )
-    expect(identical).toContain('两个版本的原始字节完全一致')
+    expect(identical).toContain('两个版本的配置内容完全一致')
 
     const failed = renderToStaticMarkup(
       <RevisionHistoryView

@@ -21,8 +21,9 @@ import {
   PUBLISH_SUCCESS,
   PUBLISH_UNCHANGED,
   SERVED_POINTER_NOTICE,
-  VALIDATION_LEVEL_CAVEAT,
-  VALIDATION_LEVEL_COPY,
+  VALIDATION_STATUS_COPY,
+  validationScopeCopy,
+  validationStatus,
 } from '../lib/copy'
 import { useProject } from '../state/useProject'
 import { useToast } from '../state/ToastContext'
@@ -182,8 +183,16 @@ export function EditorScreen() {
     )
   }
 
-  const levelCopy = VALIDATION_LEVEL_COPY[validation.level]
   const capabilities = core.editCapabilities(project.targetId)
+  const targetCapabilities = core.descriptor(project.targetId)?.capabilities
+  const statusCopy = VALIDATION_STATUS_COPY[validationStatus(validation)]
+  const scopeCopy = validationScopeCopy(
+    validation.level,
+    targetName(project.targetId),
+    targetCapabilities?.nativeValidation ?? false,
+  )
+  const emptyCheckCopy =
+    validation.level === 'basic' ? '未发现基础问题。' : '没有发现需要处理的问题。'
 
   const tabs: readonly TabItem<EditorTab>[] = [
     { id: 'raw', label: '原始' },
@@ -243,12 +252,23 @@ export function EditorScreen() {
         </div>
       </div>
 
+      <p className={styles.notice}>
+        {SERVED_POINTER_NOTICE}
+        {project.hasUnpublishedChanges && dirty && (
+          <>
+            {' '}
+            {PUBLISH_DIRTY_NOTICE}
+          </>
+        )}
+      </p>
+
       <Tabs label="编辑视图" items={tabs} active={tab} onChange={setTab} />
 
       <div className={styles.panel}>
         {tab === 'raw' && (
           <TabPanel id="raw">
             <SourceEditor
+              key={project.id}
               text={text}
               onChange={editor.setText}
               bytes={bytes}
@@ -276,14 +296,8 @@ export function EditorScreen() {
         {tab === 'check' && (
           <TabPanel id="check">
             <Panel
-              title={`本次检查到达「${levelCopy.label}」层`}
-              description={
-                <>
-                  {levelCopy.detail}
-                  <br />
-                  {VALIDATION_LEVEL_CAVEAT}
-                </>
-              }
+              title={statusCopy.title}
+              description={[statusCopy.detail, scopeCopy.detail].filter(Boolean).join(' ')}
               actions={
                 <>
                   {validating && <span className={styles.validating}>正在重新检查…</span>}
@@ -293,7 +307,7 @@ export function EditorScreen() {
               flush={validation.diagnostics.length > 0}
             >
               {validation.diagnostics.length === 0 ? (
-                <p className={page.quiet}>没有诊断信息。</p>
+                <p className={page.quiet}>{emptyCheckCopy}</p>
               ) : (
                 <DiagnosticList
                   diagnostics={validation.diagnostics}
@@ -317,18 +331,8 @@ export function EditorScreen() {
         )}
       </div>
 
-      <p className={styles.notice}>
-        {SERVED_POINTER_NOTICE}
-        {project.hasUnpublishedChanges && dirty && (
-          <>
-            {' '}
-            {PUBLISH_DIRTY_NOTICE}
-          </>
-        )}
-      </p>
-
       <div className={styles.danger}>
-        <p className={styles.dangerText}>删除后，托管地址会立刻失效，内容也无法恢复。</p>
+        <p className={styles.dangerText}>删除后无法恢复，相关托管地址将立即失效。</p>
         <Button variant="danger" onClick={() => setDeleteOpen(true)}>
           删除这个配置
         </Button>
@@ -345,7 +349,7 @@ export function EditorScreen() {
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
         title={`删除「${project.name}」`}
-        description="这份配置的所有版本和托管地址都会被删除，无法恢复。"
+        description="删除后无法恢复，相关托管地址将立即失效。"
         footer={
           <>
             <Button variant="secondary" onClick={() => setDeleteOpen(false)}>
@@ -369,7 +373,7 @@ export function EditorScreen() {
           </>
         }
       >
-        <p className={styles.confirm}>确认要删除吗？</p>
+        <p className={styles.confirm}>确认要删除这份配置吗？</p>
       </Dialog>
     </>
   )

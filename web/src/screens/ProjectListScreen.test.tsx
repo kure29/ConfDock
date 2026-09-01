@@ -57,6 +57,11 @@ async function renderWith(projects: ProjectSummary[]) {
 describe('ProjectListScreen import entry points', () => {
   it('shows one import button in the empty state', async () => {
     const renderer = await renderWith([])
+    const markup = JSON.stringify(renderer.toJSON())
+    expect(markup).toContain('管理已导入的客户端配置。')
+    expect(markup).not.toContain('校验分层')
+    expect(markup).not.toContain('最深一层')
+    expect(markup).toContain('导入一份配置即可开始。')
     const buttons = renderer.root.findAllByType('button')
     expect(buttons).toHaveLength(1)
     expect(buttons[0]?.props.children).toBe('导入配置')

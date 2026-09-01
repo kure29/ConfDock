@@ -666,6 +666,7 @@ function RevisionDetail({
           flush
         >
           <SourceEditor
+            key={revision.id}
             text={decoded.text}
             onChange={() => undefined}
             bytes={revision.source}

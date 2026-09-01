@@ -12,7 +12,12 @@ import {
 } from '../components'
 import type { ImportSource } from '../components'
 import { decodeToEditor } from '../lib/bytes'
-import { SAVE_BLOCKED, VALIDATION_LEVEL_COPY } from '../lib/copy'
+import {
+  SAVE_BLOCKED,
+  VALIDATION_STATUS_COPY,
+  validationScopeCopy,
+  validationStatus,
+} from '../lib/copy'
 import { useToast } from '../state/ToastContext'
 import { Button } from '../ui/Button'
 import { Panel } from '../ui/Panel'
@@ -93,27 +98,38 @@ export function NewProjectScreen() {
   }
 
   const shown = rejected ?? validation
-  const levelCopy = shown === null ? null : VALIDATION_LEVEL_COPY[shown.level]
+  const status = shown === null ? null : validationStatus(shown)
+  const statusCopy = status === null ? null : VALIDATION_STATUS_COPY[status]
+  const scopeCopy =
+    shown === null
+      ? null
+      : validationScopeCopy(
+          shown.level,
+          descriptor?.displayName,
+          descriptor?.capabilities.nativeValidation ?? false,
+        )
+  const emptyCheckCopy =
+    shown?.level === 'basic' ? '未发现基础问题。' : '没有发现需要处理的问题。'
 
   return (
     <>
       <div className={page.header}>
         <div className={page.heading}>
           <h1 className={page.title}>导入配置</h1>
-          <p className={page.lead}>保存的是你给的字节；ConfDock 不会替你重排格式。</p>
+          <p className={page.lead}>导入配置后，可以继续检查、编辑和保存。</p>
         </div>
       </div>
 
       <div className={page.stack}>
-        <Panel title="① 配置内容" description="拖入文件可以完整保留 BOM 与行尾。">
+        <Panel title="配置内容" description="支持拖入文件、选择文件或直接粘贴配置内容。">
           <ImportPanel value={source} onChange={setSource} />
         </Panel>
 
-        <Panel title="② 客户端" description="决定用哪个适配器解析和校验这份文档。">
+        <Panel title="客户端" description="选择这份配置要使用的客户端。">
           <TargetPicker value={targetId} onChange={setTargetId} detections={detections} />
         </Panel>
 
-        <Panel title="③ 名称">
+        <Panel title="配置名称">
           <div className={styles.names}>
             <TextField
               id="project-name"
@@ -141,15 +157,15 @@ export function NewProjectScreen() {
           </div>
         </Panel>
 
-        {shown !== null && levelCopy !== null && (
+        {shown !== null && statusCopy !== null && scopeCopy !== null && (
           <Panel
-            title="检查"
-            description={levelCopy.detail}
+            title={statusCopy.title}
+            description={[statusCopy.detail, scopeCopy.detail].filter(Boolean).join(' ')}
             actions={<ValidationLevelBadge result={shown} />}
             flush={shown.diagnostics.length > 0}
           >
             {shown.diagnostics.length === 0 ? (
-              <p className={page.quiet}>没有诊断信息。</p>
+              <p className={page.quiet}>{emptyCheckCopy}</p>
             ) : (
               decoded !== null && (
                 <DiagnosticList

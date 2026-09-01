@@ -80,16 +80,6 @@
   overflow-wrap: anywhere;
 }
 
-.meta {
-  font-size: var(--text-xs);
-  color: var(--fg-subtle);
-}
-
-.note {
-  font-size: var(--text-xs);
-  color: var(--fg-muted);
-}
-
 .warn {
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--warn-border);

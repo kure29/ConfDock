@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import type { Diagnostic, DiagnosticSeverity, DocumentInfo, SourceSpan } from '../core'
 import { decodeToEditor, spanToEditorRange } from '../lib/bytes'
 import {
@@ -83,15 +83,15 @@ export function SourceEditor({
   }, [markers])
 
   /** Vertical scroll only — the gutter has no horizontal extent to sync. */
-  function onScroll() {
+  const syncScroll = useCallback(() => {
     if (gutter.current && textarea.current) {
       gutter.current.scrollTop = textarea.current.scrollTop
     }
-  }
+  }, [])
 
   useLayoutEffect(() => {
-    onScroll()
-  }, [text])
+    syncScroll()
+  }, [syncScroll, text])
 
   useEffect(() => {
     if (!reveal) return
@@ -105,10 +105,10 @@ export function SourceEditor({
     const line = linesInRange(text, range)[0] ?? 1
     const target = (line - 1) * LINE_HEIGHT - element.clientHeight / 2
     element.scrollTop = Math.max(0, target)
-    onScroll()
+    syncScroll()
     // Deliberately keyed on the nonce alone: `text` and `info` are read here,
     // but a reveal is a one-shot request, not a value to stay in sync with.
-  }, [reveal?.nonce, bytes])
+  }, [reveal?.nonce, bytes, syncScroll, text])
 
   const numbers: number[] = []
   for (let line = 1; line <= total; line += 1) numbers.push(line)
@@ -135,7 +135,7 @@ export function SourceEditor({
           style={{ lineHeight: `${LINE_HEIGHT}px` }}
           value={text}
           onChange={(event) => onChange(event.target.value)}
-          onScroll={onScroll}
+          onScroll={syncScroll}
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
