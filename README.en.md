@@ -44,12 +44,12 @@ sha256sum -c SHA256SUMS
 
 `admin init` requires an interactive terminal and creates the fixed `admin` user. Non-interactive systemd startup must initialize first. Set `public_url` to the real HTTPS origin; keep the backend on `127.0.0.1:8787` and terminate HTTPS with Nginx or Caddy.
 
-Start with [binary deployment](docs/deployment/binary.md) and [systemd](docs/deployment/systemd.md), then configure the [reverse proxy](docs/deployment/reverse-proxy.md).
+Start with [binary deployment](docs/deployment/binary.md) or [Docker deployment](docs/deployment/docker.md), then configure the [reverse proxy](docs/deployment/reverse-proxy.md).
 
 ## Status and boundaries
 
 - Production is an independent Rust single binary embedding React/Vite assets, WASM, SQLx migrations, and Axum routes. Node.js and the docs site are not runtime dependencies.
-- Docker, ARM64 artifacts, Windows/macOS installers, formal Releases, tags, automatic backups/deploys, rollback, token rotation, clustering, and multiple administrators are not implemented.
+- Docker deployment now builds from source and is formally verified only on Linux x86-64. There is no GHCR image, formal Release, tag, automatic backup/deploy, rollback, token rotation, clustering, or multiple administrators; ARM64 is not claimed as verified.
 - Stable URLs return only the Served Revision; Save never auto-publishes. The public origin is persisted in `instance_settings.id=1` and does not change the listener.
 - Back up only after stopping the service, including the complete data directory, SQLite WAL/SHM sidecars, and the actual configuration directory.
 
@@ -61,6 +61,7 @@ The complete, user-oriented documentation lives in the [VitePress site](https://
 
 - [Getting started and core concepts](docs/guide/getting-started.md)
 - [Binary, configuration, systemd, and reverse proxy](docs/deployment/binary.md)
+- [Docker deployment, backup, upgrade, and troubleshooting](docs/deployment/docker.md)
 - [Backup, restore, upgrade, and troubleshooting](docs/operations/backup-and-restore.md)
 - [CLI, API, and security boundaries](docs/reference/cli.md)
 - [Architecture, ADRs, and local development](docs/development/architecture.md)

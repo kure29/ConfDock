@@ -1,0 +1,72 @@
+name: Docker CI
+
+on:
+  push:
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'deploy/docker/**'
+      - 'scripts/smoke-docker.sh'
+      - 'scripts/build-single-binary.sh'
+      - 'scripts/package-single-binary.sh'
+      - 'scripts/smoke-single-binary.sh'
+      - 'crates/**'
+      - 'web/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/docker-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-smoke:
+    name: Linux x86_64 image and deployment smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Linux x86_64 image
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg VCS_REF="$GITHUB_SHA" \
+            --tag confdock:ci \
+            --load \
+            .
+
+      - name: Verify runtime image boundary
+        run: |
+          test "$(docker image inspect -f '{{.Config.User}}' confdock:ci)" = '10001:10001'
+          test "$(docker image inspect -f '{{.Architecture}}' confdock:ci)" = 'amd64'
+          test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.source"}}' confdock:ci)" = 'https://github.com/kure29/ConfDock'
+          test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.licenses"}}' confdock:ci)" = 'Apache-2.0'
+          test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' confdock:ci)" = "$GITHUB_SHA"
+          docker image inspect -f 'image_size_bytes={{.Size}}' confdock:ci
+          docker run --rm --platform linux/amd64 --entrypoint /bin/sh confdock:ci -eu -c '
+            test "$(id -u)" = 10001
+            test "$(id -g)" = 10001
+            test -f /LICENSE
+            for path in /src /workspace /usr/local/cargo /usr/local/rustup /usr/local/lib/node_modules /Cargo.toml /web; do test ! -e "$path"; done
+            ! command -v node
+            ! command -v npm
+            ! command -v cargo
+            ! command -v rustc
+          '
+
+      - name: Validate Compose contract
+        run: docker compose -f deploy/docker/compose.yaml config --quiet
+
+      - name: Run source-free Docker smoke
+        env:
+          CONFDOCK_IMAGE: confdock:ci
+          COMPOSE_PROJECT_NAME: confdock-docker-ci-${{ github.run_id }}
+        run: ./scripts/smoke-docker.sh

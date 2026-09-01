@@ -1,0 +1,33 @@
+services:
+  confdock:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        VCS_REF: ${CONFDOCK_VCS_REF:-unknown}
+    image: ${CONFDOCK_IMAGE:-confdock:local}
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    read_only: true
+    user: "10001:10001"
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - confdock-data:/var/lib/confdock
+      - ${CONFDOCK_CONFIG_PATH:-./config.toml}:/etc/confdock/config.toml:ro
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8787/healthz"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+
+volumes:
+  confdock-data:
