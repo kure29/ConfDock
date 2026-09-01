@@ -1,0 +1,36 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "rollup": {
+      "name": "rollup",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1234567,
+          "name": "rollup",
+          "dependency": "rollup",
+          "title": "unexpected package issue",
+          "url": "https://github.com/advisories/GHSA-67mh-4wv8-2f99",
+          "severity": "high",
+          "range": "*"
+        }
+      ],
+      "effects": [],
+      "range": "*",
+      "nodes": ["node_modules/rollup"],
+      "fixAvailable": false
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 1,
+      "critical": 0,
+      "total": 1
+    },
+    "dependencies": {"prod": 1, "dev": 173, "optional": 50, "peer": 1, "peerOptional": 0, "total": 173}
+  }
+}

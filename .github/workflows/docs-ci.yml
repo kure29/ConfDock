@@ -28,10 +28,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -43,9 +43,17 @@ jobs:
       - name: Build documentation
         run: npm run docs:build --prefix docs
 
+      - name: Test audit parser fixtures
+        run: npm run docs:audit:test --prefix docs
+
       - name: Audit documentation dependencies
-        # VitePress 1.6.4 is required for this site and currently pulls an
-        # esbuild advisory with no upstream fix. Keep the report visible while
-        # allowing documentation builds to remain actionable.
-        continue-on-error: true
-        run: npm audit --prefix docs
+        # VitePress 1.6.4 currently pulls GHSA-67mh-4wv8-2f99 through
+        # vite -> esbuild. The audit script fails closed for every other
+        # advisory, package, dependency chain, Critical finding, or malformed
+        # report. Remove the whitelist after an upstream stable fix lands.
+        run: npm run docs:audit --prefix docs
+
+      - name: Audit production dependency tree
+        # VitePress is a devDependency, so this is not a complete security
+        # proof; it is a separate blocking check for the runtime tree.
+        run: npm audit --prefix docs --omit=dev
