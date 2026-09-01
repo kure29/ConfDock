@@ -1,13 +1,7 @@
 import { useRef, useState } from 'react'
 import { core } from '../core'
 import { encodeUtf8 } from '../lib/bytes'
-import {
-  BOM_NOTICE,
-  ENCODING_COPY,
-  LINE_ENDING_COPY,
-  MIXED_LINE_ENDING_WARNING,
-  formatBytes,
-} from '../lib/copy'
+import { MIXED_LINE_ENDING_WARNING } from '../lib/copy'
 import { cx } from '../lib/cx'
 import { Button } from '../ui/Button'
 import styles from './ImportPanel.module.css'
@@ -51,12 +45,6 @@ export function ImportPanel({ value, onChange }: ImportPanelProps) {
         <div className={styles.file}>
           <div className={styles.fileText}>
             <span className={styles.fileName}>{value.name}</span>
-            {info !== null && (
-              <span className={styles.meta}>
-                {ENCODING_COPY[info.encoding]} · {LINE_ENDING_COPY[info.lineEnding]} ·{' '}
-                {formatBytes(info.byteLength)}
-              </span>
-            )}
           </div>
           <Button variant="ghost" onClick={() => onChange(null)}>
             移除
@@ -96,7 +84,7 @@ export function ImportPanel({ value, onChange }: ImportPanelProps) {
 
           <div className={styles.paste}>
             <label className={styles.pasteLabel} htmlFor="import-text">
-              或者直接粘贴内容
+              或者直接粘贴配置内容
             </label>
             <textarea
               id="import-text"
@@ -114,18 +102,10 @@ export function ImportPanel({ value, onChange }: ImportPanelProps) {
         </>
       )}
 
-      {info !== null && value?.kind === 'text' && (
-        <p className={styles.meta}>
-          {ENCODING_COPY[info.encoding]} · {LINE_ENDING_COPY[info.lineEnding]} ·{' '}
-          {formatBytes(info.byteLength)}
-        </p>
-      )}
-      {info?.encoding === 'utf8-bom' && <p className={styles.note}>{BOM_NOTICE}</p>}
       {info?.lineEnding === 'mixed' && <p className={styles.warn}>{MIXED_LINE_ENDING_WARNING}</p>}
       {info?.encoding === 'unsupported' && (
         <p className={styles.bad}>
-          这份文件不是有效的 UTF-8。ConfDock 只处理 UTF-8 与带 BOM 的 UTF-8，
-          先在本地转码再导入。
+          这份文件无法读取。请先在本地转换为 UTF-8 文件，再重新导入。
         </p>
       )}
     </div>

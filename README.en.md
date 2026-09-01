@@ -2,7 +2,7 @@
 
 > A self-hosted manager and stable subscription endpoint for native proxy-client configuration files.
 
-[简体中文](README.md) · [Architecture](docs/architecture.md) · [Web development notes](web/README.md)
+[简体中文](README.md) · [Architecture](docs/architecture.md) · [Backup and restore](docs/backup-and-restore.md) · [Web development notes](web/README.md)
 
 ConfDock lets you import, edit, validate, save, publish, and inspect the history of one proxy client's native configuration in a browser. Native bytes remain the source of truth: ConfDock does not run proxy traffic or silently convert and reserialize documents.
 
@@ -37,14 +37,14 @@ Native configuration bytes are the only Source of Truth. Revisions are immutable
 
 ConfDock provides a `confdock` binary embedding the React/Vite production assets, Rust WASM, SQLx migrations, and Axum routes. Runtime operation requires no Node.js, npm, Vite, `web/dist`, or external migration/WASM files; SQLite remains persistent data on disk.
 
-Build locally with Node.js 22, stable Rust, and `wasm-bindgen-cli 0.2.127`:
+Build locally with Node.js 22, Rust 1.88.0, and `wasm-bindgen-cli 0.2.127`:
 
 ```bash
 ./scripts/build-single-binary.sh
-./scripts/smoke-single-binary.sh target/release/confdock
+./scripts/smoke-single-binary.sh target/confdock-rust-1.88.0/native/release/confdock
 ```
 
-The smoke test starts from a temporary directory without source or `web/dist`, checks `/healthz`, SPA fallback, JS/CSS/WASM/PNG MIME types, HEAD, API/sub boundaries, traversal protection, and SIGTERM shutdown.
+The smoke test starts from a temporary directory without source or `web/dist`, checks `/healthz`, SPA fallback, JS/CSS/WASM MIME types, HEAD, API/sub boundaries, traversal protection, and SIGTERM shutdown.
 Run `workflow_dispatch` manually from GitHub Actions to build and upload the
 `confdock-linux-x86_64` artifact (retained for 7 days). Pushes and pull
 requests execute the same package, extraction, and smoke checks without
@@ -53,6 +53,15 @@ The archive contains `confdock`, a root-level `config.toml`, and `SHA256SUMS`; i
 does not contain a database, passwords, or source files.
 
 Runtime configuration follows built-in defaults → `config.toml` → `CONFDOCK_*` environment variables → explicit CLI flags. The packaged archive includes [packaging/config.toml](packaging/config.toml); configuration files never contain passwords or tokens, and relative `data_dir` paths resolve relative to the configuration file.
+
+On first startup, the fully parsed and validated public URL is used only as the
+fallback to initialize `instance_settings.id=1`. Once that singleton exists,
+the database value is authoritative at runtime: a value saved from Settings
+survives restart, and later edits to `config.toml` or `CONFDOCK_PUBLIC_URL` do
+not overwrite it. The file, environment, and CLI inputs are still fully parsed
+and validated on every startup; an invalid configuration therefore still stops
+startup even when the database already has a value. Change an initialized
+instance's public URL from the authenticated Settings screen.
 
 ```bash
 ./confdock --help
@@ -94,13 +103,13 @@ Vite proxies `/api` and `/sub` to the Rust service during development. The produ
 
 ## Linux Deployment
 
-Examples target Linux x86-64 with glibc, with systemd as the current native service-management target: [deploy/systemd/confdock.service](deploy/systemd/confdock.service), [the environment sample](deploy/systemd/confdock.env.example), and [the systemd notes](deploy/systemd/README.md). Debian 13 has been verified on hardware; this does not claim every distribution or ARM64 support. Recommended topology:
+Examples target Linux x86-64 with glibc, with systemd as the current native service-management target: [deploy/systemd/confdock.service](deploy/systemd/confdock.service), [the environment sample](deploy/systemd/confdock.env.example), and [the systemd notes](deploy/systemd/README.md). Debian/Ubuntu commands are examples only; ARM64 and other service managers are outside this slice's verification scope. Recommended topology:
 
 ```text
 Internet → Nginx/Caddy HTTPS → 127.0.0.1:8787 → confdock → SQLite
 ```
 
-Keep the backend on loopback and do not expose the internal port through the firewall. HTTPS is required for public use; set `CONFDOCK_PUBLIC_URL` to the real origin (or update the same value from the authenticated Settings screen) and `CONFDOCK_COOKIE_SECURE=true`. WebSockets are not required. Use the distribution's generic Nginx/Caddy reverse-proxy configuration. The menu installer, Docker installation, and backup/restore are reserved for later slices. Before upgrades, stop the service and back up SQLite (do not copy only the main file while WAL writes are active), replace `/usr/local/bin/confdock`, and start it again. Migrations run at startup; do not downgrade an older binary and continue writing a database after a newer schema migration. Treat the data directory and hosted URLs as sensitive credentials.
+Keep the backend on loopback and do not expose the internal port through the firewall. HTTPS is required for public use; set `CONFDOCK_PUBLIC_URL` to the real origin (or update the same value from the authenticated Settings screen) and set `CONFDOCK_COOKIE_SECURE=true`. The public URL only controls origins embedded in hosted links; it never changes the listener or cookie policy. WebSockets are not required. Use the distribution's generic Nginx/Caddy reverse-proxy configuration. Docker and formal Release remain future slices; follow the [backup and restore runbook](docs/backup-and-restore.md) for native deployments. Before upgrades, stop the service and back up the complete data directory and actual config file (do not copy only the main file while WAL writes are active), replace `/usr/local/bin/confdock`, and start it again. Migrations run at startup; do not downgrade an older binary and continue writing a database after a newer schema migration. Treat the data directory and hosted URLs as sensitive credentials.
 
 ## API overview
 
@@ -130,7 +139,8 @@ Management and subscription responses use conservative `Cache-Control: no-store`
 - No proxy runtime, client-process management, node measurements, or cross-format conversion.
 - No Rollback, token rotation, automatic Publish, revision deletion, or Native Validator.
 - No Docker, ARM64, Windows/macOS installer, formal Release, Tag, or automatic Deploy.
-- Cargo package metadata declares Apache-2.0; redistributors must also comply with dependency licenses. Client names and icons belong to their respective rights holders and are used only to identify supported Targets; they do not imply certification, partnership, or endorsement by ConfDock.
+- The project is licensed under the [Apache License 2.0](LICENSE). The current [third-party license inventory](THIRD_PARTY_LICENSE_INVENTORY.md) is for development and release preparation and is not a complete release notices artifact. All six clients use original neutral ConfDock CSS text markers; no third-party client logo or icon image is bundled.
+- Session cookies remain HttpOnly, SameSite=Strict, host-only, and optionally Secure; CORS is not enabled. Explicit Origin/CSRF protection remains a final V1 security-review item, so do not expose the management surface to untrusted origins.
 
 ## Verification
 
@@ -146,7 +156,7 @@ npm run build --prefix web
 npm audit --prefix web
 npm audit --prefix web --omit=dev
 ./scripts/build-single-binary.sh
-./scripts/smoke-single-binary.sh target/release/confdock
+./scripts/smoke-single-binary.sh target/confdock-rust-1.88.0/native/release/confdock
 ```
 
-Issues and pull requests are welcome. New adapters should include Rust fixtures, capability-matrix updates, icon-source records, and regression tests while preserving native-byte round trips.
+Issues and pull requests are welcome. New adapters should include Rust fixtures, capability-matrix updates, a neutral CSS text marker, and regression tests while preserving native-byte round trips. Developer builds require rustup and the pinned `rust-toolchain.toml` (Rust 1.88.0 plus `wasm32-unknown-unknown`); the single-binary script reuses a toolchain-specific target directory and explicitly copies the compatible output to `target/release/confdock`.

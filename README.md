@@ -2,7 +2,7 @@
 
 > 面向原生代理客户端配置的自托管管理与稳定订阅地址服务。
 
-[English](README.en.md) · [架构说明](docs/architecture.md) · [Web 开发说明](web/README.md)
+[English](README.en.md) · [架构说明](docs/architecture.md) · [Web 开发说明](web/README.md) · [备份与恢复](docs/backup-and-restore.md)
 
 ConfDock 在浏览器中管理一份代理客户端的原生配置文件：导入、编辑、校验、保存、发布和只读查看历史。它保留 Native Config 的原始字节，不运行代理流量，也不把配置强行转换成另一种格式。
 
@@ -37,19 +37,21 @@ Native Config 原始字节是唯一 Source of Truth。Revision 不可变；历�
 
 ConfDock 提供 `confdock` 单二进制：React/Vite production assets、Rust WASM、SQLx migrations 和 Axum 路由都嵌入其中。运行时不需要 Node.js、npm、Vite、`web/dist` 或外部 Migration/WASM 文件；SQLite 数据库仍保存在数据目录中。
 
-本地构建（需要 Node.js 22、Rust stable、`wasm-bindgen-cli 0.2.127`）：
+本地构建（需要 Node.js 22、Rust 1.88.0、`wasm-bindgen-cli 0.2.127`）：
 
 ```bash
 ./scripts/build-single-binary.sh
-./scripts/smoke-single-binary.sh target/release/confdock
+./scripts/smoke-single-binary.sh target/confdock-rust-1.88.0/native/release/confdock
 ```
 
-Smoke Test 会从不含源码和 `web/dist` 的临时目录启动，检查 `/healthz`、SPA、JS/CSS/WASM/PNG MIME、HEAD、API/sub 边界、路径穿越防护和 SIGTERM 退出。
+Smoke Test 会从不含源码和 `web/dist` 的临时目录启动，检查 `/healthz`、SPA、JS/CSS/WASM MIME、HEAD、API/sub 边界、路径穿越防护和 SIGTERM 退出。
 在 GitHub Actions 页面手动运行 `workflow_dispatch` 会额外生成并上传
 `confdock-linux-x86_64` Artifact（保留 7 天）；普通 Push/PR 只执行同一套打包、解压和 Smoke Test，不会长期保存 Artifact。
 归档包含 `confdock`、根目录 `config.toml` 和 `SHA256SUMS`，不包含数据库、密码或源码。
 
 运行时配置：内置默认值 → `config.toml` → `CONFDOCK_*` 环境变量 → 明确 CLI 参数。打包归档会携带 [packaging/config.toml](packaging/config.toml)；配置文件不保存密码或 Token，且 `data_dir` 为相对路径时相对于配置文件目录解析。
+
+首次启动时，解析并验证后的公开地址仅用于初始化 `instance_settings.id=1`。该单例一旦存在，数据库中的值就是运行时权威值：设置页保存的值会在重启后继续生效，之后修改 `config.toml` 或 `CONFDOCK_PUBLIC_URL` 不会覆盖它。配置文件、环境变量和 CLI 仍会在每次启动完整解析和验证；即使数据库已有值，非法配置也会阻止启动。要改变已初始化实例的公开地址，请使用已认证的设置页。
 
 ```bash
 ./confdock --help
@@ -91,13 +93,13 @@ cargo run -p confdock-service --bin confdock
 
 ## Linux Deployment
 
-仓库提供面向 Linux x86-64 glibc、以 systemd 为当前原生服务管理目标的示例：[deploy/systemd/confdock.service](deploy/systemd/confdock.service)、[环境样例](deploy/systemd/confdock.env.example) 和 [systemd 说明](deploy/systemd/README.md)。Debian 13 已完成实机验证，但不代表所有发行版或 ARM64 均已验证。推荐拓扑：
+仓库提供面向 Linux x86-64 glibc、以 systemd 为当前原生服务管理目标的示例：[deploy/systemd/confdock.service](deploy/systemd/confdock.service)、[环境样例](deploy/systemd/confdock.env.example) 和 [systemd 说明](deploy/systemd/README.md)。Debian/Ubuntu 命令仅作为示例；ARM64 和其他服务管理器不在本 Slice 的验证范围。推荐拓扑：
 
 ```text
 Internet → Nginx/Caddy HTTPS → 127.0.0.1:8787 → confdock → SQLite
 ```
 
-后端端口只监听本机，不需要在防火墙直接开放。设置页的“对外访问地址”会持久化反向代理公开 origin；也可在初次启动前用 `CONFDOCK_PUBLIC_URL` 设置默认值。地址仅允许 `http://` 或 `https://` 加域名和可选端口，不包含路径、查询参数或片段。对外服务必须启用 HTTPS，并将公开地址设为实际 HTTPS origin、`CONFDOCK_COOKIE_SECURE=true`。WebSocket 不是本服务必需项，不要为它额外放行。反向代理请使用发行版提供的通用 Nginx/Caddy 配置。菜单式安装器、Docker 和备份恢复属于后续 Slice。
+后端端口只监听本机，不需要在防火墙直接开放。设置页的“对外访问地址”会持久化反向代理公开 origin；也可在初次启动前用 `CONFDOCK_PUBLIC_URL` 设置默认值。地址仅允许 `http://` 或 `https://` 加域名和可选端口，不包含路径、查询参数或片段。该字段只用于生成外部托管地址，不改变监听地址，也不改变 Cookie 安全配置。对外服务必须启用 HTTPS，并将公开地址设为实际 HTTPS origin、`CONFDOCK_COOKIE_SECURE=true`。WebSocket 不是本服务必需项，不要为它额外放行。反向代理请使用发行版提供的通用 Nginx/Caddy 配置。Docker 和正式 Release 属于后续 Slice；手动备份与恢复请参阅[运行手册](docs/backup-and-restore.md)。
 
 升级前先停止服务并备份 SQLite（WAL 写入期间不要只复制主数据库文件），再替换 `/usr/local/bin/confdock`、启动服务并观察 Migration 日志。不要在新 Schema 已写入后降级旧二进制继续写入。数据目录包含项目内容、Session 和 Token 元数据，应由受限用户读写并纳入备份；托管 URL 是敏感凭据，不要提交到 Issue 或日志。
 
@@ -129,7 +131,8 @@ Internet → Nginx/Caddy HTTPS → 127.0.0.1:8787 → confdock → SQLite
 - 不运行代理、不管理客户端进程、不测速、不做跨格式转换。
 - 没有 Rollback、Token Rotation、自动 Publish、Revision 删除或 Native Validator。
 - 不提供 Docker、ARM64、Windows/macOS 安装器、正式 Release、Tag 或自动 Deploy。
-- Cargo package metadata declares Apache-2.0；分发时还需遵守依赖许可证。六个客户端名称和图标是各自权利人的商标/版权，仅用于识别支持的 Target，不暗示 ConfDock 获得认证、合作或背书。
+- 项目许可证为 [Apache License 2.0](LICENSE)；当前的[第三方许可证清单](THIRD_PARTY_LICENSE_INVENTORY.md)仅用于开发和 Release 准备，不是完整的发行通知。六个客户端均使用 ConfDock 自有的中性 CSS 文字标识，不包含第三方客户端 Logo 或图标图片。
+- 当前 Session Cookie 使用 HttpOnly、SameSite=Strict、Host-only 和可选 Secure；不启用 CORS。显式 Origin/CSRF 防护仍属于 V1 最终安全审查事项，管理端不应直接暴露给不可信来源。
 
 ## 验证
 
@@ -145,7 +148,7 @@ npm run build --prefix web
 npm audit --prefix web
 npm audit --prefix web --omit=dev
 ./scripts/build-single-binary.sh
-./scripts/smoke-single-binary.sh target/release/confdock
+./scripts/smoke-single-binary.sh target/confdock-rust-1.88.0/native/release/confdock
 ```
 
-欢迎提交 Issue 和 Pull Request。新增客户端时请同时补充 Rust adapter、fixture、能力矩阵、Target 图标来源和测试，并保持原始字节保真约束。
+欢迎提交 Issue 和 Pull Request。新增客户端时请同时补充 Rust adapter、fixture、能力矩阵、中性 CSS 文字标识和测试，并保持原始字节保真约束。开发构建要求 rustup，并固定使用仓库中的 `rust-toolchain.toml`（Rust 1.88.0 + `wasm32-unknown-unknown`）；单二进制脚本在工具链专属目录复用缓存，再明确复制成 `target/release/confdock` 兼容输出。

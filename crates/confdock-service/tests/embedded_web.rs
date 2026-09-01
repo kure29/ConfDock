@@ -124,12 +124,6 @@ async fn embedded_static_routes_preserve_spa_boundaries_mime_and_cache_contracts
         "public, max-age=31536000, immutable"
     );
 
-    let icon_response = request(&app, Method::GET, "/client-icons/mihomo.png").await;
-    assert_eq!(icon_response.status(), StatusCode::OK);
-    assert_eq!(icon_response.headers()[header::CONTENT_TYPE], "image/png");
-    assert_eq!(icon_response.headers()[header::CACHE_CONTROL], "no-cache");
-    assert!(!body(icon_response).await.is_empty());
-
     let favicon = request(&app, Method::GET, "/favicon.svg").await;
     assert_eq!(favicon.status(), StatusCode::OK);
     assert_eq!(favicon.headers()[header::CONTENT_TYPE], "image/svg+xml");
@@ -159,7 +153,6 @@ async fn embedded_static_routes_preserve_spa_boundaries_mime_and_cache_contracts
         ("/api/not-found", "no-store"),
         ("/sub/not-found", "no-store"),
         ("/assets/missing.js", "no-store"),
-        ("/client-icons/missing.png", "no-store"),
         ("/assets/missing.webp", "no-store"),
         ("/assets/%2e%2e/Cargo.toml", "no-store"),
         ("/assets/%252e%252e/Cargo.toml", "no-store"),

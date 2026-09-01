@@ -9,7 +9,7 @@ import type {
   TargetId,
 } from '../core'
 import { sliceText } from '../lib/bytes'
-import { describeScope, EDIT_ERROR_COPY, noSchemaNotice } from '../lib/copy'
+import { EDIT_ERROR_COPY, noSchemaNotice } from '../lib/copy'
 import { Button } from '../ui/Button'
 import { EmptyState } from '../ui/EmptyState'
 import { TextField } from '../ui/TextField'
@@ -60,8 +60,8 @@ export function StructuredFieldList({
         title="文档现在无法安全解析，字段编辑不可用"
         body={
           <p>
-            结构化编辑只在能确定值边界时才动手。先在「原始」里把结构修好，
-            这里就会重新出现。
+            字段编辑需要先读懂配置结构。请先在「原始」里修好内容，
+            再回来继续编辑。
           </p>
         }
         action={
@@ -104,7 +104,7 @@ export function StructuredFieldList({
         <p className={styles.notice}>
           {noSchemaNotice(displayName)}
           {capabilities.length > 0 && capabilities[0] !== undefined && (
-            <> {describeScope(capabilities[0].scope)}。下面是文档里扫描到的这些键。</>
+            <> 下面列出配置中找到的可修改内容。</>
           )}
         </p>
       )}
@@ -114,7 +114,7 @@ export function StructuredFieldList({
           title="这份文档里没有可以结构化编辑的字段"
           body={
             <p>
-              适配器只承诺替换它能确定边界的已存在的值，不会新增字段。
+              字段编辑只修改能安全识别的已有内容，不会新增字段。
               需要增删内容请用「原始」。
             </p>
           }
@@ -132,7 +132,7 @@ export function StructuredFieldList({
           return (
             <p key={field.path} className={styles.absent}>
               <span className={styles.absentPath}>{field.path}</span>
-              文档里当前没有这个字段。结构化编辑不新增字段，请用「原始」添加。
+              文档里当前没有这个字段。字段编辑不新增字段，请用「原始」添加。
             </p>
           )
         }
@@ -207,7 +207,7 @@ function PointerEditor({
 
   return (
     <div className={styles.pointer}>
-      <p className={styles.pointerTitle}>按 JSON Pointer 编辑任意已存在的值</p>
+      <p className={styles.pointerTitle}>编辑配置中的已有值</p>
       <datalist id="pointer-options">
         {pointers.map((pointer) => (
           <option key={pointer} value={pointer} />

@@ -40,7 +40,7 @@
   overflow-wrap: anywhere;
 }
 
-/* The adapter's own words, set apart so it reads as a quotation rather than as
+/* The client's own words, set apart so it reads as a quotation rather than as
  * our description of it. */
 .verbatim {
   margin: 0;

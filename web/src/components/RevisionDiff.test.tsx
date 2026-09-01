@@ -54,10 +54,10 @@ describe('RevisionDiff view', () => {
     expect(markup).toContain('+1 新增行')
     expect(markup).toContain('−1 删除行')
     expect(markup).toContain('old  ')
-    expect(markup).toContain('CRLF')
+    expect(markup).toContain('Windows 换行')
     expect(markup).toContain('EOF')
-    expect(markup).toContain('上下文行，旧行 1，新行 1，LF：')
-    expect(markup).toContain('删除行，旧行 2，CRLF：')
+    expect(markup).toContain('上下文行，旧行 1，新行 1，标准换行：')
+    expect(markup).toContain('删除行，旧行 2，Windows 换行：')
     expect(markup).toContain('新增行，新行 2，EOF：')
     expect(markup).toContain('>same</span>')
     expect(markup).toContain('>old  </span>')
@@ -72,7 +72,7 @@ describe('RevisionDiff view', () => {
     const markup = renderToStaticMarkup(
       <RevisionDiffView diff={diff({ identical: true, additions: 0, deletions: 0, hunks: [] })} />,
     )
-    expect(markup).toContain('两个版本的原始字节完全一致')
+    expect(markup).toContain('两个版本的配置内容完全一致')
     expect(markup).not.toContain('差异块 1')
   })
 
@@ -80,7 +80,7 @@ describe('RevisionDiff view', () => {
     const markup = renderToStaticMarkup(
       <RevisionDiffView diff={diff({ additions: 0, deletions: 0, hunks: [] })} />,
     )
-    expect(markup).toContain('只有 BOM 或元数据不同')
-    expect(markup).toContain('BOM')
+    expect(markup).toContain('只有文件标记或其他文件信息不同')
+    expect(markup).toContain('文件标记')
   })
 })

@@ -12,32 +12,6 @@ interface TargetPickerProps {
   detections?: readonly DetectionResult[]
 }
 
-const TARGET_ICON: Record<TargetId, string> = {
-  mihomo: 'mihomo.png',
-  'sing-box': 'sing-box.png',
-  surge: 'surge.png',
-  loon: 'loon.png',
-  'quantumult-x': 'quantumult-x.png',
-  shadowrocket: 'shadowrocket.png',
-}
-
-/** Local raster assets keep rendering deterministic and avoid remote hotlinks. */
-function TargetIcon({ id }: { id: TargetId }) {
-  return (
-    <img
-      className={styles.icon}
-      src={`/client-icons/${TARGET_ICON[id]}`}
-      alt=""
-      aria-hidden="true"
-      data-target-icon={id}
-      loading="lazy"
-      onError={(event) => {
-        event.currentTarget.hidden = true
-      }}
-    />
-  )
-}
-
 /**
  * Every target returned by the Rust registry, in registry order.
  *
@@ -65,7 +39,6 @@ export function TargetPicker({ value, onChange, detections = [] }: TargetPickerP
                   checked={selected}
                   onChange={() => onChange(descriptor.id)}
                 />
-                <TargetIcon id={descriptor.id} />
                 <span className={styles.text}>
                   <span className={styles.name}>{descriptor.displayName}</span>
                   {detection !== undefined && detection.confidence !== 'none' && (

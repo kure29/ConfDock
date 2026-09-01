@@ -10,12 +10,23 @@ use sqlx::{
     SqlitePool,
 };
 use thiserror::Error;
-use tokio::sync::{Mutex, RwLock, Semaphore};
+use tokio::sync::{Mutex, RwLock, RwLockReadGuard, Semaphore};
+
+#[cfg(test)]
+use tokio::sync::oneshot;
 
 use crate::{
     auth::{bootstrap_admin, cleanup_expired_sessions, AuthError, LoginThrottle},
     config::{ConfigError, ServiceConfig},
 };
+
+/// Acquire the public URL read boundary used by operations that persist a
+/// value derived from it. Callers intentionally keep the returned guard until
+/// their database work and response DTO are complete; settings updates hold
+/// the matching write guard across their SQLite update.
+pub(crate) async fn read_public_url(public_url: &RwLock<String>) -> RwLockReadGuard<'_, String> {
+    public_url.read().await
+}
 
 // SQLite needs an exclusive schema lock while the first connection enables
 // WAL and SQLx applies migrations. Serializing startup within one process
@@ -33,6 +44,52 @@ pub struct AppState {
     pub registry: Arc<TargetRegistry>,
     pub login_throttle: Arc<LoginThrottle>,
     pub diff_slots: Arc<Semaphore>,
+    #[cfg(test)]
+    pub(crate) test_hooks: Arc<TestHooks>,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct TestHooks {
+    token_read_gate: Mutex<Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>>,
+    settings_write_gate: Mutex<Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>>,
+}
+
+#[cfg(test)]
+impl TestHooks {
+    pub(crate) async fn install_token_read_gate(
+        &self,
+    ) -> (oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        *self.token_read_gate.lock().await = Some((entered_tx, release_rx));
+        (entered_rx, release_tx)
+    }
+
+    pub(crate) async fn install_settings_write_gate(
+        &self,
+    ) -> (oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        *self.settings_write_gate.lock().await = Some((entered_tx, release_rx));
+        (entered_rx, release_tx)
+    }
+
+    pub(crate) async fn token_read_checkpoint(&self) {
+        let gate = self.token_read_gate.lock().await.take();
+        if let Some((entered, release)) = gate {
+            let _ = entered.send(());
+            let _ = release.await;
+        }
+    }
+
+    pub(crate) async fn settings_write_checkpoint(&self) {
+        let gate = self.settings_write_gate.lock().await.take();
+        if let Some((entered, release)) = gate {
+            let _ = entered.send(());
+            let _ = release.await;
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -97,6 +154,42 @@ impl AppState {
             registry: Arc::new(TargetRegistry::builtin()),
             login_throttle: Arc::new(LoginThrottle::default()),
             diff_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_DIFFS)),
+            #[cfg(test)]
+            test_hooks: Arc::new(TestHooks::default()),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use tokio::sync::{oneshot, RwLock};
+
+    use super::read_public_url;
+
+    #[tokio::test]
+    async fn public_url_operation_holds_read_lock_until_future_finishes() {
+        let public_url = Arc::new(RwLock::new("https://old.example.test".to_owned()));
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let operation_url = Arc::clone(&public_url);
+
+        let operation = tokio::spawn(async move {
+            let value = read_public_url(&operation_url).await;
+            assert_eq!(value.as_str(), "https://old.example.test");
+            entered_tx.send(()).unwrap();
+            release_rx.await.unwrap();
+            value.to_owned()
+        });
+
+        entered_rx.await.unwrap();
+        assert!(public_url.try_write().is_err());
+
+        release_tx.send(()).unwrap();
+        assert_eq!(operation.await.unwrap(), "https://old.example.test");
+
+        *public_url.write().await = "https://new.example.test".to_owned();
+        assert_eq!(public_url.read().await.as_str(), "https://new.example.test");
     }
 }

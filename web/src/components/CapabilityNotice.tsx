@@ -21,7 +21,7 @@ export function CapabilityNotice({
   if (capabilities.length === 0) {
     return (
       <p className={styles.none}>
-        这个适配器没有声明任何结构化编辑能力。所有改动都在「原始」里进行。
+        这份配置暂时没有可编辑字段，所有改动请在「原始」中进行。
       </p>
     )
   }
@@ -47,7 +47,7 @@ export function CapabilityNotice({
             </dd>
           </div>
           <div className={styles.row}>
-            <dt className={styles.term}>适配器原文</dt>
+            <dt className={styles.term}>客户端说明</dt>
             <dd className={styles.verbatim}>{capability.safetyNotes}</dd>
           </div>
         </dl>
