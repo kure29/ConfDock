@@ -14,6 +14,12 @@
   background: rgb(0 0 0 / 32%);
 }
 
+/* The dialog itself is only a programmatic focus landing point, not an
+ * interactive control. Keep the global focus treatment for real controls. */
+.dialog:focus {
+  outline: none;
+}
+
 .inner {
   display: flex;
   flex-direction: column;
