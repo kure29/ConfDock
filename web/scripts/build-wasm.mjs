@@ -42,6 +42,10 @@ const cargoHomeBin = resolve(process.env.CARGO_HOME ?? resolve(homedir(), '.carg
 const toolchainLib = resolve(dirname(rustc), '..', 'lib')
 const buildEnv = {
   ...process.env,
+  // CI setup actions may export a different default (for example `stable`).
+  // Keep compiler invocations made by Cargo build scripts on the repository's
+  // pinned toolchain as well as the top-level cargo process.
+  RUSTUP_TOOLCHAIN: '1.88.0',
   RUSTC: rustc,
   PATH: `${cargoBin}:${cargoHomeBin}:${process.env.PATH ?? ''}`,
   ...(existsSync(resolve(toolchainLib, 'libLLVM.dylib'))
