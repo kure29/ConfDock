@@ -17,10 +17,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install stable Rust with quality components
+      - name: Install Rust 1.88.0 with quality components
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: 1.88.0
           components: rustfmt, clippy
 
       - name: Check formatting
@@ -50,10 +50,10 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Install stable Rust with the WASM target
+      - name: Install Rust 1.88.0 with the WASM target
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: 1.88.0
           target: wasm32-unknown-unknown
 
       - name: Install wasm-bindgen CLI
@@ -98,10 +98,10 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Install stable Rust with the WASM target
+      - name: Install Rust 1.88.0 with the WASM target
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: 1.88.0
           target: wasm32-unknown-unknown
 
       - name: Install the pinned wasm-bindgen CLI

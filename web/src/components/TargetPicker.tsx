@@ -12,8 +12,7 @@ interface TargetPickerProps {
   detections?: readonly DetectionResult[]
 }
 
-const TARGET_ICON: Record<TargetId, string> = {
-  mihomo: 'mihomo.png',
+const TARGET_ICON: Partial<Record<TargetId, string>> = {
   'sing-box': 'sing-box.png',
   surge: 'surge.png',
   loon: 'loon.png',
@@ -23,10 +22,20 @@ const TARGET_ICON: Record<TargetId, string> = {
 
 /** Local raster assets keep rendering deterministic and avoid remote hotlinks. */
 function TargetIcon({ id }: { id: TargetId }) {
+  if (id === 'mihomo') {
+    return (
+      <span className={cx(styles.icon, styles.letterIcon)} aria-hidden="true" data-target-letter={id}>
+        M
+      </span>
+    )
+  }
+
+  const icon = TARGET_ICON[id]
+  if (icon === undefined) return null
   return (
     <img
       className={styles.icon}
-      src={`/client-icons/${TARGET_ICON[id]}`}
+      src={`/client-icons/${icon}`}
       alt=""
       aria-hidden="true"
       data-target-icon={id}

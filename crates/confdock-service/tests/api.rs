@@ -1,4 +1,10 @@
-use std::{fs, net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
+use std::{
+    env, fs,
+    net::SocketAddr,
+    str::FromStr,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use axum::{
     body::{to_bytes, Body},
@@ -21,9 +27,34 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
 };
 use tempfile::TempDir;
+use tokio::sync::Mutex as AsyncMutex;
 use tower::ServiceExt;
 
 const PASSWORD: &str = "test-only-admin-password-123!";
+static ENV_LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
+
+struct EnvRestore {
+    name: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl EnvRestore {
+    fn set(name: &'static str, value: &str) -> Self {
+        let previous = env::var_os(name);
+        env::set_var(name, value);
+        Self { name, previous }
+    }
+}
+
+impl Drop for EnvRestore {
+    fn drop(&mut self) {
+        if let Some(value) = self.previous.as_ref() {
+            env::set_var(self.name, value);
+        } else {
+            env::remove_var(self.name);
+        }
+    }
+}
 
 struct TestService {
     _directory: TempDir,
@@ -55,10 +86,19 @@ impl TestService {
 }
 
 async fn initialize(database_url: &str, password: Option<&str>, max_bytes: usize) -> AppState {
+    initialize_with_public_url(database_url, password, max_bytes, "http://127.0.0.1:8787").await
+}
+
+async fn initialize_with_public_url(
+    database_url: &str,
+    password: Option<&str>,
+    max_bytes: usize,
+    public_url: &str,
+) -> AppState {
     let config = ServiceConfig::new(
         "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
         database_url.to_owned(),
-        "http://127.0.0.1:8787/".to_owned(),
+        public_url.to_owned(),
         password.map(str::to_owned),
         3600,
         false,
@@ -2156,6 +2196,177 @@ async fn public_url_settings_are_authenticated_validated_and_persisted() {
         .await,
         json!({"publicUrl": "https://cd.example.test:8443"})
     );
+}
+
+#[tokio::test]
+async fn failed_public_url_persistence_does_not_change_memory() {
+    let service = TestService::new().await;
+    let (cookie, _) = login(&service.app, PASSWORD).await;
+    service.state.pool.close().await;
+
+    let response = request(
+        &service.app,
+        Method::PATCH,
+        "/api/settings",
+        Some(&cookie),
+        Some(json!({"publicUrl": "https://not-persisted.example.test"})),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        service.state.public_url.read().await.as_str(),
+        "http://127.0.0.1:8787"
+    );
+}
+
+#[tokio::test]
+async fn persisted_public_url_wins_over_later_config_fallback_and_reinitializes_after_database_reset(
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let database_path = directory.path().join("public-url-precedence.db");
+    let database_url = format!("sqlite://{}", database_path.display());
+    let service = initialize_with_public_url(
+        &database_url,
+        Some(PASSWORD),
+        1024 * 1024,
+        "https://first.example.test",
+    )
+    .await;
+    let (cookie, _) = login(&router(service.clone()), PASSWORD).await;
+    let app = router(service.clone());
+    let updated = request(
+        &app,
+        Method::PATCH,
+        "/api/settings",
+        Some(&cookie),
+        Some(json!({"publicUrl": "https://persisted.example.test"})),
+    )
+    .await;
+    assert_eq!(updated.status(), StatusCode::OK);
+    service.pool.close().await;
+
+    // A later config.toml fallback is deliberately ignored once the singleton
+    // row exists; the persisted value remains authoritative after restart.
+    let restarted = initialize_with_public_url(
+        &database_url,
+        Some(PASSWORD),
+        1024 * 1024,
+        "https://later-config.example.test",
+    )
+    .await;
+    assert_eq!(
+        restarted.public_url.read().await.as_str(),
+        "https://persisted.example.test"
+    );
+    restarted.pool.close().await;
+
+    // Removing the database starts a fresh instance, so the newest valid
+    // fallback is used again.
+    fs::remove_file(&database_path).unwrap();
+    for suffix in ["-wal", "-shm"] {
+        let mut sidecar = database_path.as_os_str().to_owned();
+        sidecar.push(suffix);
+        let _ = fs::remove_file(sidecar);
+    }
+    let fresh = initialize_with_public_url(
+        &database_url,
+        Some(PASSWORD),
+        1024 * 1024,
+        "https://fresh-fallback.example.test",
+    )
+    .await;
+    assert_eq!(
+        fresh.public_url.read().await.as_str(),
+        "https://fresh-fallback.example.test"
+    );
+    fresh.pool.close().await;
+}
+
+#[tokio::test]
+async fn existing_database_does_not_relax_invalid_startup_configuration() {
+    let directory = tempfile::tempdir().unwrap();
+    let database_url = format!(
+        "sqlite://{}",
+        directory.path().join("existing.db").display()
+    );
+    let state = initialize_with_public_url(
+        &database_url,
+        Some(PASSWORD),
+        1024 * 1024,
+        "https://persisted.example.test",
+    )
+    .await;
+    state.pool.close().await;
+
+    let invalid_url = ServiceConfig::new(
+        "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
+        database_url.clone(),
+        "https://persisted.example.test/path".to_owned(),
+        None,
+        3600,
+        false,
+        1024 * 1024,
+    );
+    assert!(matches!(
+        invalid_url,
+        Err(confdock_service::config::ConfigError::InvalidPublicUrl)
+    ));
+
+    let invalid_other_field = ServiceConfig::new(
+        "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
+        database_url,
+        "https://persisted.example.test".to_owned(),
+        None,
+        0,
+        false,
+        1024 * 1024,
+    );
+    assert!(matches!(
+        invalid_other_field,
+        Err(confdock_service::config::ConfigError::InvalidSessionTtl)
+    ));
+}
+
+#[tokio::test]
+async fn persisted_public_url_wins_over_environment_fallback() {
+    let _env_guard = ENV_LOCK.get_or_init(|| AsyncMutex::new(())).lock().await;
+    let directory = tempfile::tempdir().unwrap();
+    let database_path = directory.path().join("confdock.db");
+    let database_url = format!("sqlite://{}", database_path.display());
+    let initial = initialize_with_public_url(
+        &database_url,
+        Some(PASSWORD),
+        1024 * 1024,
+        "https://first.example.test",
+    )
+    .await;
+    storage::update_public_url(&initial.pool, "https://persisted.example.test")
+        .await
+        .unwrap();
+    initial.pool.close().await;
+
+    let config_path = directory.path().join("config.toml");
+    fs::write(
+        &config_path,
+        format!(
+            "data_dir = {:?}\npublic_url = \"https://config.example.test\"\n",
+            directory.path().display().to_string()
+        ),
+    )
+    .unwrap();
+    let _public_url = EnvRestore::set("CONFDOCK_PUBLIC_URL", "https://environment.example.test");
+    let config = ServiceConfig::from_sources(
+        Some(&config_path),
+        confdock_service::config::ConfigOverrides::default(),
+    )
+    .unwrap();
+    assert_eq!(config.public_url, "https://environment.example.test");
+    let restarted = AppState::initialize_unbootstrapped(config).await.unwrap();
+    assert_eq!(
+        restarted.public_url.read().await.as_str(),
+        "https://persisted.example.test"
+    );
+    restarted.pool.close().await;
 }
 
 #[tokio::test]

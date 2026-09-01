@@ -187,10 +187,14 @@ active.
 
 The authenticated `/api/settings` endpoint reads and updates the singleton
 public URL. It accepts only an `http://` or `https://` origin (host plus an
-optional port, with no credentials, path, query, or fragment). The listener
-continues to bind to its configured local address; this setting only controls
-the origin embedded in newly created hosted links and returned by
-`/api/service`.
+optional port, with no credentials, path, query, or fragment). During first
+initialization, the fully validated config/env/CLI value is inserted as the
+fallback for `instance_settings.id=1`; once that row exists, its database value
+is authoritative across restarts. Config/env/CLI input is still fully parsed
+and validated on every startup, so an invalid file cannot be hidden by a
+persisted value. The listener continues to bind to its configured local
+address; this setting only controls the origin embedded in newly created hosted
+links and returned by `/api/service`.
 
 ### Project and revision transaction
 
@@ -270,7 +274,9 @@ including authentication and error responses, so credentials and configuration
 metadata are not retained by browser or intermediary caches. Deployments that
 listen beyond loopback still require HTTPS and `CONFDOCK_COOKIE_SECURE=true`;
 TLS termination, IP rate limiting, and request filtering remain the proxy's
-responsibility.
+responsibility. The current boundary does not add an explicit Origin check or
+CSRF token; this remains a final V1 security-review item, so the management
+surface must stay same-origin and behind a trusted HTTPS proxy.
 
 ### Stable URL security
 
@@ -321,5 +327,5 @@ pointers already match is an idempotent success with `unchanged: true`.
 * **Slice 4:** Draft/Publish pointer separation. Management Project reads current
   bytes, `has_unpublished_changes` reports pointer divergence, and Publish moves
   only `served_revision_id` transactionally with optimistic pointer checks.
-* **Later:** Rollback, optional native validators, embedded Web assets,
-  Docker, and individually scoped adapters or conversion tools.
+* **Later:** Rollback, optional native validators, Docker, and individually
+  scoped adapters or conversion tools.

@@ -23,8 +23,8 @@ npm ci --prefix web
 npm run dev --prefix web # http://127.0.0.1:5173
 ```
 
-Vite 把 `/api` 和 `/sub` 同源代理到 `127.0.0.1:8787`。WASM 构建需要 stable
-Rust、`wasm32-unknown-unknown` 和 `wasm-bindgen-cli 0.2.127`。
+Vite 把 `/api` 和 `/sub` 同源代理到 `127.0.0.1:8787`。WASM 构建需要 Rust
+1.88.0、`wasm32-unknown-unknown` 和 `wasm-bindgen-cli 0.2.127`。
 
 运行时依赖为 `react` `react-dom` `react-router-dom`；开发依赖包括 `vite`
 `@vitejs/plugin-react` `typescript` 与 `vitest`。

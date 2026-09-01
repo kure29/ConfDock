@@ -124,7 +124,7 @@ async fn embedded_static_routes_preserve_spa_boundaries_mime_and_cache_contracts
         "public, max-age=31536000, immutable"
     );
 
-    let icon_response = request(&app, Method::GET, "/client-icons/mihomo.png").await;
+    let icon_response = request(&app, Method::GET, "/client-icons/sing-box.png").await;
     assert_eq!(icon_response.status(), StatusCode::OK);
     assert_eq!(icon_response.headers()[header::CONTENT_TYPE], "image/png");
     assert_eq!(icon_response.headers()[header::CACHE_CONTROL], "no-cache");

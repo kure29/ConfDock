@@ -11,6 +11,20 @@ for command_name in node npm cargo rustc; do
   }
 done
 
+# Use the repository's pinned rustup toolchain even when a standalone Cargo
+# (for example Homebrew's) appears earlier in PATH and does not read
+# rust-toolchain.toml itself. If rustup is present but cannot resolve the
+# pinned toolchain, fail instead of silently building with another version.
+if command -v rustup >/dev/null; then
+  rustup_cargo_bin="$(rustup which cargo)"
+  rustup_rustc_bin="$(rustup which rustc)"
+else
+  rustup_cargo_bin="$(command -v cargo)"
+  rustup_rustc_bin="$(command -v rustc)"
+fi
+test -x "$rustup_cargo_bin"
+test -x "$rustup_rustc_bin"
+
 wasm_bindgen_bin="$(command -v wasm-bindgen || true)"
 if [[ -z "$wasm_bindgen_bin" ]]; then
   cargo_home="${CARGO_HOME:-${HOME}/.cargo}"
@@ -34,8 +48,8 @@ if [[ "$wasm_bindgen_version" != "0.2.127" ]]; then
 fi
 
 printf 'Node.js: %s\n' "$(node --version)"
-printf 'Rustc: %s\n' "$(rustc --version)"
-printf 'Cargo: %s\n' "$(cargo --version)"
+printf 'Rustc: %s\n' "$("$rustup_rustc_bin" --version)"
+printf 'Cargo: %s\n' "$("$rustup_cargo_bin" --version)"
 printf 'wasm-bindgen: %s\n' "$wasm_bindgen_version"
 
 # Vite normally empties this directory, but make that contract explicit so an
@@ -54,9 +68,9 @@ binary="target/release/confdock"
 temporary_unembedded="$(mktemp -t confdock-unembedded.XXXXXX)"
 trap 'rm -f "$temporary_unembedded"' EXIT
 
-cargo build -p confdock-service --release
+"$rustup_cargo_bin" build -p confdock-service --release
 cp "$binary" "$temporary_unembedded"
-cargo build -p confdock-service --release --features embedded-web
+"$rustup_cargo_bin" build -p confdock-service --release --features embedded-web
 
 web_dist_bytes="$(find web/dist -type f -print0 | xargs -0 wc -c | tail -1 | awk '{print $1}')"
 wasm_bytes="$(find web/dist -type f -name '*.wasm' -print0 | xargs -0 wc -c | tail -1 | awk '{print $1}')"

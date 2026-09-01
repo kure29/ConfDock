@@ -53,5 +53,5 @@ test -f "$verify_dir/config.toml"
 
 printf 'archive=%s\n' "$archive"
 printf 'archive_sha256=%s\n' "$(awk '{print $1}' "$archive_sha")"
-printf 'binary_sha256=%s\n' "$(awk '{print $1}' "$staging_dir/SHA256SUMS")"
+printf 'binary_sha256=%s\n' "$(awk '$2 == "confdock" {print $1}' "$staging_dir/SHA256SUMS")"
 printf 'binary_bytes=%s\n' "$(wc -c < "$verify_dir/confdock" | tr -d ' ')"

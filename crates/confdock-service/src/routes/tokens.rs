@@ -10,7 +10,7 @@ use crate::{
         AccessTokenDto, CreateAccessTokenRequest, CreatedAccessTokenDto, UpdateAccessTokenRequest,
     },
     error::ApiError,
-    state::AppState,
+    state::{read_public_url, AppState},
     storage,
     validation::{token_display_name, token_expiry, token_timestamp, DEFAULT_TOKEN_DISPLAY_NAME},
 };
@@ -38,9 +38,18 @@ pub async fn create(
         None => DEFAULT_TOKEN_DISPLAY_NAME.to_owned(),
     };
     let expires_at = token_expiry(input.expires_at.as_deref(), unix_timestamp())?;
-    let public_url = state.public_url.read().await.clone();
-    let token =
-        storage::create_token(&state.pool, &id, &display_name, expires_at, &public_url).await?;
+    // Keep the read lock until token persistence and the response DTO are
+    // complete. Settings updates hold the matching write lock across their
+    // SQLite update, giving these operations an explicit linearization point.
+    let public_url = read_public_url(&state.public_url).await;
+    let token = storage::create_token(
+        &state.pool,
+        &id,
+        &display_name,
+        expires_at,
+        public_url.as_str(),
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(token)))
 }
 

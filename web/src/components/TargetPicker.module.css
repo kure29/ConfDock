@@ -74,6 +74,18 @@
   background: var(--bg-inset);
 }
 
+/* Mihomo has no bundled third-party artwork: this neutral letter is a
+ * nominative target marker implemented entirely with ConfDock's own tokens. */
+.letterIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+}
+
 .name {
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
