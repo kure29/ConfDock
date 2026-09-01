@@ -14,6 +14,7 @@ import type {
   SaveResult,
   PublishResult,
   ServiceInfo,
+  ServiceSettings,
 } from './types'
 
 /**
@@ -74,9 +75,12 @@ export interface ConfDockApi {
     input: UpdateAccessTokenInput,
   ): Promise<Result<AccessToken, ApiError>>
   revokeToken(projectId: string, tokenId: string): Promise<Result<void, ApiError>>
+  deleteRevokedToken(projectId: string, tokenId: string): Promise<Result<void, ApiError>>
 
   // -- service ------------------------------------------------------------
   serviceInfo(): Promise<Result<ServiceInfo, ApiError>>
+  settings(): Promise<Result<ServiceSettings, ApiError>>
+  updatePublicUrl(publicUrl: string): Promise<Result<ServiceSettings, ApiError>>
 }
 
 export interface PublishProjectInput {

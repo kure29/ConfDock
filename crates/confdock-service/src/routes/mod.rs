@@ -3,6 +3,7 @@ mod assets;
 mod projects;
 mod public;
 mod session;
+mod settings;
 mod tokens;
 
 use axum::{
@@ -24,6 +25,7 @@ use crate::{
 pub fn router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/api/admin/password", post(session::change_password))
+        .route("/api/settings", get(settings::get).patch(settings::update))
         .route("/api/projects", get(projects::list).post(projects::create))
         .route(
             "/api/projects/{id}",
@@ -48,6 +50,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/projects/{id}/tokens/{token_id}",
             delete(tokens::revoke).patch(tokens::update),
+        )
+        .route(
+            "/api/projects/{id}/tokens/{token_id}/purge",
+            post(tokens::purge),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

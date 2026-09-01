@@ -22,11 +22,12 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<Health>, ApiEr
 }
 
 pub async fn service_info(State(state): State<AppState>) -> Json<ServiceInfoDto> {
+    let public_url = state.public_url.read().await.clone();
     Json(ServiceInfoDto {
         version: env!("CARGO_PKG_VERSION").to_owned(),
         core: "wasm".to_owned(),
         api: "http".to_owned(),
-        subscription_base: format!("{}/sub", state.config.public_url),
+        subscription_base: format!("{public_url}/sub"),
     })
 }
 

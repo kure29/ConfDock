@@ -100,7 +100,7 @@ Examples target Linux x86-64 with glibc, with systemd as the current native serv
 Internet → Nginx/Caddy HTTPS → 127.0.0.1:8787 → confdock → SQLite
 ```
 
-Keep the backend on loopback and do not expose the internal port through the firewall. HTTPS is required for public use; set `CONFDOCK_PUBLIC_URL` to the real origin and `CONFDOCK_COOKIE_SECURE=true`. WebSockets are not required. Use the distribution's generic Nginx/Caddy reverse-proxy configuration. The menu installer, Docker installation, and backup/restore are reserved for later slices. Before upgrades, stop the service and back up SQLite (do not copy only the main file while WAL writes are active), replace `/usr/local/bin/confdock`, and start it again. Migrations run at startup; do not downgrade an older binary and continue writing a database after a newer schema migration. Treat the data directory and hosted URLs as sensitive credentials.
+Keep the backend on loopback and do not expose the internal port through the firewall. HTTPS is required for public use; set `CONFDOCK_PUBLIC_URL` to the real origin (or update the same value from the authenticated Settings screen) and `CONFDOCK_COOKIE_SECURE=true`. WebSockets are not required. Use the distribution's generic Nginx/Caddy reverse-proxy configuration. The menu installer, Docker installation, and backup/restore are reserved for later slices. Before upgrades, stop the service and back up SQLite (do not copy only the main file while WAL writes are active), replace `/usr/local/bin/confdock`, and start it again. Migrations run at startup; do not downgrade an older binary and continue writing a database after a newer schema migration. Treat the data directory and hosted URLs as sensitive credentials.
 
 ## API overview
 
@@ -118,6 +118,8 @@ Management endpoints require a session; subscriptions use an unguessable stable 
 | `GET` | `/api/projects/:id/revisions/:revisionId` | Read one revision on demand |
 | `GET` / `POST` | `/api/projects/:id/tokens` | List / create hosted addresses |
 | `PATCH` / `DELETE` | `/api/projects/:id/tokens/:tokenId` | Update name/expiry / revoke |
+| `POST` | `/api/projects/:id/tokens/:tokenId/purge` | Permanently delete a revoked hosted address |
+| `GET` / `PATCH` | `/api/settings` | Read / update the public URL |
 | `GET` | `/sub/:token` | Return served revision bytes |
 
 Management and subscription responses use conservative `Cache-Control: no-store`; hashed static assets may be cached immutably while `index.html` is revalidated. Invalid, unknown, revoked, and expired tokens receive the same safe public response without reason leakage.

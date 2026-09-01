@@ -178,8 +178,12 @@ export interface ServiceInfo {
   version: string
   core: 'wasm'
   api: 'http'
-  /** Prefix a subscription URL is built on, e.g. `http://127.0.0.1:8787/sub`. */
+  /** Prefix a subscription URL is built on, e.g. `https://cd.example.test/sub`. */
   subscriptionBase: string
+}
+
+export interface ServiceSettings {
+  publicUrl: string
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +210,7 @@ export const API_ERROR = {
   publishConflict: 'publish.conflict',
   tokenNotFound: 'token.not_found',
   tokenConflict: 'token.conflict',
+  invalidPublicUrl: 'settings.invalid_public_url',
   revisionNotFound: 'revision.not_found',
   revisionDiffTooLarge: 'revision.diff_too_large',
   invalidResponse: 'network.invalid_response',

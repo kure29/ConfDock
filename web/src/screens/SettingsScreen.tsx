@@ -1,9 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api } from '../api'
 import type { ServiceInfo } from '../api'
-import { core } from '../core'
-import { describeScope, VALIDATION_LEVEL_COPY } from '../lib/copy'
 import { THEME_LABEL } from '../state/useTheme'
 import type { ThemePreference } from '../state/useTheme'
 import { useToast } from '../state/ToastContext'
@@ -20,11 +18,8 @@ interface SettingsScreenProps {
 }
 
 /**
- * Password, appearance, and what this build actually is.
- *
- * The capability table is rendered from the Rust registry rather than written
- * by hand, so it cannot claim an ability the adapters do not have — and it
- * updates itself when the Rust side gains one.
+ * Password, appearance, and the address clients should use to reach this
+ * instance.
  */
 export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
   const toast = useToast()
@@ -35,14 +30,69 @@ export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
   const [again, setAgain] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [publicUrl, setPublicUrl] = useState('')
+  const [publicUrlError, setPublicUrlError] = useState<string | null>(null)
+  const [publicUrlLoading, setPublicUrlLoading] = useState(true)
+  const [publicUrlBusy, setPublicUrlBusy] = useState(false)
+  const mountedRef = useRef(true)
+  const serviceInfoVersionRef = useRef(0)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     let live = true
-    void api.serviceInfo().then((result) => {
-      if (!live) return
-      if (result.ok) setService(result.value)
-      else setServiceError(result.error.message)
-    })
+    const requestVersion = serviceInfoVersionRef.current
+    void api
+      .serviceInfo()
+      .then((result) => {
+        if (
+          !live ||
+          !mountedRef.current ||
+          serviceInfoVersionRef.current !== requestVersion
+        ) {
+          return
+        }
+        if (result.ok) setService(result.value)
+        else setServiceError(result.error.message)
+      })
+      .catch(() => {
+        if (
+          live &&
+          mountedRef.current &&
+          serviceInfoVersionRef.current === requestVersion
+        ) {
+          setServiceError('无法读取服务信息，请稍后重试')
+        }
+      })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let live = true
+    void api
+      .settings()
+      .then((result) => {
+        if (!live) return
+        if (result.ok) {
+          setPublicUrl(result.value.publicUrl)
+          setPublicUrlError(null)
+        } else {
+          setPublicUrlError(result.error.message)
+        }
+      })
+      .catch(() => {
+        if (live) setPublicUrlError('无法读取对外访问地址')
+      })
+      .finally(() => {
+        if (live) setPublicUrlLoading(false)
+      })
     return () => {
       live = false
     }
@@ -72,6 +122,39 @@ export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
       toast.notify('密码已更新')
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function savePublicUrl(event: FormEvent) {
+    event.preventDefault()
+    setPublicUrlError(null)
+    const value = publicUrl.trim()
+    if (value.length === 0) {
+      setPublicUrlError('请输入对外访问地址')
+      return
+    }
+    setPublicUrlBusy(true)
+    try {
+      const result = await api.updatePublicUrl(value)
+      if (!mountedRef.current) return
+      if (!result.ok) {
+        setPublicUrlError(result.error.message)
+        return
+      }
+      serviceInfoVersionRef.current += 1
+      setPublicUrl(result.value.publicUrl)
+      setService((current) =>
+        current === null
+          ? current
+          : { ...current, subscriptionBase: `${result.value.publicUrl}/sub` },
+      )
+      toast.notify('对外访问地址已更新')
+    } catch {
+      if (mountedRef.current) {
+        setPublicUrlError('无法保存对外访问地址，请稍后重试')
+      }
+    } finally {
+      if (mountedRef.current) setPublicUrlBusy(false)
     }
   }
 
@@ -137,6 +220,38 @@ export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
           />
         </Panel>
 
+        <Panel
+          title="对外访问地址"
+          description="这是反向代理对外提供服务的地址；ConfDock 后端仍只监听 127.0.0.1。"
+        >
+          <form className={styles.form} onSubmit={(event) => void savePublicUrl(event)}>
+            <TextField
+              id="public-url"
+              label="访问地址"
+              type="url"
+              inputMode="url"
+              autoComplete="url"
+              placeholder="https://cd.maibi.de"
+              value={publicUrl}
+              disabled={publicUrlLoading || publicUrlBusy}
+              onChange={(event) => setPublicUrl(event.target.value)}
+              error={publicUrlError ?? undefined}
+              hint="支持 http:// 或 https://，可包含端口，不能填写路径。"
+              mono
+            />
+            <div>
+              <Button
+                type="submit"
+                variant="primary"
+                loading={publicUrlBusy}
+                disabled={publicUrlLoading}
+              >
+                保存地址
+              </Button>
+            </div>
+          </form>
+        </Panel>
+
         <Panel title="服务信息">
           {serviceError !== null && <p className={page.quiet}>{serviceError}</p>}
           <dl className={styles.info}>
@@ -158,59 +273,11 @@ export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
             </div>
             <div className={styles.infoRow}>
               <dt className={styles.term}>订阅前缀</dt>
-              <dd className={styles.mono}>{service?.subscriptionBase ?? '—'}</dd>
+              <dd className={styles.mono}>
+                {publicUrl.length > 0 ? `${publicUrl}/sub` : service?.subscriptionBase ?? '—'}
+              </dd>
             </div>
           </dl>
-        </Panel>
-
-        <Panel
-          title="已注册的客户端"
-          description="直接读自 Target Registry：这张表不是手写的，能力变了它就跟着变。"
-          flush
-        >
-          <div className={styles.tableWrap}>
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th scope="col">客户端</th>
-                  <th scope="col">后缀</th>
-                  <th scope="col">最深校验</th>
-                  <th scope="col">schema</th>
-                  <th scope="col">可结构化编辑的范围</th>
-                </tr>
-              </thead>
-              <tbody>
-                {core.targets().map((descriptor) => {
-                  const schema = core.schema(descriptor.id)
-                  const capabilities = core.editCapabilities(descriptor.id)
-                  return (
-                    <tr key={descriptor.id}>
-                      <th scope="row" className={styles.rowHead}>
-                        {descriptor.displayName}
-                      </th>
-                      <td className={styles.mono}>
-                        {descriptor.fileExtensions.map((ext) => `.${ext}`).join(' ')}
-                      </td>
-                      <td>
-                        {VALIDATION_LEVEL_COPY[descriptor.capabilities.validationLevel].label}
-                        {descriptor.capabilities.nativeValidation ? '' : '（无原生校验器）'}
-                      </td>
-                      <td>
-                        {schema === null ? '不暴露' : `${schema.fields.length} 个字段`}
-                      </td>
-                      <td>
-                        {capabilities.length === 0
-                          ? '无'
-                          : capabilities
-                              .map((capability) => describeScope(capability.scope))
-                              .join('；')}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
         </Panel>
       </div>
     </>

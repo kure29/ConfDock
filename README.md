@@ -12,7 +12,7 @@ ConfDock 在浏览器中管理一份代理客户端的原生配置文件：导�
 - 浏览器即时反馈 + Rust 服务端权威校验；保存前不会只信任前端结果。
 - 单管理员登录、SQLite 持久化、不可变 Revision 历史和项目内分页 Diff。
 - Save 只推进 `currentRevisionId`；Publish 只推进 `servedRevisionId`。Stable URL 永远只返回最近一次发布的 Revision，Draft 不会泄露。
-- 托管地址只在创建成功时返回一次明文 URL，可设置名称和有效期；Token 数据库只保存 Hash。
+- 托管地址只在创建成功时返回一次明文 URL，可设置名称和有效期；Token 数据库只保存 Hash。已撤销地址可在确认后永久删除。
 - 结构化编辑只修改明确的 Source Span；无法安全识别的内容继续使用 Raw Editor。
 
 ## 支持的客户端
@@ -31,7 +31,7 @@ Axum → confdock-core              （服务端权威校验和事务）
 SQLite / SQLx                     （管理员、会话、项目、Revision、Token）
 ```
 
-Native Config 原始字节是唯一 Source of Truth。Revision 不可变；历史查看、Diff 和托管地址都不会修改工作区内容。`expiresAt = null` 表示永不过期；到期后服务端拒绝后续订阅请求，但不会删除 Project、Revision 或 Token。过期 Token 可以延长或改为永不过期，已撤销 Token 不能恢复。
+Native Config 原始字节是唯一 Source of Truth。Revision 不可变；历史查看、Diff 和托管地址都不会修改工作区内容。`expiresAt = null` 表示永不过期；到期后服务端拒绝后续订阅请求，但不会删除 Project、Revision 或 Token。过期 Token 可以延长或改为永不过期，已撤销 Token 不能恢复，但可在管理界面确认后永久删除。
 
 ## 单二进制运行
 
@@ -97,7 +97,7 @@ cargo run -p confdock-service --bin confdock
 Internet → Nginx/Caddy HTTPS → 127.0.0.1:8787 → confdock → SQLite
 ```
 
-后端端口只监听本机，不需要在防火墙直接开放。对外服务必须启用 HTTPS，并将 `CONFDOCK_PUBLIC_URL` 设为实际公开 origin、`CONFDOCK_COOKIE_SECURE=true`。WebSocket 不是本服务必需项，不要为它额外放行。反向代理请使用发行版提供的通用 Nginx/Caddy 配置。菜单式安装器、Docker 和备份恢复属于后续 Slice。
+后端端口只监听本机，不需要在防火墙直接开放。设置页的“对外访问地址”会持久化反向代理公开 origin；也可在初次启动前用 `CONFDOCK_PUBLIC_URL` 设置默认值。地址仅允许 `http://` 或 `https://` 加域名和可选端口，不包含路径、查询参数或片段。对外服务必须启用 HTTPS，并将公开地址设为实际 HTTPS origin、`CONFDOCK_COOKIE_SECURE=true`。WebSocket 不是本服务必需项，不要为它额外放行。反向代理请使用发行版提供的通用 Nginx/Caddy 配置。菜单式安装器、Docker 和备份恢复属于后续 Slice。
 
 升级前先停止服务并备份 SQLite（WAL 写入期间不要只复制主数据库文件），再替换 `/usr/local/bin/confdock`、启动服务并观察 Migration 日志。不要在新 Schema 已写入后降级旧二进制继续写入。数据目录包含项目内容、Session 和 Token 元数据，应由受限用户读写并纳入备份；托管 URL 是敏感凭据，不要提交到 Issue 或日志。
 
@@ -117,6 +117,8 @@ Internet → Nginx/Caddy HTTPS → 127.0.0.1:8787 → confdock → SQLite
 | `GET` | `/api/projects/:id/revisions/:revisionId` | 按需读取历史字节 |
 | `GET` / `POST` | `/api/projects/:id/tokens` | 查看 / 创建托管地址 |
 | `PATCH` / `DELETE` | `/api/projects/:id/tokens/:tokenId` | 更新名称/有效期 / 撤销 |
+| `POST` | `/api/projects/:id/tokens/:tokenId/purge` | 永久删除已撤销托管地址 |
+| `GET` / `PATCH` | `/api/settings` | 读取 / 更新对外访问地址 |
 | `GET` | `/sub/:token` | 返回 served Revision 原始字节 |
 
 管理和订阅响应使用保守的 `Cache-Control: no-store`；静态 Hash assets 可长期缓存，`index.html` 使用重新验证策略。服务端统一拒绝不存在、无效、撤销或过期 Token，不暴露原因差异。

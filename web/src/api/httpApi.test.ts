@@ -851,6 +851,45 @@ describe('HTTP API error boundary', () => {
     if (!deleted.ok) expect(deleted.error.code).not.toBe('auth.unauthorized')
   })
 
+  it('purges a revoked hosted address through the dedicated endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await createHttpApi().deleteRevokedToken('project/1', 'token/1')
+    expect(result).toEqual({ ok: true, value: undefined })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project%2F1/tokens/token%2F1/purge',
+      expect.objectContaining({ method: 'POST', credentials: 'same-origin' }),
+    )
+  })
+
+  it('reads and updates the public URL settings with strict response decoding', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ publicUrl: 'https://cd.example.test' }))
+      .mockResolvedValueOnce(Response.json({ publicUrl: 'https://cd.example.test:8443' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createHttpApi()
+    await expect(api.settings()).resolves.toEqual({
+      ok: true,
+      value: { publicUrl: 'https://cd.example.test' },
+    })
+    await expect(api.updatePublicUrl('https://cd.example.test:8443')).resolves.toEqual({
+      ok: true,
+      value: { publicUrl: 'https://cd.example.test:8443' },
+    })
+    expect(JSON.parse(fetchMock.mock.calls[1]![1].body as string)).toEqual({
+      publicUrl: 'https://cd.example.test:8443',
+    })
+  })
+
+  it('rejects malformed public URL settings responses', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ publicUrl: '' })))
+    await expect(createHttpApi().settings()).resolves.toEqual({
+      ok: false,
+      error: { code: 'network.invalid_response', message: 'ConfDock 服务返回了无效响应' },
+    })
+  })
+
   it('decodes hosted address metadata without exposing token hashes', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       Response.json({

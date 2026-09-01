@@ -37,6 +37,7 @@ import type {
   PublishResult,
   SaveResult,
   ServiceInfo,
+  ServiceSettings,
 } from './types'
 
 /**
@@ -547,6 +548,13 @@ function decodeCreatedAccessToken(value: unknown): CreatedAccessToken {
   }
 }
 
+function decodeServiceSettings(value: unknown): ServiceSettings {
+  if (!isRecord(value) || typeof value.publicUrl !== 'string' || value.publicUrl.length === 0) {
+    throw new Error('invalid service settings')
+  }
+  return { publicUrl: value.publicUrl }
+}
+
 function decodeProjectResult(wire: Wire['project']): Result<Project, ApiError> {
   try {
     return ok(decodeProject(wire))
@@ -891,8 +899,35 @@ export function createHttpApi(baseUrl = ''): ConfDockApi {
       )
     },
 
+    async deleteRevokedToken(projectId: string, tokenId: string): Promise<Result<void, ApiError>> {
+      return request<void>(
+        'POST',
+        `/api/projects/${encodeURIComponent(projectId)}/tokens/${encodeURIComponent(tokenId)}/purge`,
+      )
+    },
+
     async serviceInfo(): Promise<Result<ServiceInfo, ApiError>> {
       return request<ServiceInfo>('GET', '/api/service')
+    },
+
+    async settings(): Promise<Result<ServiceSettings, ApiError>> {
+      const result = await request<unknown>('GET', '/api/settings')
+      if (!result.ok) return result
+      try {
+        return ok(decodeServiceSettings(result.value))
+      } catch {
+        return err(invalidResponse())
+      }
+    },
+
+    async updatePublicUrl(publicUrl: string): Promise<Result<ServiceSettings, ApiError>> {
+      const result = await request<unknown>('PATCH', '/api/settings', { publicUrl })
+      if (!result.ok) return result
+      try {
+        return ok(decodeServiceSettings(result.value))
+      } catch {
+        return err(invalidResponse())
+      }
     },
   }
 }

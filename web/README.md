@@ -113,8 +113,8 @@ await initializeCore()
 root.render(<App />)
 ```
 
-`mockCore.ts` 与重复的 `registry.ts` 已删除；TargetPicker、Settings 和结构化编辑器全部从
-`core.targets()`、`core.schema()` 与 `core.editCapabilities()` 读取能力。WASM 初始化失败时只显示
+`mockCore.ts` 与重复的 `registry.ts` 已删除；TargetPicker 和结构化编辑器全部从
+`core.targets()`、`core.schema()` 与 `core.editCapabilities()` 读取能力，Settings 只管理实例设置与外观。WASM 初始化失败时只显示
 明确的启动错误，不会静默回退到 TypeScript 解析器。`isStrictJsonLiteral` 也不再存在于前端，
 最终值安全判断由 Rust adapter 执行。
 
@@ -147,6 +147,9 @@ DELETE /api/projects/:id
 GET    /api/projects/:id/tokens       → AccessToken[]（只含前后缀）
 POST   /api/projects/:id/tokens       → { token, plaintext, url }   ← 明文仅此一次返回
 DELETE /api/projects/:id/tokens/:tid
+POST   /api/projects/:id/tokens/:tid/purge → 永久删除已撤销地址
+GET    /api/settings                  → { publicUrl }
+PATCH  /api/settings                  { publicUrl } → { publicUrl }
 GET    /api/service                   → ServiceInfo
 GET    /healthz                       → { status: "ok" }
 GET    /sub/:token                    → served 修订的原生字节（唯一返回裸字节的端点）

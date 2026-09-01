@@ -63,6 +63,38 @@ fn config_check_is_database_free_and_rejects_missing_files() {
 }
 
 #[test]
+fn environment_public_url_uses_the_same_validation_boundary() {
+    let directory = tempfile::tempdir().unwrap();
+    let accepted = Command::new(binary())
+        .args(["config", "check"])
+        .env_clear()
+        .env("CONFDOCK_PUBLIC_URL", " https://example.test/ \t\n")
+        .current_dir(directory.path())
+        .output()
+        .unwrap();
+    assert!(
+        accepted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+
+    for value in [
+        "https://example.test:",
+        "http://127.0.0.1:",
+        "http://[::1]:",
+    ] {
+        let rejected = Command::new(binary())
+            .args(["config", "check"])
+            .env_clear()
+            .env("CONFDOCK_PUBLIC_URL", value)
+            .current_dir(directory.path())
+            .output()
+            .unwrap();
+        assert!(!rejected.status.success(), "{value}");
+    }
+}
+
+#[test]
 fn non_interactive_first_start_gives_actionable_message() {
     let directory = TempDir::new().unwrap();
     let data_dir = directory.path().join("data");

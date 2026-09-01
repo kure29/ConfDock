@@ -315,18 +315,42 @@ impl ServiceConfig {
     }
 }
 
-fn normalize_public_url(value: &str) -> Result<String, ConfigError> {
+pub fn normalize_public_url(value: &str) -> Result<String, ConfigError> {
+    let value = value.trim();
+    if value.is_empty() || has_explicit_empty_port(value) {
+        return Err(ConfigError::InvalidPublicUrl);
+    }
     let parsed = Url::parse(value).map_err(|_| ConfigError::InvalidPublicUrl)?;
     if !matches!(parsed.scheme(), "http" | "https")
         || parsed.host_str().is_none()
         || !parsed.username().is_empty()
         || parsed.password().is_some()
+        || (parsed.path() != "" && parsed.path() != "/")
         || parsed.query().is_some()
         || parsed.fragment().is_some()
     {
         return Err(ConfigError::InvalidPublicUrl);
     }
-    Ok(value.trim_end_matches('/').to_owned())
+    Ok(parsed.origin().ascii_serialization())
+}
+
+/// `url::Url` treats an authority ending in `:` as an omitted default port.
+/// That is useful for URL parsing in general, but it is ambiguous for a
+/// setting that must contain a stable origin, so reject only this narrow form
+/// before delegating all other URL parsing to the crate.
+fn has_explicit_empty_port(value: &str) -> bool {
+    let Some(authority_start) = value.find("://").map(|index| index + 3) else {
+        return false;
+    };
+    let authority_end = value[authority_start..]
+        .find(['/', '?', '#'])
+        .map(|index| authority_start + index)
+        .unwrap_or(value.len());
+    let authority = &value[authority_start..authority_end];
+    let host_port = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    !host_port.is_empty() && host_port.ends_with(':')
 }
 
 fn database_url_from_data_dir(value: &str) -> Result<String, ConfigError> {
@@ -424,9 +448,39 @@ mod tests {
             normalize_public_url("https://example.test/").unwrap(),
             "https://example.test"
         );
+        assert_eq!(
+            normalize_public_url(" https://example.test/ \t\n").unwrap(),
+            "https://example.test"
+        );
+        assert_eq!(
+            normalize_public_url("https://EXAMPLE.COM/").unwrap(),
+            "https://example.com"
+        );
+        assert_eq!(
+            normalize_public_url("https://example.com:443/").unwrap(),
+            "https://example.com"
+        );
+        assert_eq!(
+            normalize_public_url("http://[::1]:8787/").unwrap(),
+            "http://[::1]:8787"
+        );
+        assert_eq!(
+            normalize_public_url("https://例子.测试/").unwrap(),
+            "https://xn--fsqu00a.xn--0zwm56d"
+        );
         assert!(normalize_public_url("file:///tmp/config").is_err());
         assert!(normalize_public_url("https://user@example.test").is_err());
+        assert!(normalize_public_url("https://example.test/path").is_err());
         assert!(normalize_public_url("https://example.test/?token=secret").is_err());
+        for value in [
+            "https://example.test:",
+            "http://127.0.0.1:",
+            "http://[::1]:",
+            "https://example.com:65536",
+            "https://exa\u{0000}mple.com",
+        ] {
+            assert!(normalize_public_url(value).is_err(), "{value:?}");
+        }
     }
     #[test]
     fn resource_limits_have_explicit_upper_bounds() {
@@ -473,7 +527,10 @@ mod tests {
         let config_path = directory.path().join("config.toml");
         fs::write(
             &config_path,
-            "listen = \"127.0.0.1:9000\"\ndata_dir = \"data\"\npublic_url = \"https://example.test/\"\n",
+            r#"listen = "127.0.0.1:9000"
+data_dir = "data"
+public_url = " https://example.test/ "
+"#,
         )
         .unwrap();
         let config =
