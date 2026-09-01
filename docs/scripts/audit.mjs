@@ -2,7 +2,13 @@ import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-export const ALLOWED_ADVISORY = 'GHSA-67mh-4wv8-2f99'
+export const ALLOWED_ADVISORIES = Object.freeze([
+  'GHSA-67mh-4wv8-2f99',
+  'GHSA-4w7w-66w2-5vf9',
+  'GHSA-v6wh-96g9-6wx3',
+  'GHSA-fx2h-pf6j-xcff',
+])
+const ALLOWED_ADVISORY_SET = new Set(ALLOWED_ADVISORIES.map((advisory) => advisory.toUpperCase()))
 
 const SEVERITIES = ['info', 'low', 'moderate', 'high', 'critical']
 const EXPECTED_PACKAGES = new Set(['esbuild', 'vite', 'vitepress'])
@@ -198,7 +204,7 @@ export function validateAuditReport(report) {
           addError(errors, `${packageName} advisory URL does not contain exactly one GHSA ID`)
         } else {
           advisoryIds.add(ids[0])
-          if (ids[0] !== ALLOWED_ADVISORY.toUpperCase()) {
+          if (!ALLOWED_ADVISORY_SET.has(ids[0])) {
             addError(errors, `unexpected advisory ${ids[0]}`)
           }
         }
@@ -269,9 +275,9 @@ export function main() {
   try {
     const validation = runAudit()
     if (validation.vulnerabilityCount === 0) {
-      console.log(`npm audit found no vulnerabilities; remove the ${ALLOWED_ADVISORY} whitelist after confirming the clean result.`)
+      console.log(`npm audit found no vulnerabilities; remove the ${ALLOWED_ADVISORIES.join(', ')} whitelist after confirming the clean result.`)
     } else {
-      console.log(`npm audit passed with the sole allowlisted advisory ${ALLOWED_ADVISORY}; all other advisories and Critical findings remain blocking.`)
+      console.log(`npm audit passed with only the allowlisted advisories ${ALLOWED_ADVISORIES.join(', ')}; all other advisories and Critical findings remain blocking.`)
     }
     return 0
   } catch (error) {

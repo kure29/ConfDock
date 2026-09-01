@@ -47,10 +47,11 @@ jobs:
         run: npm run docs:audit:test --prefix docs
 
       - name: Audit documentation dependencies
-        # VitePress 1.6.4 currently pulls GHSA-67mh-4wv8-2f99 through
-        # vite -> esbuild. The audit script fails closed for every other
-        # advisory, package, dependency chain, Critical finding, or malformed
-        # report. Remove the whitelist after an upstream stable fix lands.
+        # VitePress 1.6.4 currently pulls four advisories through
+        # vite -> esbuild. The audit script allows only their exact GHSA IDs
+        # and fails closed for every other advisory, package, dependency chain,
+        # Critical finding, or malformed report. Remove the whitelist after
+        # upstream stable fixes land.
         run: npm run docs:audit --prefix docs
 
       - name: Audit production dependency tree
