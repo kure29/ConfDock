@@ -41,10 +41,10 @@ ConfDock 提供 `confdock` 单二进制：React/Vite production assets、Rust WA
 
 ```bash
 ./scripts/build-single-binary.sh
-./scripts/smoke-single-binary.sh target/release/confdock
+./scripts/smoke-single-binary.sh target/confdock-rust-1.88.0/native/release/confdock
 ```
 
-Smoke Test 会从不含源码和 `web/dist` 的临时目录启动，检查 `/healthz`、SPA、JS/CSS/WASM/PNG MIME、HEAD、API/sub 边界、路径穿越防护和 SIGTERM 退出。
+Smoke Test 会从不含源码和 `web/dist` 的临时目录启动，检查 `/healthz`、SPA、JS/CSS/WASM MIME、HEAD、API/sub 边界、路径穿越防护和 SIGTERM 退出。
 在 GitHub Actions 页面手动运行 `workflow_dispatch` 会额外生成并上传
 `confdock-linux-x86_64` Artifact（保留 7 天）；普通 Push/PR 只执行同一套打包、解压和 Smoke Test，不会长期保存 Artifact。
 归档包含 `confdock`、根目录 `config.toml` 和 `SHA256SUMS`，不包含数据库、密码或源码。
@@ -131,7 +131,7 @@ Internet → Nginx/Caddy HTTPS → 127.0.0.1:8787 → confdock → SQLite
 - 不运行代理、不管理客户端进程、不测速、不做跨格式转换。
 - 没有 Rollback、Token Rotation、自动 Publish、Revision 删除或 Native Validator。
 - 不提供 Docker、ARM64、Windows/macOS 安装器、正式 Release、Tag 或自动 Deploy。
-- 项目许可证为 [Apache License 2.0](LICENSE)；分发时还需遵守依赖许可证（见 [第三方通知](THIRD_PARTY_NOTICES.md)）。Mihomo 使用 ConfDock 自己的中性字母标识；其他客户端名称和图标是各自权利人的商标/版权，仅用于识别支持的 Target，不暗示 ConfDock 获得认证、合作或背书。
+- 项目许可证为 [Apache License 2.0](LICENSE)；当前的[第三方许可证清单](THIRD_PARTY_LICENSE_INVENTORY.md)仅用于开发和 Release 准备，不是完整的发行通知。六个客户端均使用 ConfDock 自有的中性 CSS 文字标识，不包含第三方客户端 Logo 或图标图片。
 - 当前 Session Cookie 使用 HttpOnly、SameSite=Strict、Host-only 和可选 Secure；不启用 CORS。显式 Origin/CSRF 防护仍属于 V1 最终安全审查事项，管理端不应直接暴露给不可信来源。
 
 ## 验证
@@ -148,7 +148,7 @@ npm run build --prefix web
 npm audit --prefix web
 npm audit --prefix web --omit=dev
 ./scripts/build-single-binary.sh
-./scripts/smoke-single-binary.sh target/release/confdock
+./scripts/smoke-single-binary.sh target/confdock-rust-1.88.0/native/release/confdock
 ```
 
-欢迎提交 Issue 和 Pull Request。新增客户端时请同时补充 Rust adapter、fixture、能力矩阵、Target 图标来源和测试，并保持原始字节保真约束。开发构建固定使用仓库中的 `rust-toolchain.toml`（Rust 1.88.0 + `wasm32-unknown-unknown`）。
+欢迎提交 Issue 和 Pull Request。新增客户端时请同时补充 Rust adapter、fixture、能力矩阵、中性 CSS 文字标识和测试，并保持原始字节保真约束。开发构建要求 rustup，并固定使用仓库中的 `rust-toolchain.toml`（Rust 1.88.0 + `wasm32-unknown-unknown`）；单二进制脚本在工具链专属目录复用缓存，再明确复制成 `target/release/confdock` 兼容输出。

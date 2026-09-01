@@ -30,6 +30,8 @@ pub async fn update(
     // Serialize persistence and the in-memory value so concurrent updates
     // cannot leave service-info responses ahead of (or behind) SQLite.
     let mut current = state.public_url.write().await;
+    #[cfg(test)]
+    state.test_hooks.settings_write_checkpoint().await;
     storage::update_public_url(&state.pool, &public_url).await?;
     *current = public_url.clone();
     Ok((StatusCode::OK, Json(ServiceSettingsDto { public_url })))

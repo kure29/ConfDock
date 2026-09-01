@@ -27,11 +27,6 @@ pub async fn file(Path(path): Path<String>, method: Method) -> Response {
     serve(&key, &method)
 }
 
-pub async fn icon(Path(path): Path<String>, method: Method) -> Response {
-    let path = path.trim_start_matches('/');
-    serve(&format!("client-icons/{path}"), &method)
-}
-
 pub async fn fallback(method: Method, uri: Uri) -> Response {
     let path = uri.path();
     let relative = path.strip_prefix('/').unwrap_or(path);
@@ -164,7 +159,6 @@ mod tests {
         assert!(is_hashed_asset("assets/index-AbCd1234.js"));
         assert!(is_hashed_asset("assets/index-C0P-BXNx.js"));
         assert!(!is_hashed_asset("assets/index.js"));
-        assert!(!is_hashed_asset("client-icons/sing-box.png"));
         assert_eq!(cache_control("index.html"), "no-cache");
     }
 
@@ -183,7 +177,7 @@ mod tests {
         );
         assert_eq!(content_type("assets/app.css"), "text/css; charset=utf-8");
         assert_eq!(content_type("assets/core.wasm"), "application/wasm");
-        assert_eq!(content_type("client-icons/client.png"), "image/png");
-        assert_eq!(content_type("client-icons/client.webp"), "image/webp");
+        assert_eq!(content_type("images/example.png"), "image/png");
+        assert_eq!(content_type("images/example.webp"), "image/webp");
     }
 }

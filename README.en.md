@@ -41,10 +41,10 @@ Build locally with Node.js 22, Rust 1.88.0, and `wasm-bindgen-cli 0.2.127`:
 
 ```bash
 ./scripts/build-single-binary.sh
-./scripts/smoke-single-binary.sh target/release/confdock
+./scripts/smoke-single-binary.sh target/confdock-rust-1.88.0/native/release/confdock
 ```
 
-The smoke test starts from a temporary directory without source or `web/dist`, checks `/healthz`, SPA fallback, JS/CSS/WASM/PNG MIME types, HEAD, API/sub boundaries, traversal protection, and SIGTERM shutdown.
+The smoke test starts from a temporary directory without source or `web/dist`, checks `/healthz`, SPA fallback, JS/CSS/WASM MIME types, HEAD, API/sub boundaries, traversal protection, and SIGTERM shutdown.
 Run `workflow_dispatch` manually from GitHub Actions to build and upload the
 `confdock-linux-x86_64` artifact (retained for 7 days). Pushes and pull
 requests execute the same package, extraction, and smoke checks without
@@ -139,7 +139,7 @@ Management and subscription responses use conservative `Cache-Control: no-store`
 - No proxy runtime, client-process management, node measurements, or cross-format conversion.
 - No Rollback, token rotation, automatic Publish, revision deletion, or Native Validator.
 - No Docker, ARM64, Windows/macOS installer, formal Release, Tag, or automatic Deploy.
-- The project is licensed under the [Apache License 2.0](LICENSE); redistributors must also comply with dependency licenses (see [third-party notices](THIRD_PARTY_NOTICES.md)). Mihomo uses a neutral ConfDock letter marker; other client names and icons belong to their respective rights holders and are used only to identify supported Targets; they do not imply certification, partnership, or endorsement by ConfDock.
+- The project is licensed under the [Apache License 2.0](LICENSE). The current [third-party license inventory](THIRD_PARTY_LICENSE_INVENTORY.md) is for development and release preparation and is not a complete release notices artifact. All six clients use original neutral ConfDock CSS text markers; no third-party client logo or icon image is bundled.
 - Session cookies remain HttpOnly, SameSite=Strict, host-only, and optionally Secure; CORS is not enabled. Explicit Origin/CSRF protection remains a final V1 security-review item, so do not expose the management surface to untrusted origins.
 
 ## Verification
@@ -156,7 +156,7 @@ npm run build --prefix web
 npm audit --prefix web
 npm audit --prefix web --omit=dev
 ./scripts/build-single-binary.sh
-./scripts/smoke-single-binary.sh target/release/confdock
+./scripts/smoke-single-binary.sh target/confdock-rust-1.88.0/native/release/confdock
 ```
 
-Issues and pull requests are welcome. New adapters should include Rust fixtures, capability-matrix updates, icon-source records, and regression tests while preserving native-byte round trips. Developer builds use the pinned `rust-toolchain.toml` (Rust 1.88.0 plus `wasm32-unknown-unknown`).
+Issues and pull requests are welcome. New adapters should include Rust fixtures, capability-matrix updates, a neutral CSS text marker, and regression tests while preserving native-byte round trips. Developer builds require rustup and the pinned `rust-toolchain.toml` (Rust 1.88.0 plus `wasm32-unknown-unknown`); the single-binary script reuses a toolchain-specific target directory and explicitly copies the compatible output to `target/release/confdock`.

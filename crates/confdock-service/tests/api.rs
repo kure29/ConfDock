@@ -33,6 +33,10 @@ use tower::ServiceExt;
 const PASSWORD: &str = "test-only-admin-password-123!";
 static ENV_LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
 
+fn binary() -> &'static str {
+    env!("CARGO_BIN_EXE_confdock")
+}
+
 struct EnvRestore {
     name: &'static str,
     previous: Option<std::ffi::OsString>,
@@ -2296,39 +2300,58 @@ async fn existing_database_does_not_relax_invalid_startup_configuration() {
         "https://persisted.example.test",
     )
     .await;
+    let config_path = directory.path().join("invalid-existing.toml");
+    fs::write(
+        &config_path,
+        format!(
+            "data_dir = {:?}\npublic_url = \"https://persisted.example.test/path\"\n",
+            directory.path().display().to_string()
+        ),
+    )
+    .unwrap();
+    let error = ServiceConfig::from_sources(
+        Some(&config_path),
+        confdock_service::config::ConfigOverrides::default(),
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        confdock_service::config::ConfigError::ConfigFileInvalid { .. }
+    ));
+    let settings_url: String =
+        sqlx::query_scalar("SELECT public_url FROM instance_settings WHERE id = 1")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(settings_url, "https://persisted.example.test");
     state.pool.close().await;
 
-    let invalid_url = ServiceConfig::new(
-        "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
-        database_url.clone(),
-        "https://persisted.example.test/path".to_owned(),
-        None,
-        3600,
-        false,
-        1024 * 1024,
-    );
-    assert!(matches!(
-        invalid_url,
-        Err(confdock_service::config::ConfigError::InvalidPublicUrl)
-    ));
-
-    let invalid_other_field = ServiceConfig::new(
-        "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
-        database_url,
-        "https://persisted.example.test".to_owned(),
-        None,
-        0,
-        false,
-        1024 * 1024,
-    );
-    assert!(matches!(
-        invalid_other_field,
-        Err(confdock_service::config::ConfigError::InvalidSessionTtl)
-    ));
+    let invalid_other = directory.path().join("invalid-session.toml");
+    fs::write(
+        &invalid_other,
+        format!(
+            "data_dir = {:?}\nsession_ttl_seconds = 0\n",
+            directory.path().display().to_string()
+        ),
+    )
+    .unwrap();
+    let output = std::process::Command::new(binary())
+        .args([
+            "--config",
+            invalid_other.to_str().unwrap(),
+            "config",
+            "check",
+        ])
+        .current_dir(directory.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid-session.toml"));
+    assert!(!directory.path().join("confdock.db").exists());
 }
 
 #[tokio::test]
-async fn persisted_public_url_wins_over_environment_fallback() {
+async fn config_environment_cli_precedence_then_persisted_public_url_wins() {
     let _env_guard = ENV_LOCK.get_or_init(|| AsyncMutex::new(())).lock().await;
     let directory = tempfile::tempdir().unwrap();
     let database_path = directory.path().join("confdock.db");
@@ -2357,10 +2380,13 @@ async fn persisted_public_url_wins_over_environment_fallback() {
     let _public_url = EnvRestore::set("CONFDOCK_PUBLIC_URL", "https://environment.example.test");
     let config = ServiceConfig::from_sources(
         Some(&config_path),
-        confdock_service::config::ConfigOverrides::default(),
+        confdock_service::config::ConfigOverrides {
+            public_url: Some("https://cli.example.test".to_owned()),
+            ..Default::default()
+        },
     )
     .unwrap();
-    assert_eq!(config.public_url, "https://environment.example.test");
+    assert_eq!(config.public_url, "https://cli.example.test");
     let restarted = AppState::initialize_unbootstrapped(config).await.unwrap();
     assert_eq!(
         restarted.public_url.read().await.as_str(),

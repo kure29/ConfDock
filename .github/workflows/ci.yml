@@ -111,13 +111,13 @@ jobs:
         run: ./scripts/build-single-binary.sh
 
       - name: Run from a source-free temporary directory
-        run: ./scripts/smoke-single-binary.sh target/release/confdock
+        run: ./scripts/smoke-single-binary.sh target/confdock-rust-1.88.0/native/release/confdock
 
       - name: Package and re-test the downloadable archive
         run: |
           package_dir="$(mktemp -d)"
           trap 'rm -rf "$package_dir"' EXIT
-          ./scripts/package-single-binary.sh target/release/confdock "$package_dir"
+          ./scripts/package-single-binary.sh target/confdock-rust-1.88.0/native/release/confdock "$package_dir"
 
   # Artifact publication is deliberately opt-in. Pull requests and pushes
   # execute the same packaging and extraction checks above without retaining
@@ -164,14 +164,14 @@ jobs:
 
       - name: Inspect Linux compatibility and build sizes
         run: |
-          file target/release/confdock
-          ldd target/release/confdock
-          printf 'binary_bytes=%s\n' "$(wc -c < target/release/confdock | tr -d ' ')"
+          file target/confdock-rust-1.88.0/native/release/confdock
+          ldd target/confdock-rust-1.88.0/native/release/confdock
+          printf 'binary_bytes=%s\n' "$(wc -c < target/confdock-rust-1.88.0/native/release/confdock | tr -d ' ')"
           printf 'web_dist_bytes=%s\n' "$(find web/dist -type f -print0 | xargs -0 wc -c | tail -1 | awk '{print $1}')"
           printf 'wasm_bytes=%s\n' "$(find web/dist -type f -name '*.wasm' -print0 | xargs -0 wc -c | tail -1 | awk '{print $1}')"
 
       - name: Package, extract, verify SHA-256, and smoke-test
-        run: ./scripts/package-single-binary.sh target/release/confdock artifact
+        run: ./scripts/package-single-binary.sh target/confdock-rust-1.88.0/native/release/confdock artifact
 
       - name: Upload Linux x86_64 artifact
         uses: actions/upload-artifact@v4

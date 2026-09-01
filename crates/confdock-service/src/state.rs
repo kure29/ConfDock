@@ -12,6 +12,9 @@ use sqlx::{
 use thiserror::Error;
 use tokio::sync::{Mutex, RwLock, RwLockReadGuard, Semaphore};
 
+#[cfg(test)]
+use tokio::sync::oneshot;
+
 use crate::{
     auth::{bootstrap_admin, cleanup_expired_sessions, AuthError, LoginThrottle},
     config::{ConfigError, ServiceConfig},
@@ -41,6 +44,52 @@ pub struct AppState {
     pub registry: Arc<TargetRegistry>,
     pub login_throttle: Arc<LoginThrottle>,
     pub diff_slots: Arc<Semaphore>,
+    #[cfg(test)]
+    pub(crate) test_hooks: Arc<TestHooks>,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct TestHooks {
+    token_read_gate: Mutex<Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>>,
+    settings_write_gate: Mutex<Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>>,
+}
+
+#[cfg(test)]
+impl TestHooks {
+    pub(crate) async fn install_token_read_gate(
+        &self,
+    ) -> (oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        *self.token_read_gate.lock().await = Some((entered_tx, release_rx));
+        (entered_rx, release_tx)
+    }
+
+    pub(crate) async fn install_settings_write_gate(
+        &self,
+    ) -> (oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        *self.settings_write_gate.lock().await = Some((entered_tx, release_rx));
+        (entered_rx, release_tx)
+    }
+
+    pub(crate) async fn token_read_checkpoint(&self) {
+        let gate = self.token_read_gate.lock().await.take();
+        if let Some((entered, release)) = gate {
+            let _ = entered.send(());
+            let _ = release.await;
+        }
+    }
+
+    pub(crate) async fn settings_write_checkpoint(&self) {
+        let gate = self.settings_write_gate.lock().await.take();
+        if let Some((entered, release)) = gate {
+            let _ = entered.send(());
+            let _ = release.await;
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -105,6 +154,8 @@ impl AppState {
             registry: Arc::new(TargetRegistry::builtin()),
             login_throttle: Arc::new(LoginThrottle::default()),
             diff_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_DIFFS)),
+            #[cfg(test)]
+            test_hooks: Arc::new(TestHooks::default()),
         })
     }
 }

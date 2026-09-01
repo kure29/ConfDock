@@ -51,6 +51,25 @@ fn config_check_is_database_free_and_rejects_missing_files() {
     );
     assert!(!directory.path().join("relative-data").exists());
 
+    let invalid = directory.path().join("invalid-public-url.toml");
+    fs::write(&invalid, "public_url = \"https://example.test/path\"\n").unwrap();
+    let output = Command::new(binary())
+        .args([
+            "--listen",
+            "127.0.0.1:1",
+            "--config",
+            invalid.to_str().unwrap(),
+            "config",
+            "check",
+        ])
+        .current_dir(directory.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid-public-url.toml"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("could not bind"));
+    assert!(!directory.path().join("confdock.db").exists());
+
     let missing = directory.path().join("missing.toml");
     let output = Command::new(binary())
         .args(["config", "check", "--config"])

@@ -12,38 +12,25 @@ interface TargetPickerProps {
   detections?: readonly DetectionResult[]
 }
 
-const TARGET_ICON: Partial<Record<TargetId, string>> = {
-  'sing-box': 'sing-box.png',
-  surge: 'surge.png',
-  loon: 'loon.png',
-  'quantumult-x': 'quantumult-x.png',
-  shadowrocket: 'shadowrocket.png',
+const TARGET_MARKER: Record<TargetId, string> = {
+  mihomo: 'M',
+  'sing-box': 'SB',
+  surge: 'SG',
+  loon: 'L',
+  'quantumult-x': 'QX',
+  shadowrocket: 'SR',
 }
 
-/** Local raster assets keep rendering deterministic and avoid remote hotlinks. */
-function TargetIcon({ id }: { id: TargetId }) {
-  if (id === 'mihomo') {
-    return (
-      <span className={cx(styles.icon, styles.letterIcon)} aria-hidden="true" data-target-letter={id}>
-        M
-      </span>
-    )
-  }
-
-  const icon = TARGET_ICON[id]
-  if (icon === undefined) return null
+/** Original ConfDock text markers avoid third-party artwork and remote assets. */
+function TargetMarker({ id }: { id: TargetId }) {
   return (
-    <img
-      className={styles.icon}
-      src={`/client-icons/${icon}`}
-      alt=""
+    <span
+      className={styles.marker}
       aria-hidden="true"
-      data-target-icon={id}
-      loading="lazy"
-      onError={(event) => {
-        event.currentTarget.hidden = true
-      }}
-    />
+      data-target-marker={id}
+    >
+      {TARGET_MARKER[id]}
+    </span>
   )
 }
 
@@ -74,7 +61,7 @@ export function TargetPicker({ value, onChange, detections = [] }: TargetPickerP
                   checked={selected}
                   onChange={() => onChange(descriptor.id)}
                 />
-                <TargetIcon id={descriptor.id} />
+                <TargetMarker id={descriptor.id} />
                 <span className={styles.text}>
                   <span className={styles.name}>{descriptor.displayName}</span>
                   {detection !== undefined && detection.confidence !== 'none' && (

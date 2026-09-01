@@ -80,7 +80,6 @@ assert_content_type() {
 
 assert_content_type "$script_path" "application/javascript; charset=utf-8"
 assert_content_type "$style_path" "text/css; charset=utf-8"
-assert_content_type "/client-icons/sing-box.png" "image/png"
 curl -fsS "$base_url$script_path" -o "$runtime_dir/app.js"
 test -s "$runtime_dir/app.js"
 curl -fsS "$base_url$style_path" -o "$runtime_dir/app.css"
@@ -97,7 +96,7 @@ test "$head_bytes" = "0"
 test "$(curl -fsS -o "$runtime_dir/spa.html" -w '%{http_code}' "$base_url/p/smoke")" = "200"
 grep -F '<div id="root"></div>' "$runtime_dir/spa.html" >/dev/null
 
-for path in /api/not-found /sub/not-found /assets/missing.js /assets/missing.css /assets/missing.wasm /client-icons/missing.png /client-icons/missing.webp; do
+for path in /api/not-found /sub/not-found /assets/missing.js /assets/missing.css /assets/missing.wasm; do
   status="$(curl -sS -o "$runtime_dir/missing.body" -w '%{http_code}' "$base_url$path")"
   test "$status" = "404"
   ! grep -F '<div id="root"></div>' "$runtime_dir/missing.body" >/dev/null

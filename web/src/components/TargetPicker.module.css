@@ -65,24 +65,19 @@
   margin-right: auto;
 }
 
-.icon {
+.marker {
   flex: 0 0 40px;
   width: 40px;
   height: 40px;
   border-radius: var(--radius);
-  object-fit: contain;
   background: var(--bg-inset);
-}
-
-/* Mihomo has no bundled third-party artwork: this neutral letter is a
- * nominative target marker implemented entirely with ConfDock's own tokens. */
-.letterIcon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--fg-muted);
-  font-size: var(--text-lg);
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
+  letter-spacing: -0.02em;
   line-height: 1;
 }
 

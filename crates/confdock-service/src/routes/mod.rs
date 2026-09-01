@@ -80,7 +80,6 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(assets::index))
         .route("/index.html", get(assets::index))
         .route("/assets/{*path}", get(assets::file))
-        .route("/client-icons/{*path}", get(assets::icon))
         .route("/favicon.svg", get(assets::favicon))
         .fallback(assets::fallback);
 
@@ -149,4 +148,209 @@ pub(super) fn with_clear_cookie(error: ApiError, state: &AppState) -> Response {
 
 pub(super) fn insert_set_cookie(response: &mut Response, value: HeaderValue) {
     response.headers_mut().insert(header::SET_COOKIE, value);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::SocketAddr;
+
+    use axum::{
+        body::{to_bytes, Body},
+        http::{header, Method, Request, Response, StatusCode},
+        Router,
+    };
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use serde_json::{json, Value};
+    use tempfile::TempDir;
+    use tower::ServiceExt;
+
+    use crate::{
+        auth::{create_session, SESSION_COOKIE},
+        config::ServiceConfig,
+        state::AppState,
+    };
+
+    async fn test_app() -> (Router, AppState, TempDir) {
+        let directory = tempfile::tempdir().unwrap();
+        let database_url = format!(
+            "sqlite://{}",
+            directory.path().join("confdock.db").display()
+        );
+        let config = ServiceConfig::new(
+            SocketAddr::from(([127, 0, 0, 1], 0)),
+            database_url,
+            "http://127.0.0.1:8787".to_owned(),
+            Some("test-only-admin-password-123!".to_owned()),
+            3600,
+            false,
+            1024 * 1024,
+        )
+        .unwrap();
+        let state = AppState::initialize(config).await.unwrap();
+        let app = super::router(state.clone());
+        (app, state, directory)
+    }
+
+    async fn request(
+        app: &Router,
+        method: Method,
+        uri: &str,
+        cookie: &str,
+        body: Option<Value>,
+    ) -> Response<Body> {
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(header::COOKIE, cookie);
+        let body = match body {
+            Some(body) => {
+                builder = builder.header(header::CONTENT_TYPE, "application/json");
+                Body::from(serde_json::to_vec(&body).unwrap())
+            }
+            None => Body::empty(),
+        };
+        app.clone()
+            .oneshot(builder.body(body).unwrap())
+            .await
+            .unwrap()
+    }
+
+    async fn response_json(response: Response<Body>) -> Value {
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+    }
+
+    async fn session_cookie(state: &AppState) -> String {
+        let (_, token) = create_session(&state.pool, 3600).await.unwrap();
+        format!("{SESSION_COOKIE}={token}")
+    }
+
+    async fn create_project(app: &Router, cookie: &str, name: &str) -> String {
+        let response = request(
+            app,
+            Method::POST,
+            "/api/projects",
+            cookie,
+            Some(json!({
+                "name": name,
+                "targetId": "sing-box",
+                "fileName": "config.json",
+                "source": STANDARD.encode(br#"{}"#),
+            })),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        response_json(response).await["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[tokio::test]
+    async fn token_handler_read_lock_precedes_settings_handler_write_lock() {
+        let (app, state, _directory) = test_app().await;
+        let cookie = session_cookie(&state).await;
+        let project_id = create_project(&app, &cookie, "Token first").await;
+        let token_uri = format!("/api/projects/{project_id}/tokens");
+        let (entered, release) = state.test_hooks.install_token_read_gate().await;
+
+        let token_app = app.clone();
+        let token_cookie = cookie.clone();
+        let token_task = tokio::spawn(async move {
+            request(&token_app, Method::POST, &token_uri, &token_cookie, None).await
+        });
+        entered.await.unwrap();
+
+        let settings_app = app.clone();
+        let settings_cookie = cookie.clone();
+        let settings_task = tokio::spawn(async move {
+            request(
+                &settings_app,
+                Method::PATCH,
+                "/api/settings",
+                &settings_cookie,
+                Some(json!({"publicUrl": "https://new.example.test"})),
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+        assert!(!settings_task.is_finished());
+
+        release.send(()).unwrap();
+        let token_response = token_task.await.unwrap();
+        assert_eq!(token_response.status(), StatusCode::CREATED);
+        let token = response_json(token_response).await;
+        assert!(token["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("http://127.0.0.1:8787/sub/"));
+
+        let settings_response = settings_task.await.unwrap();
+        assert_eq!(settings_response.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(settings_response).await,
+            json!({"publicUrl": "https://new.example.test"})
+        );
+        assert_eq!(
+            state.public_url.read().await.as_str(),
+            "https://new.example.test"
+        );
+        let stored: String =
+            sqlx::query_scalar("SELECT public_url FROM instance_settings WHERE id = 1")
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, "https://new.example.test");
+    }
+
+    #[tokio::test]
+    async fn settings_handler_write_lock_precedes_token_handler_read_lock() {
+        let (app, state, _directory) = test_app().await;
+        let cookie = session_cookie(&state).await;
+        let project_id = create_project(&app, &cookie, "Settings first").await;
+        let token_uri = format!("/api/projects/{project_id}/tokens");
+        let (entered, release) = state.test_hooks.install_settings_write_gate().await;
+
+        let settings_app = app.clone();
+        let settings_cookie = cookie.clone();
+        let settings_task = tokio::spawn(async move {
+            request(
+                &settings_app,
+                Method::PATCH,
+                "/api/settings",
+                &settings_cookie,
+                Some(json!({"publicUrl": "https://new.example.test"})),
+            )
+            .await
+        });
+        entered.await.unwrap();
+
+        let token_app = app.clone();
+        let token_cookie = cookie.clone();
+        let token_task = tokio::spawn(async move {
+            request(&token_app, Method::POST, &token_uri, &token_cookie, None).await
+        });
+        tokio::task::yield_now().await;
+        assert!(!token_task.is_finished());
+
+        release.send(()).unwrap();
+        let settings_response = settings_task.await.unwrap();
+        assert_eq!(settings_response.status(), StatusCode::OK);
+        let token_response = token_task.await.unwrap();
+        assert_eq!(token_response.status(), StatusCode::CREATED);
+        let token = response_json(token_response).await;
+        assert!(token["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://new.example.test/sub/"));
+        assert_eq!(
+            state.public_url.read().await.as_str(),
+            "https://new.example.test"
+        );
+        let stored: String =
+            sqlx::query_scalar("SELECT public_url FROM instance_settings WHERE id = 1")
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, "https://new.example.test");
+    }
 }

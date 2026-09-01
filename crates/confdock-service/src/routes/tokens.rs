@@ -42,6 +42,8 @@ pub async fn create(
     // complete. Settings updates hold the matching write lock across their
     // SQLite update, giving these operations an explicit linearization point.
     let public_url = read_public_url(&state.public_url).await;
+    #[cfg(test)]
+    state.test_hooks.token_read_checkpoint().await;
     let token = storage::create_token(
         &state.pool,
         &id,

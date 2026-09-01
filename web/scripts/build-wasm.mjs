@@ -7,7 +7,11 @@ import { fileURLToPath } from 'node:url'
 const webDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repository = resolve(webDir, '..')
 const generated = resolve(webDir, 'src/core/wasm-generated')
-const wasmBinary = resolve(repository, 'target/wasm32-unknown-unknown/release/confdock_wasm.wasm')
+const wasmTargetDir = resolve(
+  repository,
+  process.env.CONFDOCK_WASM_TARGET_DIR ?? 'target/confdock-rust-1.88.0/wasm',
+)
+const wasmBinary = resolve(wasmTargetDir, 'wasm32-unknown-unknown/release/confdock_wasm.wasm')
 
 mkdirSync(generated, { recursive: true })
 
@@ -25,28 +29,47 @@ function run(command, args, options = {}) {
   }
 }
 
-// On developer machines Homebrew's standalone cargo can appear before the
-// rustup toolchain in PATH. Resolve the active rustup binaries explicitly so
-// the wasm32 standard library installed by rustup is always used. CI's
-// setup-rust-toolchain also works with these paths.
 function rustupBinary(name) {
-  const result = spawnSync('rustup', ['which', name], { encoding: 'utf8' })
-  if (result.status === 0) return result.stdout.trim()
-  return name
+  const result = spawnSync('rustup', ['which', '--toolchain', '1.88.0', name], {
+    encoding: 'utf8',
+  })
+  if (result.status === 0 && result.stdout.trim() !== '') return result.stdout.trim()
+  throw new Error(`Rust 1.88.0 is required; rustup could not resolve ${name}`)
 }
 
 const cargo = rustupBinary('cargo')
 const rustc = rustupBinary('rustc')
+const rustcVersionResult = spawnSync(rustc, ['--version'], { encoding: 'utf8' })
+const cargoVersionResult = spawnSync(cargo, ['--version'], { encoding: 'utf8' })
+const rustcVersion = rustcVersionResult.stdout.trim()
+const cargoVersion = cargoVersionResult.stdout.trim()
+if (!/^rustc 1\.88\.0 \(/.test(rustcVersion)) {
+  throw new Error(`Rust 1.88.0 is required (found ${rustcVersion})`)
+}
+if (!/^cargo 1\.88\.0 \(/.test(cargoVersion)) {
+  throw new Error(`Cargo 1.88.0 is required (found ${cargoVersion})`)
+}
+
 const cargoBin = dirname(cargo)
 const cargoHomeBin = resolve(process.env.CARGO_HOME ?? resolve(homedir(), '.cargo'), 'bin')
+const wasmBindgen = resolve(
+  repository,
+  process.env.CONFDOCK_WASM_BINDGEN ?? resolve(cargoHomeBin, 'wasm-bindgen'),
+)
+const wasmBindgenVersion = spawnSync(wasmBindgen, ['--version'], { encoding: 'utf8' })
+if (
+  wasmBindgenVersion.status !== 0 ||
+  !/^wasm-bindgen 0\.2\.127$/.test(wasmBindgenVersion.stdout.trim())
+) {
+  throw new Error('wasm-bindgen 0.2.127 is required')
+}
+
 const toolchainLib = resolve(dirname(rustc), '..', 'lib')
 const buildEnv = {
   ...process.env,
-  // CI setup actions may export a different default (for example `stable`).
-  // Keep compiler invocations made by Cargo build scripts on the repository's
-  // pinned toolchain as well as the top-level cargo process.
   RUSTUP_TOOLCHAIN: '1.88.0',
   RUSTC: rustc,
+  CARGO_TARGET_DIR: wasmTargetDir,
   PATH: `${cargoBin}:${cargoHomeBin}:${process.env.PATH ?? ''}`,
   ...(existsSync(resolve(toolchainLib, 'libLLVM.dylib'))
     ? { DYLD_LIBRARY_PATH: `${toolchainLib}:${process.env.DYLD_LIBRARY_PATH ?? ''}` }
@@ -56,7 +79,7 @@ const buildEnv = {
 run(cargo, ['build', '-p', 'confdock-wasm', '--target', 'wasm32-unknown-unknown', '--release'], {
   env: buildEnv,
 })
-run(resolve(cargoHomeBin, 'wasm-bindgen'), [
+run(wasmBindgen, [
   wasmBinary,
   '--target',
   'web',

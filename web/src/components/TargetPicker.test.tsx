@@ -4,23 +4,27 @@ import { core } from '../core'
 import { TargetPicker } from './TargetPicker'
 
 describe('TargetPicker cards', () => {
-  it('renders local raster icons and a neutral Mihomo marker for every target', () => {
+  it('renders original neutral text markers and names for every target', () => {
     const markup = renderToStaticMarkup(<TargetPicker value={null} onChange={() => {}} />)
     const descriptors = core.targets()
+    const markers = {
+      mihomo: 'M',
+      'sing-box': 'SB',
+      surge: 'SG',
+      loon: 'L',
+      'quantumult-x': 'QX',
+      shadowrocket: 'SR',
+    } as const
     expect(descriptors).toHaveLength(6)
-    expect((markup.match(/data-target-icon=/g) ?? []).length).toBe(descriptors.length - 1)
-    expect((markup.match(/<img /g) ?? []).length).toBe(descriptors.length - 1)
-    expect(markup).toContain('data-target-letter="mihomo"')
-    expect(markup).toContain('>M</span>')
-    expect(markup).not.toContain('data-target-icon="mihomo"')
+    expect((markup.match(/data-target-marker=/g) ?? []).length).toBe(descriptors.length)
+    expect((markup.match(/aria-hidden="true"/g) ?? []).length).toBe(descriptors.length)
+    expect(markup).not.toContain('<img')
     expect(markup).not.toContain('<svg')
     expect(markup).not.toMatch(/https?:\/\//)
     for (const descriptor of descriptors) {
       expect(markup).toContain(descriptor.displayName)
-      if (descriptor.id !== 'mihomo') {
-        const icon = `${descriptor.id === 'sing-box' ? 'sing-box' : descriptor.id}.png`
-        expect(markup).toContain(`/client-icons/${icon}`)
-      }
+      expect(markup).toContain(`data-target-marker="${descriptor.id}"`)
+      expect(markup).toContain(`>${markers[descriptor.id]}</span>`)
     }
     expect(markup).not.toContain('最深校验')
     expect(markup).not.toContain('.yaml')
