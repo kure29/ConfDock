@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api } from '../api'
 import type { ServiceInfo } from '../api'
@@ -34,14 +34,41 @@ export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
   const [publicUrlError, setPublicUrlError] = useState<string | null>(null)
   const [publicUrlLoading, setPublicUrlLoading] = useState(true)
   const [publicUrlBusy, setPublicUrlBusy] = useState(false)
+  const mountedRef = useRef(true)
+  const serviceInfoVersionRef = useRef(0)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     let live = true
-    void api.serviceInfo().then((result) => {
-      if (!live) return
-      if (result.ok) setService(result.value)
-      else setServiceError(result.error.message)
-    })
+    const requestVersion = serviceInfoVersionRef.current
+    void api
+      .serviceInfo()
+      .then((result) => {
+        if (
+          !live ||
+          !mountedRef.current ||
+          serviceInfoVersionRef.current !== requestVersion
+        ) {
+          return
+        }
+        if (result.ok) setService(result.value)
+        else setServiceError(result.error.message)
+      })
+      .catch(() => {
+        if (
+          live &&
+          mountedRef.current &&
+          serviceInfoVersionRef.current === requestVersion
+        ) {
+          setServiceError('无法读取服务信息，请稍后重试')
+        }
+      })
     return () => {
       live = false
     }
@@ -109,10 +136,12 @@ export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
     setPublicUrlBusy(true)
     try {
       const result = await api.updatePublicUrl(value)
+      if (!mountedRef.current) return
       if (!result.ok) {
         setPublicUrlError(result.error.message)
         return
       }
+      serviceInfoVersionRef.current += 1
       setPublicUrl(result.value.publicUrl)
       setService((current) =>
         current === null
@@ -120,8 +149,12 @@ export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
           : { ...current, subscriptionBase: `${result.value.publicUrl}/sub` },
       )
       toast.notify('对外访问地址已更新')
+    } catch {
+      if (mountedRef.current) {
+        setPublicUrlError('无法保存对外访问地址，请稍后重试')
+      }
     } finally {
-      setPublicUrlBusy(false)
+      if (mountedRef.current) setPublicUrlBusy(false)
     }
   }
 
@@ -240,7 +273,9 @@ export function SettingsScreen({ theme, onThemeChange }: SettingsScreenProps) {
             </div>
             <div className={styles.infoRow}>
               <dt className={styles.term}>订阅前缀</dt>
-              <dd className={styles.mono}>{service?.subscriptionBase ?? '—'}</dd>
+              <dd className={styles.mono}>
+                {publicUrl.length > 0 ? `${publicUrl}/sub` : service?.subscriptionBase ?? '—'}
+              </dd>
             </div>
           </dl>
         </Panel>
