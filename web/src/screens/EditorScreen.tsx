@@ -9,7 +9,6 @@ import {
   ServedUrlDialog,
   SourceEditor,
   StructuredFieldList,
-  TargetBadge,
   ValidationLevelBadge,
   diagnosticMarkers,
 } from '../components'
@@ -27,6 +26,7 @@ import {
 } from '../lib/copy'
 import { useProject } from '../state/useProject'
 import { useToast } from '../state/ToastContext'
+import { targetName } from '../lib/targetName'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { Dialog } from '../ui/Dialog'
@@ -213,7 +213,7 @@ export function EditorScreen() {
             if (event.key === 'Escape') setNameDraft(project.name)
           }}
         />
-        <TargetBadge id={project.targetId} />
+        <span className={styles.target}>{targetName(project.targetId)}</span>
         <span className={styles.file}>{project.fileName}</span>
         {project.hasUnpublishedChanges && <Badge tone="accent">未发布</Badge>}
         {dirty && <span className={styles.dirty} title="有未保存的改动" />}

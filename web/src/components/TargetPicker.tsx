@@ -12,28 +12,6 @@ interface TargetPickerProps {
   detections?: readonly DetectionResult[]
 }
 
-const TARGET_MARKER: Record<TargetId, string> = {
-  mihomo: 'M',
-  'sing-box': 'SB',
-  surge: 'SG',
-  loon: 'L',
-  'quantumult-x': 'QX',
-  shadowrocket: 'SR',
-}
-
-/** Original ConfDock text markers avoid third-party artwork and remote assets. */
-function TargetMarker({ id }: { id: TargetId }) {
-  return (
-    <span
-      className={styles.marker}
-      aria-hidden="true"
-      data-target-marker={id}
-    >
-      {TARGET_MARKER[id]}
-    </span>
-  )
-}
-
 /**
  * Every target returned by the Rust registry, in registry order.
  *
@@ -61,7 +39,6 @@ export function TargetPicker({ value, onChange, detections = [] }: TargetPickerP
                   checked={selected}
                   onChange={() => onChange(descriptor.id)}
                 />
-                <TargetMarker id={descriptor.id} />
                 <span className={styles.text}>
                   <span className={styles.name}>{descriptor.displayName}</span>
                   {detection !== undefined && detection.confidence !== 'none' && (

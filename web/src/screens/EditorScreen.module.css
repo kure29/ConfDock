@@ -50,6 +50,14 @@
   color: var(--fg-subtle);
 }
 
+.target {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
 .dirty {
   width: 6px;
   height: 6px;

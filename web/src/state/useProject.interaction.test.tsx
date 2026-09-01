@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
     renameProject: vi.fn(),
   },
   core: {
+    descriptor: (id: string) => ({ displayName: `Registry ${id}` }),
     documentInfo: (source: Uint8Array) => ({
       encoding: 'utf8' as const,
       lineEnding: 'lf' as const,
@@ -381,6 +382,27 @@ describe('useProject rename and write交错', () => {
     await resolve(rename, failure('network.error'))
 
     expect(nameInput().props.value).toBe('Second project')
+    renderer.unmount()
+  })
+
+  it('renders the current target as the registry display name without a target badge', async () => {
+    const renderer = await (async () => {
+      const load = deferred<Result<Project, ApiError>>()
+      mocks.api.getProject.mockImplementationOnce(() => load.promise)
+      let resultRenderer!: ReturnType<typeof create>
+      await act(async () => {
+        resultRenderer = create(<EditorScreen />)
+      })
+      await resolve(load, result(project('p1', { targetId: 'sing-box' })))
+      return resultRenderer
+    })()
+
+    const spanText = renderer.root
+      .findAllByType('span')
+      .map((node) => node.props.children)
+      .filter((children): children is string => typeof children === 'string')
+    expect(spanText).toContain('Registry sing-box')
+    expect(spanText).not.toContain('SB')
     renderer.unmount()
   })
 })
