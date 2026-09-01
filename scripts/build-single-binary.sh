@@ -16,8 +16,8 @@ done
 # rust-toolchain.toml itself. If rustup is present but cannot resolve the
 # pinned toolchain, fail instead of silently building with another version.
 if command -v rustup >/dev/null; then
-  rustup_cargo_bin="$(rustup which cargo)"
-  rustup_rustc_bin="$(rustup which rustc)"
+  rustup_cargo_bin="$(rustup which --toolchain 1.88.0 cargo)"
+  rustup_rustc_bin="$(rustup which --toolchain 1.88.0 rustc)"
 else
   rustup_cargo_bin="$(command -v cargo)"
   rustup_rustc_bin="$(command -v rustc)"
@@ -68,9 +68,11 @@ binary="target/release/confdock"
 temporary_unembedded="$(mktemp -t confdock-unembedded.XXXXXX)"
 trap 'rm -f "$temporary_unembedded"' EXIT
 
-"$rustup_cargo_bin" build -p confdock-service --release
+RUSTUP_TOOLCHAIN=1.88.0 RUSTC="$rustup_rustc_bin" \
+  "$rustup_cargo_bin" build -p confdock-service --release
 cp "$binary" "$temporary_unembedded"
-"$rustup_cargo_bin" build -p confdock-service --release --features embedded-web
+RUSTUP_TOOLCHAIN=1.88.0 RUSTC="$rustup_rustc_bin" \
+  "$rustup_cargo_bin" build -p confdock-service --release --features embedded-web
 
 web_dist_bytes="$(find web/dist -type f -print0 | xargs -0 wc -c | tail -1 | awk '{print $1}')"
 wasm_bytes="$(find web/dist -type f -name '*.wasm' -print0 | xargs -0 wc -c | tail -1 | awk '{print $1}')"
