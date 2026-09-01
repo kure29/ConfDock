@@ -20,7 +20,7 @@ interface DialogProps {
  */
 export function Dialog({ open, onClose, title, description, footer, children }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null)
-  const titleRef = useRef<HTMLHeadingElement>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
   /** Several dialogs are mounted at once (closed ones still render), so the
    * title id has to be unique per instance. */
   const titleId = useId()
@@ -28,14 +28,31 @@ export function Dialog({ open, onClose, title, description, footer, children }: 
   useEffect(() => {
     const dialog = ref.current
     if (dialog === null) return
-    if (open && !dialog.open) {
-      dialog.showModal()
-      // Native dialogs otherwise move focus to the first input. Focusing the
-      // title gives touch users a stable starting point without stealing their
-      // attention into a form control as soon as the sheet opens.
-      titleRef.current?.focus({ preventScroll: true })
+    const modal = dialog
+    if (open && !modal.open) {
+      const active = typeof document === 'undefined' ? null : document.activeElement
+      openerRef.current =
+        typeof HTMLElement !== 'undefined' && active instanceof HTMLElement ? active : null
+      modal.showModal()
+      // Keep initial focus on the non-interactive container. This prevents
+      // iOS from opening the keyboard when a dialog contains a form control.
+      modal.focus({ preventScroll: true })
     }
-    if (!open && dialog.open) dialog.close()
+
+    function closeAndRestoreFocus() {
+      if (modal.open) modal.close()
+      const opener = openerRef.current
+      openerRef.current = null
+      if (opener?.isConnected) opener.focus({ preventScroll: true })
+    }
+
+    if (!open) closeAndRestoreFocus()
+    return () => {
+      // A dialog can be removed by a parent (the nested delete confirmation
+      // does this), so close it explicitly before unmounting and restore the
+      // control that opened it.
+      if (modal.open) closeAndRestoreFocus()
+    }
   }, [open])
 
   /** Esc and the form's implicit close both fire `cancel`/`close`. */
@@ -66,9 +83,7 @@ export function Dialog({ open, onClose, title, description, footer, children }: 
     >
       <div className={styles.inner}>
         <header className={styles.header}>
-          <h2 ref={titleRef} className={styles.title} id={titleId} tabIndex={-1}>
-            {title}
-          </h2>
+          <h2 className={styles.title} id={titleId}>{title}</h2>
           {description !== undefined && <p className={styles.description}>{description}</p>}
         </header>
         <div className={styles.body}>{children}</div>

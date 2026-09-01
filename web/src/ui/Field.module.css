@@ -102,3 +102,12 @@
   transform: translateY(-70%) rotate(45deg);
   pointer-events: none;
 }
+
+/* iOS Safari zooms a page when a focused editable control is smaller than
+ * 16px. Keep the compact desktop scale, but use the platform-safe size on
+ * touch devices and narrow viewports. */
+@media (pointer: coarse), (max-width: 640px) {
+  .control {
+    font-size: 16px;
+  }
+}
