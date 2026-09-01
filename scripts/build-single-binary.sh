@@ -73,6 +73,12 @@ binary="target/release/confdock"
 temporary_unembedded="$(mktemp -t confdock-unembedded.XXXXXX)"
 trap 'rm -f "$temporary_unembedded"' EXIT
 
+# The CI Rust cache can contain artifacts produced by another default
+# toolchain (for example stable). Remove them before the first native build so
+# both passes below are compiled consistently with the pinned compiler.
+RUSTUP_TOOLCHAIN=1.88.0 RUSTC="$rustup_rustc_bin" \
+  "$rustup_cargo_bin" clean
+
 RUSTUP_TOOLCHAIN=1.88.0 RUSTC="$rustup_rustc_bin" \
   "$rustup_cargo_bin" build -p confdock-service --release
 cp "$binary" "$temporary_unembedded"
