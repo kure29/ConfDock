@@ -18,6 +18,11 @@ done
 if command -v rustup >/dev/null; then
   rustup_cargo_bin="$(rustup which --toolchain 1.88.0 cargo)"
   rustup_rustc_bin="$(rustup which --toolchain 1.88.0 rustc)"
+  # Cargo resolves rustc through PATH unless RUSTC is honored by every nested
+  # invocation. Put the pinned toolchain first as a second guard against CI
+  # setup actions that leave a `stable` rustup shim ahead of it.
+  pinned_toolchain_bin="$(dirname "$rustup_rustc_bin")"
+  export PATH="$pinned_toolchain_bin:$PATH"
 else
   rustup_cargo_bin="$(command -v cargo)"
   rustup_rustc_bin="$(command -v rustc)"
