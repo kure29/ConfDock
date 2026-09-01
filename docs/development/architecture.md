@@ -1,5 +1,7 @@
 # ConfDock architecture (Slice 4)
 
+> 本页保留实现级架构记录，面向需要阅读 Rust/WASM/SQLite 边界的开发者。用户导向的概览请先看[产品介绍](../guide/introduction)和[核心概念](../guide/core-concepts)。
+
 ## Product boundary
 
 ConfDock is a self-hosted configuration management and stable-URL serving

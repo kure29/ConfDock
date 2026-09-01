@@ -15,7 +15,7 @@ interface TargetPickerProps {
 /**
  * Every target returned by the Rust registry, in registry order.
  *
- * Detection is shown as a hint and nothing more: `docs/architecture.md` is
+ * Detection is shown as a hint and nothing more: `docs/development/architecture.md` is
  * explicit that `detect` is advisory and a user-selected target always wins, so
  * this component never auto-selects and never disables a row.
  */

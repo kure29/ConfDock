@@ -1,162 +1,80 @@
 # ConfDock
 
-> A self-hosted manager and stable subscription endpoint for native proxy-client configuration files.
+> Manage native configuration, publish a stable subscription endpoint.
 
-[简体中文](README.md) · [Architecture](docs/architecture.md) · [Backup and restore](docs/backup-and-restore.md) · [Web development notes](web/README.md)
+[简体中文](README.md) · [Documentation](https://kure29.github.io/ConfDock/) · [Architecture](docs/development/architecture.md) · [Backup and restore](docs/operations/backup-and-restore.md) · [Web development notes](web/README.md)
 
-ConfDock lets you import, edit, validate, save, publish, and inspect the history of one proxy client's native configuration in a browser. Native bytes remain the source of truth: ConfDock does not run proxy traffic or silently convert and reserialize documents.
+ConfDock is a self-hosted configuration manager for native proxy-client files. Import, edit, validate, save, and publish one client document in a browser, then create a stable subscription URL for the published revision. Native bytes remain the source of truth: ConfDock does not run proxy traffic, measure nodes, manage client processes, or convert between formats.
 
 ## What works today
 
-- Byte-preserving editing keeps BOMs, line endings, comments, ordering, and unknown fields.
-- Browser feedback is backed by authoritative Rust validation before persistence.
-- Single-administrator authentication, SQLite persistence, immutable revisions, paginated history, and read-only revision diff.
-- Save advances `currentRevisionId`; Publish advances `servedRevisionId`. Stable URLs return only the latest served revision, never an unpublished draft.
-- Hosted addresses return their plaintext URL only once at creation, support a display name and expiry, and store only a token hash in SQLite.
-- Structured editing changes only explicit source spans; unsafe content remains available through the Raw Editor.
+- Byte-preserving edits keep BOMs, line endings, comments, ordering, and unknown fields. Structured edits are local Source Span patches.
+- Immutable Revisions provide history metadata, read-only details, and bounded diffs.
+- Save advances only `currentRevisionId`; Publish advances `servedRevisionId`. Stable URLs never expose an unpublished draft.
+- Single-administrator SQLite persistence and high-entropy Hosted Address tokens. Plaintext is returned once at creation; SQLite stores only a hash.
 
 ## Supported clients
 
-Mihomo, sing-box, Surge, Loon, Quantumult X, and Shadowrocket. Each Target keeps a raw editing path and displays the structured-editing and validation boundary actually implemented. Native Validator integrations are not implemented; Static/Syntax/Basic describe ConfDock's current layers, not official client validators.
+Mihomo, sing-box, Surge, Loon, Quantumult X, and Shadowrocket. Current validation levels are Basic, Syntax, and Static; Native Validator integration is not implemented. Every Target displays ConfDock's complete plain-text name. No third-party logos, images, emoji, abbreviated badges, or CSS client marks are shipped.
 
-## Architecture and data semantics
+## Data semantics
+
+A Project maps to one Target and one Native Config. Revisions store the original SQLite BLOB; history, diff, and Hosted Address reads never mutate the editor.
+
+- `currentRevisionId` is the saved draft shown in management; `servedRevisionId` is what a Stable URL returns.
+- Save creates a new Current Revision; Publish only moves Served Revision and never auto-publishes or rotates a token.
+- `expires_at = null` means a Hosted Address never expires; a revoked address cannot be restored, but may be purged after confirmation.
+
+## Quick start
+
+Only the Linux x86-64 glibc artifact is currently verified. There is no formal Release yet. Run the GitHub Actions `workflow_dispatch` build manually and download the temporary `confdock-linux-x86_64` artifact (retained for 7 days). It contains:
 
 ```text
-React / Vite (5173 in development; served by Axum in the binary)
-├── confdock-wasm → confdock-core  (instant validation and source-span edits)
-└── same-origin /api requests
-        ↓
-Axum → confdock-core              (authoritative validation and transactions)
-        ↓
-SQLite / SQLx                     (admin, sessions, projects, revisions, tokens)
+confdock
+config.toml
+SHA256SUMS
 ```
 
-Native configuration bytes are the only Source of Truth. Revisions are immutable; history, diff, and hosted-address reads do not modify the editor. `expiresAt = null` means never expires. After expiry the server rejects subsequent subscription requests without deleting the Project, revisions, or token. An expired token may be extended or made permanent; a revoked token cannot be restored.
-
-## Single-binary distribution
-
-ConfDock provides a `confdock` binary embedding the React/Vite production assets, Rust WASM, SQLx migrations, and Axum routes. Runtime operation requires no Node.js, npm, Vite, `web/dist`, or external migration/WASM files; SQLite remains persistent data on disk.
-
-Build locally with Node.js 22, Rust 1.88.0, and `wasm-bindgen-cli 0.2.127`:
-
 ```bash
-./scripts/build-single-binary.sh
-./scripts/smoke-single-binary.sh target/confdock-rust-1.88.0/native/release/confdock
-```
-
-The smoke test starts from a temporary directory without source or `web/dist`, checks `/healthz`, SPA fallback, JS/CSS/WASM MIME types, HEAD, API/sub boundaries, traversal protection, and SIGTERM shutdown.
-Run `workflow_dispatch` manually from GitHub Actions to build and upload the
-`confdock-linux-x86_64` artifact (retained for 7 days). Pushes and pull
-requests execute the same package, extraction, and smoke checks without
-retaining an artifact.
-The archive contains `confdock`, a root-level `config.toml`, and `SHA256SUMS`; it
-does not contain a database, passwords, or source files.
-
-Runtime configuration follows built-in defaults → `config.toml` → `CONFDOCK_*` environment variables → explicit CLI flags. The packaged archive includes [packaging/config.toml](packaging/config.toml); configuration files never contain passwords or tokens, and relative `data_dir` paths resolve relative to the configuration file.
-
-On first startup, the fully parsed and validated public URL is used only as the
-fallback to initialize `instance_settings.id=1`. Once that singleton exists,
-the database value is authoritative at runtime: a value saved from Settings
-survives restart, and later edits to `config.toml` or `CONFDOCK_PUBLIC_URL` do
-not overwrite it. The file, environment, and CLI inputs are still fully parsed
-and validated on every startup; an invalid configuration therefore still stops
-startup even when the database already has a value. Change an initialized
-instance's public URL from the authenticated Settings screen.
-
-```bash
-./confdock --help
+sha256sum -c SHA256SUMS
 ./confdock config check --config ./config.toml
 ./confdock admin init --config ./config.toml
 ./confdock --config ./config.toml
 ```
 
-Starting directly from an interactive terminal prompts to initialize the fixed `admin` user on an empty database and then continues serving. For systemd and other non-interactive environments, run `admin init` first. `CONFDOCK_BOOTSTRAP_PASSWORD` remains available for controlled automation, but must not be written to `config.toml`.
+`admin init` requires an interactive terminal and creates the fixed `admin` user. Non-interactive systemd startup must initialize first. Set `public_url` to the real HTTPS origin; keep the backend on `127.0.0.1:8787` and terminate HTTPS with Nginx or Caddy.
 
-Runtime environment variables (advanced compatibility entry point):
+Start with [binary deployment](docs/deployment/binary.md) and [systemd](docs/deployment/systemd.md), then configure the [reverse proxy](docs/deployment/reverse-proxy.md).
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `CONFDOCK_LISTEN` | `127.0.0.1:8787` | API/Web listen address |
-| `CONFDOCK_DATA_DIR` | `/var/lib/confdock` | Absolute data directory; uses `confdock.db` inside it |
-| `CONFDOCK_DATABASE_URL` | `sqlite:///var/lib/confdock/confdock.db` | Choose this or `CONFDOCK_DATA_DIR`; existing URL configuration remains supported |
-| `CONFDOCK_PUBLIC_URL` | `http://127.0.0.1:8787` | Public origin for stable URLs |
-| `CONFDOCK_BOOTSTRAP_PASSWORD` | none | First administrator only |
-| `CONFDOCK_COOKIE_SECURE` | `false` | Set `true` behind an HTTPS reverse proxy |
-| `CONFDOCK_SESSION_TTL_SECONDS` | `604800` | Session lifetime, at most one year |
-| `CONFDOCK_MAX_CONFIG_BYTES` | `8388608` | Decoded configuration limit, up to 64 MiB |
-| `RUST_LOG` | `info` | Log filter |
+## Status and boundaries
 
-Setting both data-location variables fails explicitly, avoiding an unpredictable current-directory database. Startup creates the data directory, runs migrations, and on Unix restricts the SQLite file and WAL/SHM sidecars as far as the host permits.
+- Production is an independent Rust single binary embedding React/Vite assets, WASM, SQLx migrations, and Axum routes. Node.js and the docs site are not runtime dependencies.
+- Docker, ARM64 artifacts, Windows/macOS installers, formal Releases, tags, automatic backups/deploys, rollback, token rotation, clustering, and multiple administrators are not implemented.
+- Stable URLs return only the Served Revision; Save never auto-publishes. The public origin is persisted in `instance_settings.id=1` and does not change the listener.
+- Back up only after stopping the service, including the complete data directory, SQLite WAL/SHM sidecars, and the actual configuration directory.
 
-## Local development
+The public origin is persisted in the database singleton; editing `config.toml` does not replace an initialized value. Update it from the authenticated Settings screen.
 
-```bash
-npm ci --prefix web
-npm run dev --prefix web
+## Documentation and development
 
-CONFDOCK_BOOTSTRAP_PASSWORD='local-development-password' \
-CONFDOCK_DATABASE_URL='sqlite://data/confdock-dev.db' \
-cargo run -p confdock-service --bin confdock
-```
+The complete, user-oriented documentation lives in the [VitePress site](https://kure29.github.io/ConfDock/) and remains readable from the repository:
 
-Vite proxies `/api` and `/sub` to the Rust service during development. The production binary serves `/`, assets, `/api/**`, `/sub/**`, and `/healthz` from Axum.
+- [Getting started and core concepts](docs/guide/getting-started.md)
+- [Binary, configuration, systemd, and reverse proxy](docs/deployment/binary.md)
+- [Backup, restore, upgrade, and troubleshooting](docs/operations/backup-and-restore.md)
+- [CLI, API, and security boundaries](docs/reference/cli.md)
+- [Architecture, ADRs, and local development](docs/development/architecture.md)
 
-## Linux Deployment
-
-Examples target Linux x86-64 with glibc, with systemd as the current native service-management target: [deploy/systemd/confdock.service](deploy/systemd/confdock.service), [the environment sample](deploy/systemd/confdock.env.example), and [the systemd notes](deploy/systemd/README.md). Debian/Ubuntu commands are examples only; ARM64 and other service managers are outside this slice's verification scope. Recommended topology:
-
-```text
-Internet → Nginx/Caddy HTTPS → 127.0.0.1:8787 → confdock → SQLite
-```
-
-Keep the backend on loopback and do not expose the internal port through the firewall. HTTPS is required for public use; set `CONFDOCK_PUBLIC_URL` to the real origin (or update the same value from the authenticated Settings screen) and set `CONFDOCK_COOKIE_SECURE=true`. The public URL only controls origins embedded in hosted links; it never changes the listener or cookie policy. WebSockets are not required. Use the distribution's generic Nginx/Caddy reverse-proxy configuration. Docker and formal Release remain future slices; follow the [backup and restore runbook](docs/backup-and-restore.md) for native deployments. Before upgrades, stop the service and back up the complete data directory and actual config file (do not copy only the main file while WAL writes are active), replace `/usr/local/bin/confdock`, and start it again. Migrations run at startup; do not downgrade an older binary and continue writing a database after a newer schema migration. Treat the data directory and hosted URLs as sensitive credentials.
-
-## API overview
-
-Management endpoints require a session; subscriptions use an unguessable stable token:
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/healthz` | Check service and basic SQLite availability |
-| `POST` / `DELETE` | `/api/session` | Sign in / sign out |
-| `GET` / `POST` | `/api/projects` | List / create projects |
-| `GET` / `PATCH` / `DELETE` | `/api/projects/:id` | Get, rename, or delete |
-| `POST` | `/api/projects/:id/revisions` | Validate and Save a revision |
-| `POST` | `/api/projects/:id/publish` | Publish a saved draft |
-| `GET` | `/api/projects/:id/revisions` | Paginated revision metadata |
-| `GET` | `/api/projects/:id/revisions/:revisionId` | Read one revision on demand |
-| `GET` / `POST` | `/api/projects/:id/tokens` | List / create hosted addresses |
-| `PATCH` / `DELETE` | `/api/projects/:id/tokens/:tokenId` | Update name/expiry / revoke |
-| `POST` | `/api/projects/:id/tokens/:tokenId/purge` | Permanently delete a revoked hosted address |
-| `GET` / `PATCH` | `/api/settings` | Read / update the public URL |
-| `GET` | `/sub/:token` | Return served revision bytes |
-
-Management and subscription responses use conservative `Cache-Control: no-store`; hashed static assets may be cached immutably while `index.html` is revalidated. Invalid, unknown, revoked, and expired tokens receive the same safe public response without reason leakage.
-
-## Limits and security boundaries
-
-- One administrator and one-machine SQLite; no clustering, object storage, or automatic backup service.
-- No proxy runtime, client-process management, node measurements, or cross-format conversion.
-- No Rollback, token rotation, automatic Publish, revision deletion, or Native Validator.
-- No Docker, ARM64, Windows/macOS installer, formal Release, Tag, or automatic Deploy.
-- The project is licensed under the [Apache License 2.0](LICENSE). The current [third-party license inventory](THIRD_PARTY_LICENSE_INVENTORY.md) is for development and release preparation and is not a complete release notices artifact. All six clients use original neutral ConfDock CSS text markers; no third-party client logo or icon image is bundled.
-- Session cookies remain HttpOnly, SameSite=Strict, host-only, and optionally Secure; CORS is not enabled. Explicit Origin/CSRF protection remains a final V1 security-review item, so do not expose the management surface to untrusted origins.
-
-## Verification
+The Web-specific engineering notes remain in [`web/README.md`](web/README.md). Common checks:
 
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo test -p confdock-service --features embedded-web --test embedded_web
-npm ci --prefix web
 npm run typecheck --prefix web
 npm run test --prefix web
 npm run build --prefix web
-npm audit --prefix web
-npm audit --prefix web --omit=dev
-./scripts/build-single-binary.sh
-./scripts/smoke-single-binary.sh target/confdock-rust-1.88.0/native/release/confdock
+npm run docs:build --prefix docs
 ```
 
-Issues and pull requests are welcome. New adapters should include Rust fixtures, capability-matrix updates, a neutral CSS text marker, and regression tests while preserving native-byte round trips. Developer builds require rustup and the pinned `rust-toolchain.toml` (Rust 1.88.0 plus `wasm32-unknown-unknown`); the single-binary script reuses a toolchain-specific target directory and explicitly copies the compatible output to `target/release/confdock`.
+ConfDock is licensed under [Apache License 2.0](LICENSE). Dependency scope and the future release-notice requirement are tracked in [THIRD_PARTY_LICENSE_INVENTORY.md](THIRD_PARTY_LICENSE_INVENTORY.md). The full documentation is currently maintained in Simplified Chinese; this README is kept factually aligned with it.

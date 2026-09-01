@@ -15,3 +15,8 @@ data/
 web/node_modules/
 web/dist/
 web/.vite/
+
+# docs/ VitePress 文档站
+docs/node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/

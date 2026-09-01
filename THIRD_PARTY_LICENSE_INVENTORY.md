@@ -9,8 +9,9 @@ statement and attribution has already been collected.
 
 ## Reproducible scope
 
-The snapshot below was checked against the committed `Cargo.lock` and
-`web/package-lock.json`. The supported executable inputs are the Linux x86-64
+The snapshot below was checked against the committed `Cargo.lock`,
+`web/package-lock.json`, and (for documentation tooling only)
+`docs/package-lock.json`. The supported executable inputs are the Linux x86-64
 `confdock-service` graph and the `wasm32-unknown-unknown` `confdock-wasm` graph.
 
 ```bash
@@ -21,7 +22,15 @@ cargo tree --locked -p confdock-wasm \
 cargo metadata --locked --format-version 1
 npm ci --prefix web
 npm ls --all --prefix web --json
+npm ci --prefix docs
+npm ls --all --prefix docs --json
 ```
+
+The `docs/` lockfile is an independent development-only graph for VitePress
+1.6.4 and its Vue-based static-site builder. It is never installed by the Web
+application, is not embedded in the ConfDock binary, and is not a runtime
+distribution dependency. Its audit and license review must remain separate
+from the `web/` lockfile.
 
 `Cargo.lock` currently contains 266 registry package records across all
 platforms and dependency kinds. The union of the two target-specific normal

@@ -1,7 +1,7 @@
 import type { TargetId, ValidationResult } from '../core/types'
 
 /**
- * The wire shape of the Axum service described in `docs/architecture.md`.
+ * The wire shape of the Axum service described in `docs/development/architecture.md`.
  *
  * These types describe the *service*, not the config format — anything about
  * config semantics belongs in `core/`. Keeping the boundary separate lets the

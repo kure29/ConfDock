@@ -31,7 +31,7 @@ import styles from './NewProjectScreen.module.css'
  * Three steps in one screen, in the order the decisions actually happen: the
  * bytes, the client they are for, then the name. Detection runs on the bytes and
  * is shown in the picker as a hint — it never selects for you, because
- * `docs/architecture.md` is explicit that a user-chosen target wins.
+ * `docs/development/architecture.md` is explicit that a user-chosen target wins.
  */
 export function NewProjectScreen() {
   const navigate = useNavigate()

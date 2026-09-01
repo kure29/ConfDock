@@ -1,0 +1,15 @@
+{
+  "name": "confdock-docs",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "ConfDock documentation site",
+  "scripts": {
+    "docs:dev": "vitepress .",
+    "docs:build": "vitepress build .",
+    "docs:preview": "vitepress preview ."
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  }
+}
