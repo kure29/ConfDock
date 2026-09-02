@@ -5,9 +5,25 @@ on:
   pull_request:
     paths:
       - 'Dockerfile'
+      - 'LICENSE'
       - '.dockerignore'
       - 'deploy/docker/**'
+      - 'deploy/docker/.env.example'
+      - '.env.example'
+      - 'docs/deployment/docker.md'
+      - 'docs/operations/backup-and-restore.md'
+      - 'docs/reference/security.md'
+      - 'docs/development/architecture.md'
+      - 'docs/.vitepress/**'
+      - 'docs/package.json'
+      - 'docs/package-lock.json'
+      - 'docs/index.md'
+      - 'README.md'
+      - 'README.en.md'
       - 'scripts/smoke-docker.sh'
+      - 'scripts/backup-docker.sh'
+      - 'scripts/restore-docker.sh'
+      - 'scripts/test-docker-build-guards.sh'
       - 'scripts/build-single-binary.sh'
       - 'scripts/package-single-binary.sh'
       - 'scripts/smoke-single-binary.sh'
@@ -17,6 +33,7 @@ on:
       - 'Cargo.lock'
       - 'rust-toolchain.toml'
       - '.github/workflows/docker-ci.yml'
+      - '.gitignore'
   workflow_dispatch:
 
 permissions:
@@ -30,40 +47,120 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Check shell syntax and ShellCheck
+        run: |
+          bash -n scripts/build-single-binary.sh scripts/package-single-binary.sh \
+            scripts/smoke-single-binary.sh scripts/smoke-docker.sh \
+            scripts/backup-docker.sh scripts/restore-docker.sh \
+            scripts/test-docker-build-guards.sh
+          shellcheck scripts/build-single-binary.sh scripts/package-single-binary.sh \
+            scripts/smoke-single-binary.sh scripts/smoke-docker.sh \
+            scripts/backup-docker.sh scripts/restore-docker.sh \
+            scripts/test-docker-build-guards.sh
+
+      - name: Test lockfile and toolchain guards
+        run: |
+          docker run --rm --platform linux/amd64 \
+            --env CONFDOCK_BUILD_GUARD_MODE=cargo \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/src,readonly" \
+            --workdir /src rust:1.88.0-bookworm \
+            bash /src/scripts/test-docker-build-guards.sh
+
+          docker run --rm --platform linux/amd64 \
+            --env CONFDOCK_BUILD_GUARD_MODE=npm \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/src,readonly" \
+            --workdir /src node:22.14.0-bookworm-slim \
+            bash /src/scripts/test-docker-build-guards.sh
+
+      - name: Reject an overridden Node version
+        run: |
+          output_file="$(mktemp)"
+          trap 'rm -f "$output_file"' EXIT
+          if docker buildx build --progress=plain --platform linux/amd64 --target node-toolchain \
+            --build-arg NODE_VERSION=22.15.0 --tag confdock:wrong-node . \
+            >"$output_file" 2>&1; then
+            echo 'an overridden Node version unexpectedly built' >&2
+            exit 1
+          fi
+          if ! grep -F 'Node.js 22.14.0' "$output_file" >/dev/null; then
+            echo 'the wrong-Node negative test did not reach the version guard' >&2
+            tail -n 40 "$output_file" >&2
+            exit 1
+          fi
+
       - name: Build Linux x86_64 image
         run: |
+          vcs_ref="$(git rev-parse HEAD)"
           docker buildx build \
             --platform linux/amd64 \
-            --build-arg VCS_REF="$GITHUB_SHA" \
+            --pull \
+            --build-arg VCS_REF="$vcs_ref" \
             --tag confdock:ci \
             --load \
             .
 
       - name: Verify runtime image boundary
         run: |
+          vcs_ref="$(git rev-parse HEAD)"
           test "$(docker image inspect -f '{{.Config.User}}' confdock:ci)" = '10001:10001'
           test "$(docker image inspect -f '{{.Architecture}}' confdock:ci)" = 'amd64'
+          test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.title"}}' confdock:ci)" = 'ConfDock'
+          test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.url"}}' confdock:ci)" = 'https://github.com/kure29/ConfDock'
           test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.source"}}' confdock:ci)" = 'https://github.com/kure29/ConfDock'
           test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.licenses"}}' confdock:ci)" = 'Apache-2.0'
-          test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' confdock:ci)" = "$GITHUB_SHA"
+          test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' confdock:ci)" = "$vcs_ref"
+          test "$(docker image inspect -f '{{json .Config.Volumes}}' confdock:ci | jq -r 'has("/var/lib/confdock")')" = 'true'
           docker image inspect -f 'image_size_bytes={{.Size}}' confdock:ci
-          docker run --rm --platform linux/amd64 --entrypoint /bin/sh confdock:ci -eu -c '
+          image_env="$(docker image inspect -f '{{json .Config.Env}}' confdock:ci)"
+          if printf '%s' "$image_env" | grep -Eiq '(PASSWORD|TOKEN|SECRET|BEGIN .*PRIVATE KEY)'; then
+            echo 'runtime image environment contains a secret-like variable' >&2
+            exit 1
+          fi
+          image_history="$(docker history --no-trunc --format '{{.CreatedBy}}' confdock:ci)"
+          if printf '%s' "$image_history" | grep -Eiq '(CONFDOCK_BOOTSTRAP_PASSWORD|BEGIN .*PRIVATE KEY|npm_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,})'; then
+            echo 'runtime image history contains a secret-like value' >&2
+            exit 1
+          fi
+          docker run --rm --platform linux/amd64 --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
+            --tmpfs /var/lib/confdock:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=700 \
+            --network none --entrypoint /bin/sh confdock:ci -eu -c '
             test "$(id -u)" = 10001
             test "$(id -g)" = 10001
+            test "$(stat -c "%u:%g" /var/lib/confdock)" = 10001:10001
             test -f /LICENSE
-            for path in /src /workspace /usr/local/cargo /usr/local/rustup /usr/local/lib/node_modules /Cargo.toml /web; do test ! -e "$path"; done
+            command -v find >/dev/null
+            command -v sha256sum >/dev/null
+            command -v sqlite3 >/dev/null
+            command -v sort >/dev/null
+            command -v tar >/dev/null
+            for path in /src /workspace /target /app /repo /usr/local/cargo /usr/local/rustup \
+              /root/.cargo /root/.rustup /usr/local/lib/node_modules /node_modules \
+              /Cargo.toml /Cargo.lock /rust-toolchain.toml /package.json /package-lock.json \
+              /web /docs /.git; do test ! -e "$path"; done
             ! command -v node
             ! command -v npm
             ! command -v cargo
             ! command -v rustc
+            ! command -v rustup
+            ! command -v wasm-bindgen
+            ! command -v git
+            ! command -v make
+            ! command -v cc
+            ! command -v gcc
           '
 
       - name: Validate Compose contract
-        run: docker compose -f deploy/docker/compose.yaml config --quiet
+        run: |
+          docker compose -f deploy/docker/compose.yaml config --quiet
+          git diff --check
 
       - name: Run source-free Docker smoke
         env:

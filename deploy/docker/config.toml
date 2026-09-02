@@ -4,8 +4,11 @@ listen = "0.0.0.0:8787"
 # The named Compose volume is mounted at this complete data directory.
 data_dir = "/var/lib/confdock"
 
-# Keep this independent from `listen`. Set it to the external HTTPS origin
-# when a reverse proxy fronts the container.
+# Keep this independent from `listen`. Before first initialization this value
+# seeds the database setting; after initialization the database value is the
+# runtime authority and should be changed through the authenticated Settings
+# page. Set it to the external HTTPS origin when a reverse proxy fronts a new
+# instance.
 public_url = "http://127.0.0.1:8787"
 
 # Set true when public_url is HTTPS.
