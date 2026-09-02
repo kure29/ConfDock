@@ -368,7 +368,7 @@ fi
 printf '%s\n' 'docker smoke: compose contract' >&2
 compose_json="$runtime_dir/compose.json"
 "${compose[@]}" config --format json >"$compose_json"
-jq -e --arg volume "$smoke_volume" --arg config "$CONFDOCK_CONFIG_PATH" '
+if ! jq -e --arg volume "$smoke_volume" --arg config "$CONFDOCK_CONFIG_PATH" '
   .services.confdock.user == "10001:10001" and
   .services.confdock.platform == "linux/amd64" and
   .services.confdock.read_only == true and
@@ -394,7 +394,16 @@ jq -e --arg volume "$smoke_volume" --arg config "$CONFDOCK_CONFIG_PATH" '
   ((.services.confdock.volumes // []) | all(.target != "/var/run/docker.sock" and .source != "/var/run/docker.sock")) and
   ((.services.confdock.privileged // false) == false) and
   ((.services.confdock.network_mode // "") != "host")
-' "$compose_json" >/dev/null
+' "$compose_json" >/dev/null; then
+  # Keep a failed contract diagnosable without dumping arbitrary environment
+  # values or any service output that could contain credentials.
+  jq '{service: (.services.confdock | {user, platform, read_only, init, restart,
+      stop_grace_period, stop_signal, ports, tmpfs, cap_drop, cap_add,
+      security_opt, healthcheck, volumes, privileged, network_mode}),
+      volume: .volumes["confdock-data"], network: .networks.default}' \
+    "$compose_json" >&2 || true
+  fail 'Compose contract assertion failed'
+fi
 
 printf '%s\n' 'docker smoke: runtime image boundary' >&2
 test "$(docker image inspect -f '{{.Config.User}}' "$image")" = '10001:10001'
