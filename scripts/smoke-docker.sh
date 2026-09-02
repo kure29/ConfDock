@@ -164,6 +164,7 @@ assert_project_unused() {
   local container_ids container_id container_run container_project
   container_ids="$(docker ps -aq --filter "label=com.docker.compose.project=$project_name")" \
     || return 1
+  container_ids+=$'\n'
   container_ids+="$(docker ps -aq --filter "name=^/${project_name}-")" \
     || return 1
   while IFS= read -r container_id; do
@@ -179,6 +180,7 @@ assert_project_unused() {
   local network_ids network_id network_run network_project network_kind network_name
   network_ids="$(docker network ls -q --filter "label=com.docker.compose.project=$project_name")" \
     || return 1
+  network_ids+=$'\n'
   network_ids+="$(docker network ls -q --filter "name=^${project_name}_default$")" \
     || return 1
   while IFS= read -r network_id; do
