@@ -1,0 +1,60 @@
+services:
+  confdock:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        VCS_REF: ${CONFDOCK_VCS_REF:-unknown}
+    image: ${CONFDOCK_IMAGE:-confdock:local}
+    labels:
+      com.confdock.smoke.run: ${CONFDOCK_SMOKE_RUN:-none}
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    read_only: true
+    user: "10001:10001"
+    ports:
+      - "127.0.0.1:${CONFDOCK_HOST_PORT:-8787}:8787"
+    volumes:
+      - type: volume
+        source: confdock-data
+        target: /var/lib/confdock
+        read_only: false
+        volume:
+          nocopy: true
+      - type: bind
+        source: "${CONFDOCK_CONFIG_PATH:-./config.toml}"
+        target: /etc/confdock/config.toml
+        read_only: true
+        bind:
+          # Do not let Compose turn a missing configuration file into a
+          # directory. A missing or mistyped path must fail before the service
+          # starts instead of producing a confusing runtime error.
+          create_host_path: false
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8787/healthz"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+
+volumes:
+  confdock-data:
+    name: "${CONFDOCK_VOLUME_NAME:-confdock-data}"
+    # Keep the physical volume independent from the Compose project name.
+    # It is created once by the operator (see the deployment guide), then
+    # deliberately reused by any project name that points at this file.
+    external: true
+
+networks:
+  default:
+    labels:
+      com.confdock.smoke.run: ${CONFDOCK_SMOKE_RUN:-none}

@@ -49,13 +49,22 @@ if [[ "$wasm_bindgen_version" != "0.2.127" ]]; then
   exit 1
 fi
 
-node_major="$(node -p 'process.versions.node.split(".")[0]')"
-if [[ "$node_major" -lt 22 ]]; then
-  printf 'Node.js 22 or newer is required (found %s)\n' "$(node --version)" >&2
-  exit 1
+node_version="$(node --version)"
+if [[ "${CONFDOCK_REQUIRE_NODE_VERSION:-}" == "22.14.0" ]]; then
+  if [[ "$node_version" != "v22.14.0" ]]; then
+    printf 'Node.js 22.14.0 is required for this build (found %s)\n' "$node_version" >&2
+    exit 1
+  fi
+else
+  node_major="${node_version#v}"
+  node_major="${node_major%%.*}"
+  if [[ ! "$node_major" =~ ^[0-9]+$ || "$node_major" -lt 22 ]]; then
+    printf 'Node.js 22 or newer is required (found %s)\n' "$node_version" >&2
+    exit 1
+  fi
 fi
 
-printf 'Node.js: %s\n' "$(node --version)"
+printf 'Node.js: %s\n' "$node_version"
 printf 'Rustc: %s\n' "$rustc_version"
 printf 'Cargo: %s\n' "$cargo_version"
 printf 'wasm-bindgen: %s\n' "$wasm_bindgen_version"
@@ -90,10 +99,10 @@ cleanup() {
 trap cleanup EXIT
 
 CARGO_TARGET_DIR="$native_target_dir" RUSTUP_TOOLCHAIN=1.88.0 RUSTC="$rustup_rustc_bin" \
-  "$rustup_cargo_bin" build -p confdock-service --release
+  "$rustup_cargo_bin" build -p confdock-service --release --locked
 cp "$native_binary" "$temporary_unembedded"
 CARGO_TARGET_DIR="$native_target_dir" RUSTUP_TOOLCHAIN=1.88.0 RUSTC="$rustup_rustc_bin" \
-  "$rustup_cargo_bin" build -p confdock-service --release --features embedded-web
+  "$rustup_cargo_bin" build -p confdock-service --release --features embedded-web --locked
 
 # Keep the historical output path only as an explicit copy of the just-built,
 # toolchain-isolated binary. Packaging and smoke tests should use native_binary.

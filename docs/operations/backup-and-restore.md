@@ -1,7 +1,7 @@
 # ConfDock V1 备份与恢复
 
 这是原生 Linux/systemd 部署的手动运行手册。V1 不提供自动备份、定时任务或
-菜单式恢复工具。Docker 的备份恢复流程将在 Docker Slice 随 Compose 一起提供。
+菜单式恢复工具。Docker 部署请使用 [Docker 备份、隔离恢复和回滚流程](../deployment/docker)。
 
 ## SQLite 一致性边界
 
