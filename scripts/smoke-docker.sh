@@ -30,6 +30,7 @@ trap cleanup EXIT
 docker image inspect "$image" >/dev/null
 
 # Verify the final image is the source-free, fixed-UID runtime stage.
+printf '%s\n' 'docker smoke: runtime image boundary' >&2
 test "$(docker image inspect -f '{{.Config.User}}' "$image")" = '10001:10001'
 docker run --rm --platform linux/amd64 --entrypoint /bin/sh "$image" -eu -c '
   test "$(id -u)" = 10001
@@ -46,6 +47,7 @@ docker run --rm --platform linux/amd64 --entrypoint /bin/sh "$image" -eu -c '
   ! command -v rustc
 '
 
+printf '%s\n' 'docker smoke: CLI checks' >&2
 docker run --rm --platform linux/amd64 --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
   "$image" --help >/dev/null
 docker run --rm --platform linux/amd64 --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
@@ -53,9 +55,11 @@ docker run --rm --platform linux/amd64 --read-only --tmpfs /tmp:rw,noexec,nosuid
 docker run --rm --platform linux/amd64 --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
   "$image" --config /etc/confdock/config.toml config check >/dev/null
 
+printf '%s\n' 'docker smoke: compose config' >&2
 "${compose[@]}" config --quiet
 
 # A malformed config fails closed without changing the persistent volume.
+printf '%s\n' 'docker smoke: invalid config' >&2
 printf '%s\n' 'listen = "not-an-address"' >"$bad_config"
 if "${compose[@]}" run --rm --no-deps -T \
   -v "$bad_config:/etc/confdock/config.toml:ro" confdock \
@@ -67,6 +71,7 @@ grep -F 'configuration file' "$runtime_dir/bad-config.out" >/dev/null
 
 # A read-only data directory fails with a clear SQLite-open error instead of
 # silently falling back to an ephemeral location.
+printf '%s\n' 'docker smoke: read-only data directory' >&2
 if docker run --rm --platform linux/amd64 --read-only \
   --mount type=tmpfs,destination=/var/lib/confdock,readonly \
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m "$image" \
@@ -78,6 +83,7 @@ grep -F 'SQLite database could not be opened' "$runtime_dir/read-only-data.out" 
 
 # Before admin init, a non-interactive serve must fail with the real CLI
 # contract. Do not print its output: it can contain deployment paths.
+printf '%s\n' 'docker smoke: uninitialized service' >&2
 if "${compose[@]}" run --rm --no-deps -T confdock \
   --config /etc/confdock/config.toml >"$runtime_dir/uninitialized.out" 2>&1; then
   printf 'uninitialized service unexpectedly passed\n' >&2
@@ -87,11 +93,13 @@ grep -F 'not initialized' "$runtime_dir/uninitialized.out" >/dev/null
 
 # `admin init` requires a TTY. util-linux `script` supplies a disposable PTY
 # while the password is piped to it; the password never appears in output.
+printf '%s\n' 'docker smoke: admin init' >&2
 printf '%s\n%s\n' "$password" "$password" | \
   script -qec "${compose[*]} run --rm -it --no-deps confdock --config /etc/confdock/config.toml admin init" /dev/null \
   >"$runtime_dir/admin-init.out" 2>&1
 grep -F 'initialized successfully' "$runtime_dir/admin-init.out" >/dev/null
 
+printf '%s\n' 'docker smoke: start service' >&2
 "${compose[@]}" up -d --no-build >/dev/null
 for _ in $(seq 1 90); do
   container_id="$("${compose[@]}" ps -q confdock)"
@@ -106,6 +114,7 @@ done
 container_id="$("${compose[@]}" ps -q confdock)"
 test "$(docker inspect -f '{{.State.Health.Status}}' "$container_id")" = healthy
 
+printf '%s\n' 'docker smoke: HTTP and persistence checks' >&2
 base_url='http://127.0.0.1:8787'
 curl -fsS "$base_url/healthz" | jq -e '.status == "ok"' >/dev/null
 curl -fsS "$base_url/" | grep -F '<div id="root"></div>' >/dev/null
@@ -161,6 +170,7 @@ curl -fsS -b "$cookie_file" "$base_url/api/settings" | jq -e '.publicUrl == "htt
 test "$(curl -sS -o /dev/null -w '%{http_code}' "$base_url/api/projects")" = 401
 test "$(curl -sS -o /dev/null -w '%{http_code}' "$base_url/sub/not-a-token")" = 404
 
+printf '%s\n' 'docker smoke: stop and SQLite integrity' >&2
 "${compose[@]}" stop -t 30 >/dev/null
 test "$(docker inspect -f '{{.State.Status}}' "$container_id")" = exited
 
