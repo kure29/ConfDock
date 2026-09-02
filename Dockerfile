@@ -12,12 +12,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     RUSTUP_HOME=/usr/local/rustup
 WORKDIR /src
 
-# Copy only Node 22 into the Rust builder. Node, npm, Cargo, and all source
-# material remain in intermediate layers and are never copied to runtime.
-COPY --from=node-toolchain /usr/local/bin/node /usr/local/bin/node
-COPY --from=node-toolchain /usr/local/bin/npm /usr/local/bin/npm
-COPY --from=node-toolchain /usr/local/bin/npx /usr/local/bin/npx
-COPY --from=node-toolchain /usr/local/lib/node_modules /usr/local/lib/node_modules
+# Copy Node 22 (including npm's launcher and its library) into the Rust
+# builder. Node, npm, Cargo, and all source material remain in intermediate
+# layers and are never copied to runtime.
+COPY --from=node-toolchain /usr/local /usr/local
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
