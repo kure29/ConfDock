@@ -79,7 +79,13 @@ if docker run --rm --platform linux/amd64 --read-only \
   printf 'read-only data directory unexpectedly passed\n' >&2
   exit 1
 fi
-grep -F 'SQLite database could not be opened' "$runtime_dir/read-only-data.out" >/dev/null
+if ! grep -Eq 'SQLite (database could not be opened|migrations could not be applied|database files)' \
+  "$runtime_dir/read-only-data.out"; then
+  printf '%s\n' 'read-only data directory returned an unexpected error:' >&2
+  tr '\n' ' ' <"$runtime_dir/read-only-data.out" | cut -c1-240 >&2
+  printf '\n' >&2
+  exit 1
+fi
 
 # Before admin init, a non-interactive serve must fail with the real CLI
 # contract. Do not print its output: it can contain deployment paths.
