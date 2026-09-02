@@ -155,16 +155,61 @@ choose_restore_volume() {
 assert_project_unused() {
   local project_name="$1"
   local ignored_volume="${2:-}"
-  [[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=$project_name")" \
-    && -z "$(docker ps -aq --filter "name=^/${project_name}-")" \
-    && -z "$(docker network ls -q --filter "label=com.docker.compose.project=$project_name")" \
-    && -z "$(docker network ls -q --filter "name=^${project_name}_default$")" ]] \
+
+  # `compose run` may create the project's default network (and, briefly, a
+  # one-off container) before the long-running service starts.  Those
+  # resources carry the smoke run label from compose.yaml and are ours.  Any
+  # resource that has the project identity without this exact run marker is an
+  # external collision and must stop the test before `up` can attach to it.
+  local container_ids container_id container_run container_project
+  container_ids="$(docker ps -aq --filter "label=com.docker.compose.project=$project_name")" \
     || return 1
-  local project_volumes volume_name
+  container_ids+="$(docker ps -aq --filter "name=^/${project_name}-")" \
+    || return 1
+  while IFS= read -r container_id; do
+    [[ -n "$container_id" ]] || continue
+    container_run="$(docker inspect -f '{{index .Config.Labels "com.confdock.smoke.run"}}' \
+      "$container_id" 2>/dev/null)" || return 1
+    container_project="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' \
+      "$container_id" 2>/dev/null)" || return 1
+    [[ "$container_run" == "$smoke_run" && "$container_project" == "$project_name" ]] \
+      || return 1
+  done < <(printf '%s\n' "$container_ids" | awk 'NF && !seen[$0]++')
+
+  local network_ids network_id network_run network_project network_kind network_name
+  network_ids="$(docker network ls -q --filter "label=com.docker.compose.project=$project_name")" \
+    || return 1
+  network_ids+="$(docker network ls -q --filter "name=^${project_name}_default$")" \
+    || return 1
+  while IFS= read -r network_id; do
+    [[ -n "$network_id" ]] || continue
+    network_run="$(docker network inspect -f '{{index .Labels "com.confdock.smoke.run"}}' \
+      "$network_id" 2>/dev/null)" || return 1
+    network_project="$(docker network inspect -f '{{index .Labels "com.docker.compose.project"}}' \
+      "$network_id" 2>/dev/null)" || return 1
+    network_kind="$(docker network inspect -f '{{index .Labels "com.docker.compose.network"}}' \
+      "$network_id" 2>/dev/null)" || return 1
+    network_name="$(docker network inspect -f '{{.Name}}' "$network_id" 2>/dev/null)" \
+      || return 1
+    [[ "$network_run" == "$smoke_run" && "$network_project" == "$project_name" \
+      && "$network_kind" == default && "$network_name" == "${project_name}_default" ]] \
+      || return 1
+  done < <(printf '%s\n' "$network_ids" | awk 'NF && !seen[$0]++')
+
+  local project_volumes volume_name volume_run volume_project volume_kind
   project_volumes="$(docker volume ls -q --filter "label=com.docker.compose.project=$project_name")" \
     || return 1
   while IFS= read -r volume_name; do
-    [[ -z "$volume_name" || "$volume_name" == "$ignored_volume" ]] || return 1
+    [[ -n "$volume_name" ]] || continue
+    volume_run="$(docker volume inspect -f '{{index .Labels "com.confdock.smoke.run"}}' \
+      "$volume_name" 2>/dev/null)" || return 1
+    volume_project="$(docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}' \
+      "$volume_name" 2>/dev/null)" || return 1
+    volume_kind="$(docker volume inspect -f '{{index .Labels "com.docker.compose.volume"}}' \
+      "$volume_name" 2>/dev/null)" || return 1
+    [[ "$volume_name" == "$ignored_volume" && "$volume_run" == "$smoke_run" \
+      && "$volume_project" == "$project_name" && "$volume_kind" == confdock-data ]] \
+      || return 1
   done <<<"$project_volumes"
 }
 
