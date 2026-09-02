@@ -154,12 +154,18 @@ choose_restore_volume() {
 
 assert_project_unused() {
   local project_name="$1"
+  local ignored_volume="${2:-}"
   [[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=$project_name")" \
     && -z "$(docker ps -aq --filter "name=^/${project_name}-")" \
     && -z "$(docker network ls -q --filter "label=com.docker.compose.project=$project_name")" \
-    && -z "$(docker network ls -q --filter "name=^${project_name}_default$")" \
-    && -z "$(docker volume ls -q --filter "label=com.docker.compose.project=$project_name")" ]] \
+    && -z "$(docker network ls -q --filter "name=^${project_name}_default$")" ]] \
     || return 1
+  local project_volumes volume_name
+  project_volumes="$(docker volume ls -q --filter "label=com.docker.compose.project=$project_name")" \
+    || return 1
+  while IFS= read -r volume_name; do
+    [[ -z "$volume_name" || "$volume_name" == "$ignored_volume" ]] || return 1
+  done <<<"$project_volumes"
 }
 
 choose_identity || fail 'could not allocate an unused smoke project and volume'
@@ -653,7 +659,8 @@ assert_volume_manifest() {
 }
 
 printf '%s\n' 'docker smoke: start service' >&2
-assert_project_unused "$smoke_project" || fail 'smoke project became occupied before startup'
+assert_project_unused "$smoke_project" "$smoke_volume" \
+  || fail 'smoke project became occupied before startup'
 reserved_volume_run="$(docker volume inspect -f '{{index .Labels "com.confdock.smoke.run"}}' "$smoke_volume" 2>/dev/null || true)"
 [[ "$reserved_volume_run" == "$smoke_run" ]] || fail 'smoke volume reservation was lost'
 "${compose[@]}" up -d --no-build >/dev/null
@@ -956,7 +963,8 @@ cmp "$original_config_copy" "$restore_config" >/dev/null \
   || fail 'restored configuration bytes differ from the backup source'
 export COMPOSE_PROJECT_NAME="$restore_project"
 set_helper_project "$restore_project"
-assert_project_unused "$restore_project" || fail 'restore project became occupied before startup'
+assert_project_unused "$restore_project" "$restore_volume" \
+  || fail 'restore project became occupied before startup'
 export CONFDOCK_VOLUME_NAME="$restore_volume"
 export CONFDOCK_CONFIG_PATH="$restore_config"
 compose=(docker compose --project-name "$restore_project" -f "$compose_file")
