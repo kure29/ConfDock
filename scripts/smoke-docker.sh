@@ -387,7 +387,7 @@ if ! jq -e --arg volume "$smoke_volume" --arg config "$CONFDOCK_CONFIG_PATH" '
   ((.services.confdock.security_opt // []) | index("no-new-privileges:true") != null) and
   .services.confdock.healthcheck.test == ["CMD","curl","--fail","--silent","--show-error","http://127.0.0.1:8787/healthz"] and
   ((.services.confdock.volumes // []) | any(.type == "volume" and .source == "confdock-data" and .target == "/var/lib/confdock" and ((.read_only // false) == false) and .volume.nocopy == true)) and
-  ((.services.confdock.volumes // []) | any(.type == "bind" and .target == "/etc/confdock/config.toml" and .source == $config and .read_only == true and .bind.create_host_path == false)) and
+  ((.services.confdock.volumes // []) | any(.type == "bind" and .target == "/etc/confdock/config.toml" and .source == $config and .read_only == true and ((.bind.create_host_path == false) or ((.bind // {}) | has("create_host_path") | not)))) and
   ((.services.confdock.volumes // []) | all(.type != "volume" or (.source == "confdock-data" and .target == "/var/lib/confdock"))) and
   .volumes["confdock-data"].name == $volume and
   .volumes["confdock-data"].external == true and
@@ -455,6 +455,17 @@ docker run --rm "${smoke_helper_args[@]}" "${smoke_helper_security[@]}" --platfo
   "$image" --config /etc/confdock/config.toml config check >/dev/null
 
 printf '%s\n' 'docker smoke: invalid config and missing initialization' >&2
+missing_config="$runtime_dir/missing-config.toml"
+if CONFDOCK_CONFIG_PATH="$missing_config" "${compose[@]}" run --rm --no-deps -T confdock \
+  --config /etc/confdock/config.toml config check >"$runtime_dir/missing-config.out" 2>&1; then
+  fail 'missing configuration unexpectedly passed'
+fi
+if [[ -e "$missing_config" || -L "$missing_config" ]]; then
+  fail 'Compose created a host path for a missing configuration'
+fi
+grep -Eiq '(bind source path does not exist|does not exist|no such file)' \
+  "$runtime_dir/missing-config.out" || fail 'missing configuration error was not actionable'
+
 printf '%s\n' 'listen = "not-an-address"' >"$bad_config"
 if CONFDOCK_CONFIG_PATH="$bad_config" "${compose[@]}" run --rm --no-deps -T confdock \
   --config /etc/confdock/config.toml config check >"$runtime_dir/bad-config.out" 2>&1; then
