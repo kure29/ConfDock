@@ -566,7 +566,7 @@ run_admin_init() {
   local first_password="$1" second_password="$2" output_file="$3" compose_command
   compose_command="$(printf '%q ' "${compose[@]}")run --rm -it --no-deps confdock --config /etc/confdock/config.toml admin init"
   printf '%s\n%s\n' "$first_password" "$second_password" | \
-    script -qec "$compose_command" /dev/null >"$output_file" 2>&1
+    script -q --echo=never -e -c "$compose_command" /dev/null >"$output_file" 2>&1
 }
 
 if run_admin_init "$password" "${password}-mismatch" "$runtime_dir/admin-mismatch.out"; then
@@ -1110,9 +1110,12 @@ assert_sqlite_integrity "$smoke_volume"
 # Inspect every temporary capture, not just the files whose names happen to
 # be logs.  The check is quiet on success and never prints the matched value.
 while IFS= read -r -d '' output_file; do
-  if grep -aF -- "$password" "$output_file" >/dev/null \
-    || grep -aF -- "$token_plain" "$output_file" >/dev/null; then
-    fail 'smoke output contains a password or token'
+  output_name="${output_file#"$runtime_dir"/}"
+  if grep -aF -- "$password" "$output_file" >/dev/null; then
+    fail "private smoke output still contains the administrator password: $output_name"
+  fi
+  if grep -aF -- "$token_plain" "$output_file" >/dev/null; then
+    fail "private smoke output still contains the subscription token: $output_name"
   fi
 done < <(find "$runtime_dir" -type f -print0)
 

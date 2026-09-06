@@ -50,6 +50,7 @@ grep -F 'unset COMPOSE_PROJECT_NAME COMPOSE_FILE COMPOSE_ENV_FILES COMPOSE_PATH_
   "$repo_root/scripts/smoke-docker.sh" >/dev/null
 grep -F 'CONFDOCK_ENV_FILE' "$repo_root/scripts/smoke-docker.sh" >/dev/null
 grep -F "find \"\$runtime_dir\" -type f -print0" "$repo_root/scripts/smoke-docker.sh" >/dev/null
+grep -F -- 'script -q --echo=never -e -c' "$repo_root/scripts/smoke-docker.sh" >/dev/null
 grep -F -- "--volumes-from \"\$container_id:ro\"" "$repo_root/scripts/backup-docker.sh" >/dev/null
 grep -F -- '--transform="s#^\\.\$#data#;s#^\\./#data/#"' \
   "$repo_root/scripts/backup-docker.sh" >/dev/null
