@@ -565,8 +565,67 @@ grep -F 'interactive terminal' "$runtime_dir/admin-no-tty.out" >/dev/null
 run_admin_init() {
   local first_password="$1" second_password="$2" output_file="$3" compose_command
   compose_command="$(printf '%q ' "${compose[@]}")run --rm -it --no-deps confdock --config /etc/confdock/config.toml admin init"
-  printf '%s\n%s\n' "$first_password" "$second_password" | \
-    script -q --echo=never -e -c "$compose_command" /dev/null >"$output_file" 2>&1
+  # Supplying both values before rpassword has printed its prompts races the
+  # container PTY's echo setup.  Drive the session one prompt at a time so no
+  # secret reaches the PTY until the application has disabled terminal echo.
+  # Secrets arrive on Python's stdin, never in argv or the environment.
+  printf '%s\0%s\0' "$first_password" "$second_password" | python3 -c '
+import os
+import select
+import subprocess
+import sys
+import time
+
+output_path, command = sys.argv[1:]
+parts = sys.stdin.buffer.read().split(b"\0")
+if len(parts) != 3 or parts[2] != b"":
+    raise SystemExit("invalid secret input")
+secrets = parts[:2]
+prompts = [b"Enter administrator password: ", b"Confirm administrator password: "]
+process = subprocess.Popen(
+    ["script", "-q", "--echo=never", "-e", "-c", command, "/dev/null"],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+)
+deadline = time.monotonic() + 30
+pending = b""
+next_prompt = 0
+try:
+    with open(output_path, "wb") as output:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("admin init prompt timed out")
+            ready, _, _ = select.select([process.stdout], [], [], min(remaining, 1))
+            if not ready:
+                if process.poll() is not None:
+                    break
+                continue
+            chunk = os.read(process.stdout.fileno(), 4096)
+            if not chunk:
+                break
+            output.write(chunk)
+            output.flush()
+            pending = (pending + chunk)[-4096:]
+            if next_prompt < len(prompts) and prompts[next_prompt] in pending:
+                process.stdin.write(secrets[next_prompt] + b"\n")
+                process.stdin.flush()
+                next_prompt += 1
+                pending = b""
+        if process.stdin:
+            process.stdin.close()
+        status = process.wait(timeout=max(1, deadline - time.monotonic()))
+finally:
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+raise SystemExit(status)
+' "$output_file" "$compose_command"
 }
 
 run_admin_init_without_password() {
@@ -1122,6 +1181,11 @@ assert_sqlite_integrity "$smoke_volume"
 # be logs.  The check is quiet on success and never prints the matched value.
 while IFS= read -r -d '' output_file; do
   output_name="${output_file#"$runtime_dir"/}"
+  # Rejected malicious restore fixtures may intentionally leave root-owned,
+  # mode-0600 archive members behind until the run-scoped trap removes them.
+  # They are not command output and are unreadable to the runner; scan every
+  # readable capture without emitting permission errors or secret values.
+  [[ -r "$output_file" ]] || continue
   if grep -aF -- "$password" "$output_file" >/dev/null; then
     fail "private smoke output still contains the administrator password: $output_name"
   fi
