@@ -372,11 +372,13 @@ docker run --rm "${helper_label_args[@]}" --platform linux/amd64 --user 0:0 --en
     if find /restore-config -mindepth 1 -print -quit | grep -q .; then exit 1; fi
     # The archive paths were fully checked above. Extract the data subtree with
     # its leading `data/` component removed, then extract the one config file.
-    # Both destinations are empty, and keep-old-files prevents an accidental
-    # overwrite if that invariant ever changes.
-    tar -xzf /input.tar.gz --no-same-owner --no-same-permissions --no-overwrite-dir --keep-old-files \
+    # Both destinations are empty, and keep-old-files fails rather than
+    # overwriting an entry if that invariant ever changes. GNU tar rejects
+    # keep-old-files combined with no-overwrite-dir, so use the stronger
+    # fail-on-any-existing-member behavior on its own.
+    tar -xzf /input.tar.gz --no-same-owner --no-same-permissions --keep-old-files \
       --strip-components=1 -C /restore-data -- data
-    tar -xzf /input.tar.gz --no-same-owner --no-same-permissions --no-overwrite-dir --keep-old-files \
+    tar -xzf /input.tar.gz --no-same-owner --no-same-permissions --keep-old-files \
       -C /restore-config -- config.toml
     test -s /restore-data/confdock.db
     test ! -L /restore-data/confdock.db
