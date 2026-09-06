@@ -887,7 +887,14 @@ if CONFDOCK_IMAGE="$image" CONFDOCK_COMPOSE_FILE="$compose_file" \
   "$runtime_dir/invalid-name-config" >"$runtime_dir/invalid-name.out" 2>&1; then
   fail 'restore unexpectedly accepted an invalid volume name'
 fi
-grep -F 'invalid restore volume name' "$runtime_dir/invalid-name.out" >/dev/null
+if ! grep -F 'invalid restore volume name' "$runtime_dir/invalid-name.out" >/dev/null; then
+  # Restore diagnostics are deliberately prefixed and never contain database
+  # rows, passwords, sessions, or tokens. Show only that controlled error
+  # class when an earlier fail-closed boundary masks the assertion under test.
+  sed -n 's/^docker restore: /docker smoke: restore diagnostic: /p' \
+    "$runtime_dir/invalid-name.out" >&2
+  fail 'invalid restore volume rejection did not reach the name validator'
+fi
 
 smoke_phase='unsafe restore archive rejection'
 permission_archive="$runtime_dir/permission.tar.gz"
