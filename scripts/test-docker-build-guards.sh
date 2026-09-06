@@ -91,6 +91,7 @@ if [[ "${1:-}" == inspect && "${2:-}" == -f ]]; then
   object="${4:-}"
   if [[ "$object" == 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef ]]; then
     case "$template" in
+      *'.Id'*) printf '%s' "$object" ;;
       *State.Status*) printf 'exited' ;;
       *len*Mounts*) printf '2' ;;
       *Destination*'x'*) printf 'x' ;;

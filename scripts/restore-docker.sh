@@ -175,6 +175,10 @@ case "$container_count" in
     container_id="$(printf '%s\n' "$container_ids" | awk 'NF { print; exit }')"
     [[ "$container_id" =~ ^[0-9a-fA-F]{12,64}$ ]] \
       || fail 'Compose returned an invalid container identifier'
+    container_id="$(docker inspect -f '{{.Id}}' "$container_id" 2>/dev/null)" \
+      || fail 'the Compose confdock container could not be inspected'
+    [[ "$container_id" =~ ^[0-9a-f]{64}$ ]] \
+      || fail 'Docker returned an invalid canonical container identifier'
     container_state="$(docker inspect -f '{{.State.Status}}' "$container_id")"
     case "$container_state" in
       created|dead|exited) ;;
@@ -222,8 +226,14 @@ case "$container_count" in
       fail 'could not inspect containers using the original data volume'
     fi
     while IFS= read -r original_volume_container_id; do
-      [[ -n "$original_volume_container_id" && "$original_volume_container_id" != "$container_id" ]] \
-        && fail 'the original data volume is mounted by another container'
+      [[ -n "$original_volume_container_id" ]] || continue
+      original_volume_container_canonical_id="$(docker inspect -f '{{.Id}}' \
+        "$original_volume_container_id" 2>/dev/null)" \
+        || fail 'a container using the original data volume could not be inspected'
+      [[ "$original_volume_container_canonical_id" =~ ^[0-9a-f]{64}$ ]] \
+        || fail 'Docker returned an invalid container identifier for the original data volume'
+      [[ "$original_volume_container_canonical_id" == "$container_id" ]] \
+        || fail 'the original data volume is mounted by another container'
     done <<<"$original_volume_container_ids"
     ;;
   *) fail 'multiple Compose confdock containers found; isolate or remove them before restore' ;;

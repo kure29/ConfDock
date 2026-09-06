@@ -70,6 +70,10 @@ container_count="$(printf '%s\n' "$container_ids" | awk 'NF { n += 1 } END { pri
 [[ "$container_count" == 1 ]] || fail 'exactly one existing confdock container is required'
 container_id="$(printf '%s\n' "$container_ids" | awk 'NF { print; exit }')"
 [[ "$container_id" =~ ^[0-9a-fA-F]{12,64}$ ]] || fail 'Compose returned an invalid container identifier'
+container_id="$(docker inspect -f '{{.Id}}' "$container_id" 2>/dev/null)" \
+  || fail 'the Compose confdock container could not be inspected'
+[[ "$container_id" =~ ^[0-9a-f]{64}$ ]] \
+  || fail 'Docker returned an invalid canonical container identifier'
 
 container_state="$(docker inspect -f '{{.State.Status}}' "$container_id")"
 case "$container_state" in
@@ -176,13 +180,18 @@ config_sha256="$(sha256sum "$config_source" | awk '{print $1}')" \
 [[ "$config_sha256" =~ ^[0-9a-f]{64}$ ]] || fail 'configuration fingerprint is invalid'
 
 assert_volume_exclusive() {
-  local current_ids current_id
+  local current_ids current_id current_canonical_id
   if ! current_ids="$(docker ps -aq --filter "volume=$volume_name")"; then
     fail 'could not inspect containers using the data volume'
   fi
   while IFS= read -r current_id; do
-    [[ -n "$current_id" && "$current_id" != "$container_id" ]] \
-      && fail 'data volume is also mounted by another container'
+    [[ -n "$current_id" ]] || continue
+    current_canonical_id="$(docker inspect -f '{{.Id}}' "$current_id" 2>/dev/null)" \
+      || fail 'a container using the data volume could not be inspected'
+    [[ "$current_canonical_id" =~ ^[0-9a-f]{64}$ ]] \
+      || fail 'Docker returned an invalid container identifier for the data volume'
+    [[ "$current_canonical_id" == "$container_id" ]] \
+      || fail 'data volume is also mounted by another container'
   done <<<"$current_ids"
 }
 
