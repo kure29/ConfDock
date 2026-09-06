@@ -51,6 +51,8 @@ grep -F 'unset COMPOSE_PROJECT_NAME COMPOSE_FILE COMPOSE_ENV_FILES COMPOSE_PATH_
 grep -F 'CONFDOCK_ENV_FILE' "$repo_root/scripts/smoke-docker.sh" >/dev/null
 grep -F "find \"\$runtime_dir\" -type f -print0" "$repo_root/scripts/smoke-docker.sh" >/dev/null
 grep -F -- "--volumes-from \"\$container_id:ro\"" "$repo_root/scripts/backup-docker.sh" >/dev/null
+grep -F -- '--transform="s#^\\.\$#data#;s#^\\./#data/#"' \
+  "$repo_root/scripts/backup-docker.sh" >/dev/null
 grep -F -- 'install -d -m 700' "$repo_root/scripts/backup-docker.sh" >/dev/null
 grep -F -- '--strip-components=1' "$repo_root/scripts/restore-docker.sh" >/dev/null
 if grep -F "type=volume,source=\$volume_name" "$repo_root/scripts/backup-docker.sh" >/dev/null; then

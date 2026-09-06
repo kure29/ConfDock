@@ -260,7 +260,10 @@ docker run --rm "${helper_label_args[@]}" --platform linux/amd64 --user 0:0 --en
    if find /var/lib/confdock ! -type f ! -type d -print -quit | grep -q .; then exit 1; fi &&
    test -f /bundle/config.toml &&
    test ! -L /bundle/config.toml &&
-   tar --create --gzip --file=- --transform="s#^\\./#data/#" \
+   # GNU tar presents the explicit root operand as `.` to transforms. Map that
+   # member as well as its `./...` descendants so the archive never contains a
+   # top-level `./` entry that the fail-closed restore validator must reject.
+   tar --create --gzip --file=- --transform="s#^\\.\$#data#;s#^\\./#data/#" \
      --directory=/var/lib/confdock . --directory=/bundle config.toml' \
   >"$temporary_archive" || helper_status=$?
 
