@@ -66,6 +66,19 @@ fail() {
   exit 1
 }
 
+# Never enable shell tracing in this test: it handles an administrator
+# password and a one-time subscription token. A phase name and source line are
+# enough to diagnose an otherwise silent assertion without echoing the command
+# or any of its arguments.
+smoke_phase='preflight'
+report_unexpected_error() {
+  local status="$?"
+  printf 'docker smoke: unexpected failure in %s at line %s\n' \
+    "$smoke_phase" "${BASH_LINENO[0]:-unknown}" >&2
+  return "$status"
+}
+trap report_unexpected_error ERR
+
 for command_name in awk base64 chmod cmp cp curl docker find grep install jq mkdir mktemp od \
   python3 rm script sed sha256sum sleep sort stat tar tr; do
   command -v "$command_name" >/dev/null || fail "required command missing: $command_name"
@@ -836,6 +849,7 @@ stop_and_assert
 assert_sqlite_integrity "$smoke_volume"
 
 printf '%s\n' 'docker smoke: backup failure and archive checks' >&2
+smoke_phase='missing-container backup rejection'
 missing_project="$(choose_project)" || fail 'could not allocate missing-project identity'
 if COMPOSE_PROJECT_NAME="$missing_project" CONFDOCK_SMOKE_PROJECT="$missing_project" \
   CONFDOCK_COMPOSE_FILE="$compose_file" \
@@ -844,6 +858,7 @@ if COMPOSE_PROJECT_NAME="$missing_project" CONFDOCK_SMOKE_PROJECT="$missing_proj
   fail 'backup unexpectedly passed without a container'
 fi
 
+smoke_phase='backup creation and permissions'
 backup_output="$(COMPOSE_PROJECT_NAME="$alt_project" CONFDOCK_COMPOSE_FILE="$compose_file" \
   "$repo_root/scripts/backup-docker.sh" "$runtime_dir/backups")"
 backup_file="$(printf '%s\n' "$backup_output" | sed -n 's/^Docker backup created: //p')"
@@ -854,15 +869,18 @@ backup_dir_mode="$(stat -c '%a' "$runtime_dir/backups" 2>/dev/null || stat -f '%
 expected_owner="$(id -u):$(id -g)"
 [[ "$backup_mode" == 600 && "$backup_dir_mode" == 700 && "$backup_owner" == "$expected_owner" ]] \
   || fail 'backup permissions or ownership are unsafe'
+smoke_phase='backup target rejection'
 printf '%s\n' 'not-a-directory' >"$runtime_dir/backup-target"
 if COMPOSE_PROJECT_NAME="$alt_project" CONFDOCK_COMPOSE_FILE="$compose_file" \
   "$repo_root/scripts/backup-docker.sh" "$runtime_dir/backup-target" \
   >"$runtime_dir/backup-permission.out" 2>&1; then
   fail 'backup unexpectedly accepted a non-directory target'
 fi
+smoke_phase='backup archive contents'
 tar -tzf "$backup_file" | sed 's#^\./##' | grep -Fx 'data/confdock.db' >/dev/null
 tar -tzf "$backup_file" | sed 's#^\./##' | grep -Fx 'config.toml' >/dev/null
 
+smoke_phase='invalid restore volume rejection'
 if CONFDOCK_IMAGE="$image" CONFDOCK_COMPOSE_FILE="$compose_file" \
   CONFDOCK_RESTORE_VOLUME_NAME='invalid/volume-name' \
   "$repo_root/scripts/restore-docker.sh" "$backup_file" \
@@ -871,6 +889,7 @@ if CONFDOCK_IMAGE="$image" CONFDOCK_COMPOSE_FILE="$compose_file" \
 fi
 grep -F 'invalid restore volume name' "$runtime_dir/invalid-name.out" >/dev/null
 
+smoke_phase='unsafe restore archive rejection'
 permission_archive="$runtime_dir/permission.tar.gz"
 cp "$backup_file" "$permission_archive"
 chmod 644 "$permission_archive"
@@ -889,6 +908,7 @@ if CONFDOCK_IMAGE="$image" CONFDOCK_COMPOSE_FILE="$compose_file" \
 fi
 grep -F 'symlink' "$runtime_dir/link-restore.out" >/dev/null
 
+smoke_phase='backup and source manifest comparison'
 docker run --rm "${smoke_helper_args[@]}" "${smoke_helper_security[@]}" \
   --platform linux/amd64 --user 10001:10001 \
   --tmpfs /var/lib/confdock:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=700 --network none \
@@ -990,9 +1010,11 @@ done
 # Capture the source volume immediately before the isolated restore, after all
 # normal cross-project startup/stop and backup work has completed.  The source
 # remains stopped throughout the isolated validation below.
+smoke_phase='pre-restore source manifest'
 assert_volume_manifest "$smoke_volume" "$runtime_dir/pre-restore-original-manifest"
 
 printf '%s\n' 'docker smoke: isolated restore and verification' >&2
+smoke_phase='isolated restore creation'
 planned_restore_volume="$(choose_restore_volume)" || fail 'could not allocate an unused restore volume'
 restore_project="$(choose_project)" || fail 'could not allocate restore project'
 restore_volume="$planned_restore_volume"
@@ -1019,6 +1041,7 @@ compose=(docker compose --project-name "$restore_project" -f "$compose_file")
 "${compose[@]}" run --rm --no-deps confdock \
   --config /etc/confdock/config.toml config check >/dev/null
 "${compose[@]}" up -d --no-build >/dev/null
+smoke_phase='isolated restore service verification'
 wait_healthy || fail 'restored container did not become healthy'
 container_id="$("${compose[@]}" ps -q confdock)"
 assert_runtime_contract
@@ -1049,6 +1072,7 @@ cmp "$runtime_dir/pre-restore-original-manifest" \
   || fail 'original volume changed during isolated restore'
 
 printf '%s\n' 'docker smoke: rollback to the untouched original volume' >&2
+smoke_phase='original volume rollback'
 # The isolated instance is now stopped.  Recreate the original project against
 # its original physical volume and configuration, proving that a failed
 # cutover can be reversed without deleting or mutating either side.
