@@ -569,6 +569,17 @@ run_admin_init() {
     script -q --echo=never -e -c "$compose_command" /dev/null >"$output_file" 2>&1
 }
 
+run_admin_init_without_password() {
+  local output_file="$1" compose_command
+  compose_command="$(printf '%q ' "${compose[@]}")run --rm -it --no-deps confdock --config /etc/confdock/config.toml admin init"
+  # An already initialized instance rejects the command before prompting.  Do
+  # not preload a password into Docker's pseudo-terminal: if the process exits
+  # before disabling terminal echo, those bytes would otherwise be captured by
+  # `script` even though ConfDock never consumed them.
+  script -q --echo=never -e -c "$compose_command" /dev/null \
+    </dev/null >"$output_file" 2>&1
+}
+
 if run_admin_init "$password" "${password}-mismatch" "$runtime_dir/admin-mismatch.out"; then
   fail 'mismatched admin init unexpectedly passed'
 fi
@@ -578,7 +589,7 @@ run_admin_init "$password" "$password" "$runtime_dir/admin-init.out" \
   || fail 'admin init failed in a TTY'
 grep -F 'initialized successfully' "$runtime_dir/admin-init.out" >/dev/null
 
-if run_admin_init "$password" "$password" "$runtime_dir/admin-repeat.out"; then
+if run_admin_init_without_password "$runtime_dir/admin-repeat.out"; then
   fail 'repeat admin init unexpectedly passed'
 fi
 grep -F 'already initialized' "$runtime_dir/admin-repeat.out" >/dev/null
@@ -728,7 +739,7 @@ wait_healthy || fail 'container did not become healthy'
 container_id="$("${compose[@]}" ps -q confdock)"
 assert_runtime_contract
 
-if run_admin_init "$password" "$password" "$runtime_dir/admin-running.out"; then
+if run_admin_init_without_password "$runtime_dir/admin-running.out"; then
   fail 'admin init unexpectedly accepted a running, initialized instance'
 fi
 grep -F 'already initialized' "$runtime_dir/admin-running.out" >/dev/null
