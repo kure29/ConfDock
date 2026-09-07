@@ -151,7 +151,7 @@ jobs:
           major="${RELEASE_VERSION%%.*}"
           minor="${RELEASE_VERSION%.*}"
           immutable_sha_tag="sha-${RELEASE_SHA}"
-          manifest_file="$RUNNER_TEMP/confdock-image-manifest.json"
+          manifest_descriptor="$RUNNER_TEMP/confdock-image-manifest-descriptor.json"
           registry_check_container=''
           partial_state='none'
           report_partial_state() {
@@ -179,14 +179,19 @@ jobs:
             partial_state="GHCR tags through $GHCR_IMAGE:$tag"
           done
 
-          docker buildx imagetools inspect --raw \
-            "$GHCR_IMAGE:$RELEASE_VERSION" >"$manifest_file"
-          manifest_digest="sha256:$(sha256sum "$manifest_file" | awk '{print $1}')"
+          docker buildx imagetools inspect --format '{{json .Manifest}}' \
+            "$GHCR_IMAGE:$RELEASE_VERSION" >"$manifest_descriptor"
+          manifest_digest="$(jq -er '
+            .digest
+            | select(type == "string")
+            | select(test("^sha256:[0-9a-f]{64}$"))
+          ' "$manifest_descriptor")"
           [[ "$manifest_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           for tag in "$immutable_sha_tag" "$major" "$minor" latest; do
-            alias_manifest="$RUNNER_TEMP/confdock-image-manifest-$tag.json"
-            docker buildx imagetools inspect --raw "$GHCR_IMAGE:$tag" >"$alias_manifest"
-            test "sha256:$(sha256sum "$alias_manifest" | awk '{print $1}')" = "$manifest_digest"
+            alias_digest="$(docker buildx imagetools inspect \
+              --format '{{json .Manifest}}' "$GHCR_IMAGE:$tag" \
+              | jq -er '.digest | select(type == "string")')"
+            test "$alias_digest" = "$manifest_digest"
           done
           docker buildx imagetools inspect "$GHCR_IMAGE@$manifest_digest"
           docker pull "$GHCR_IMAGE@$manifest_digest"

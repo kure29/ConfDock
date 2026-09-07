@@ -37,6 +37,8 @@ for (const line of release.split('\n')) {
 assert.match(release, /check-ghcr-immutable-tags\.sh[\s\S]*docker push/);
 assert.match(release, /local_image='confdock:release-candidate'/);
 assert.match(release, /confdock-registry-binary[\s\S]*cmp .*confdock-registry-binary.*image-binary\/confdock/);
+assert.match(release, /imagetools inspect --format '\{\{json \.Manifest\}\}'[\s\S]*\.digest/);
+assert.doesNotMatch(release, /manifest_digest=.*sha256sum/);
 assert.match(release, /partial publication/);
 
 assert.match(dryRun, /^permissions:\n  contents: read$/m);
