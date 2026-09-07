@@ -10,7 +10,7 @@ IFS=$'\n\t'
 export LC_ALL=C
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compose_file="${CONFDOCK_COMPOSE_FILE:-$repo_root/deploy/docker/compose.yaml}"
-archive="${1:-}"
+input_archive="${1:-}"
 restore_dir_arg="${2:-}"
 host_uid="${CONFDOCK_HOST_UID:-$(id -u)}"
 host_gid="${CONFDOCK_HOST_GID:-$(id -g)}"
@@ -38,9 +38,9 @@ if [[ -n "${CONFDOCK_SMOKE_RUN:-}" ]]; then
   fi
 fi
 
-[[ -n "$archive" ]] || fail 'usage: restore-docker.sh BACKUP.tar.gz [RESTORE_CONFIG_DIR]'
+[[ -n "$input_archive" ]] || fail 'usage: restore-docker.sh BACKUP.tar.gz [RESTORE_CONFIG_DIR]'
 command -v docker >/dev/null || fail 'docker is required'
-for command_name in awk basename chmod chown date dirname find grep id mkdir mktemp od rm rmdir sed sort stat tar tr uniq wc; do
+for command_name in awk basename chmod chown cp date dirname find grep id mkdir mktemp mv od rm rmdir sed sha256sum sort stat tar tr uniq wc; do
   command -v "$command_name" >/dev/null || fail "required command missing: $command_name"
 done
 [[ "$host_uid" =~ ^[0-9]+$ && "$host_gid" =~ ^[0-9]+$ ]] \
@@ -60,26 +60,64 @@ if [[ -n "${CONFDOCK_ENV_FILE:-}" ]]; then
   [[ -f "$CONFDOCK_ENV_FILE" && ! -L "$CONFDOCK_ENV_FILE" ]] \
     || fail "Compose env file is missing or a symlink: $CONFDOCK_ENV_FILE"
 fi
-[[ -f "$archive" && ! -L "$archive" ]] || fail "backup archive is missing or a symlink: $archive"
-[[ "$archive" != *$'\n'* && "$archive" != *$'\r'* && "$archive" != *$'\t'* \
-  && "$archive" != *,* ]] || fail 'backup archive path contains unsafe characters'
-archive_mode="$(stat -c '%a' "$archive" 2>/dev/null || stat -f '%Lp' "$archive")"
-[[ "$archive_mode" == 600 ]] || fail 'backup archive must have mode 0600'
+[[ "$input_archive" != *$'\n'* && "$input_archive" != *$'\r'* \
+  && "$input_archive" != *$'\t'* && "$input_archive" != *,* ]] \
+  || fail 'backup archive path contains unsafe characters'
+[[ -f "$input_archive" && ! -L "$input_archive" ]] \
+  || fail "backup archive is missing or a symlink: $input_archive"
+input_archive_dir="$(cd "$(dirname "$input_archive")" && pwd -P)" \
+  || fail "backup directory does not exist: $(dirname "$input_archive")"
+input_archive="${input_archive_dir}/$(basename "$input_archive")"
+[[ -f "$input_archive" && ! -L "$input_archive" ]] \
+  || fail 'backup archive changed while its parent directory was resolved'
+input_archive_mode="$(stat -c '%a' "$input_archive" 2>/dev/null || stat -f '%Lp' "$input_archive")"
+[[ "$input_archive_mode" == 600 ]] || fail 'backup archive must have mode 0600'
+# Pin the verified regular file before copying. A pathname replacement between
+# metadata validation and snapshot creation cannot redirect the copy to a
+# different inode.
+exec {input_archive_fd}<"$input_archive" \
+  || fail 'backup archive could not be opened for private staging'
+input_archive_fd_path="/proc/$$/fd/$input_archive_fd"
+[[ -r "$input_archive_fd_path" ]] || input_archive_fd_path="/dev/fd/$input_archive_fd"
+input_archive_path_identity="$(stat -c '%d:%i' "$input_archive" 2>/dev/null || stat -f '%d:%i' "$input_archive")"
+input_archive_fd_identity="$(stat -Lc '%d:%i' "$input_archive_fd_path" 2>/dev/null || stat -Lf '%d:%i' "$input_archive_fd_path")"
+input_archive_fd_type="$(stat -Lc '%F' "$input_archive_fd_path" 2>/dev/null || stat -Lf '%HT' "$input_archive_fd_path")"
+input_archive_fd_mode="$(stat -Lc '%a' "$input_archive_fd_path" 2>/dev/null || stat -Lf '%Lp' "$input_archive_fd_path")"
+[[ "$input_archive_path_identity" == "$input_archive_fd_identity" \
+  && "$input_archive_fd_type" == 'regular file' && "$input_archive_fd_mode" == 600 ]] \
+  || fail 'backup archive identity or type changed before private staging'
 
-archive_dir="$(cd "$(dirname "$archive")" && pwd)" \
-  || fail "backup directory does not exist: $(dirname "$archive")"
-archive="${archive_dir}/$(basename "$archive")"
-
-entries_file="$(mktemp -t confdock-restore-entries.XXXXXX)"
-types_file="$(mktemp -t confdock-restore-types.XXXXXX)"
+staging_root=''
+staged_archive=''
+staged_archive_sha256=''
+entries_file=''
+types_file=''
+config_stage_dir=''
+config_stage_identity=''
 restore_dir=''
-restore_dir_user_supplied=0
+restore_parent=''
+restore_parent_identity=''
+restore_dir_identity=''
+restore_dir_reserved=0
 restore_volume=''
 restore_marker=''
 keep_restore_volume=0
 keep_restore_dir=0
 cleanup() {
-  rm -f -- "$entries_file" "$types_file"
+  [[ -z "$entries_file" || ! -e "$entries_file" ]] || rm -f -- "$entries_file"
+  [[ -z "$types_file" || ! -e "$types_file" ]] || rm -f -- "$types_file"
+  [[ -z "$staged_archive" || ! -e "$staged_archive" ]] || rm -f -- "$staged_archive"
+  if [[ -n "$config_stage_dir" && -n "$config_stage_identity" \
+    && "$(path_identity "$config_stage_dir" 2>/dev/null || true)" == "$config_stage_identity" \
+    && -d "$config_stage_dir" && ! -L "$config_stage_dir" ]]; then
+    if [[ -f "$config_stage_dir/config.toml" || -L "$config_stage_dir/config.toml" ]]; then
+      rm -f -- "$config_stage_dir/config.toml"
+    fi
+    rmdir -- "$config_stage_dir" 2>/dev/null || true
+  fi
+  if [[ -n "$staging_root" && -d "$staging_root" && ! -L "$staging_root" ]]; then
+    rmdir -- "$staging_root" 2>/dev/null || true
+  fi
   if [[ "$keep_restore_volume" == 0 && -n "$restore_volume" && -n "$restore_marker" ]]; then
     # A volume name can be raced after a failed operation. Only remove the
     # volume carrying this invocation's marker; never remove an unrelated
@@ -90,19 +128,77 @@ cleanup() {
       docker volume rm "$restore_volume" >/dev/null 2>&1 || true
     fi
   fi
-  # The restore directory contains at most the one config file created by this
-  # invocation.  Remove that file and then the directory itself; never recurse
-  # through a path that could have been replaced by a symlink or mount.
-  if [[ "$keep_restore_dir" == 0 && "$restore_dir_user_supplied" == 0 \
-    && -n "$restore_dir" && -d "$restore_dir" \
-    && ! -L "$restore_dir" ]]; then
-    if [[ -f "$restore_dir/config.toml" && ! -L "$restore_dir/config.toml" ]]; then
-      rm -f -- "$restore_dir/config.toml"
+  # Remove only the exact empty/config-only directory reserved by this
+  # invocation. If its inode changed, leave the replacement untouched and
+  # report it for manual inspection instead of following a raced path.
+  if [[ "$keep_restore_dir" == 0 && "$restore_dir_reserved" == 1 \
+    && -n "$restore_dir" && -n "$restore_dir_identity" ]]; then
+    current_restore_identity="$(path_identity "$restore_dir" 2>/dev/null || true)"
+    if [[ "$current_restore_identity" == "$restore_dir_identity" \
+      && -d "$restore_dir" && ! -L "$restore_dir" ]]; then
+      if [[ -f "$restore_dir/config.toml" && ! -L "$restore_dir/config.toml" ]]; then
+        rm -f -- "$restore_dir/config.toml"
+      fi
+      rmdir -- "$restore_dir" 2>/dev/null || true
+    elif [[ -e "$restore_dir" || -L "$restore_dir" ]]; then
+      printf 'docker restore: restore target identity changed; left untouched for manual inspection: %s\n' \
+        "$restore_dir" >&2
     fi
-    rmdir -- "$restore_dir" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT
+
+path_identity() {
+  local path="$1"
+  stat -c '%d:%i' "$path" 2>/dev/null || stat -f '%d:%i' "$path"
+}
+
+# Snapshot the caller-supplied archive before inspecting any archive content.
+# All later tar and Docker operations use only this private, unpredictable copy,
+# so replacing the original pathname cannot substitute unvalidated bytes.
+staging_root="$(mktemp -d -t confdock-restore-stage.XXXXXX)"
+chmod 0700 "$staging_root"
+staging_mode="$(stat -c '%a' "$staging_root" 2>/dev/null || stat -f '%Lp' "$staging_root")"
+staging_owner="$(stat -c '%u:%g' "$staging_root" 2>/dev/null || stat -f '%u:%g' "$staging_root")"
+[[ "$staging_mode" == 700 && "$staging_owner" == "$(id -u):$(id -g)" ]] \
+  || fail 'restore staging directory has unsafe permissions or ownership'
+[[ "$staging_root" != *,* ]] || fail 'restore staging path contains an unsupported comma'
+staged_archive="$(mktemp "$staging_root/archive.XXXXXX.tar.gz")"
+cp -- "$input_archive_fd_path" "$staged_archive"
+exec {input_archive_fd}<&-
+chmod 0600 "$staged_archive"
+[[ -f "$staged_archive" && ! -L "$staged_archive" ]] \
+  || fail 'could not create a private regular-file archive snapshot'
+staged_mode="$(stat -c '%a' "$staged_archive" 2>/dev/null || stat -f '%Lp' "$staged_archive")"
+staged_owner="$(stat -c '%u:%g' "$staged_archive" 2>/dev/null || stat -f '%u:%g' "$staged_archive")"
+[[ "$staged_mode" == 600 && "$staged_owner" == "$(id -u):$(id -g)" ]] \
+  || fail 'staged backup archive has unsafe permissions or ownership'
+staged_archive_sha256="$(sha256sum "$staged_archive" | awk '{print $1}')"
+[[ "$staged_archive_sha256" =~ ^[0-9a-f]{64}$ ]] \
+  || fail 'could not fingerprint the staged backup archive'
+
+# Retain only the resolved parent for the default output location. The original
+# archive pathname is deliberately discarded and is never passed to tar or
+# Docker after the snapshot above.
+archive_dir="$input_archive_dir"
+unset input_archive input_archive_dir input_archive_mode input_archive_fd_path \
+  input_archive_path_identity input_archive_fd_identity input_archive_fd_type \
+  input_archive_fd_mode
+archive="$staged_archive"
+
+assert_staged_archive_unchanged() {
+  local current_mode current_owner current_sha256
+  [[ -f "$archive" && ! -L "$archive" ]] || fail 'staged backup archive changed type'
+  current_mode="$(stat -c '%a' "$archive" 2>/dev/null || stat -f '%Lp' "$archive")"
+  current_owner="$(stat -c '%u:%g' "$archive" 2>/dev/null || stat -f '%u:%g' "$archive")"
+  current_sha256="$(sha256sum "$archive" | awk '{print $1}')"
+  [[ "$current_mode" == 600 && "$current_owner" == "$(id -u):$(id -g)" \
+    && "$current_sha256" == "$staged_archive_sha256" ]] \
+    || fail 'staged backup archive changed after validation'
+}
+
+entries_file="$(mktemp "$staging_root/entries.XXXXXX")"
+types_file="$(mktemp "$staging_root/types.XXXXXX")"
 
 tar -tzf "$archive" >"$entries_file" \
   || fail 'backup archive is not a valid gzip tar archive'
@@ -128,6 +224,7 @@ while IFS= read -r listing; do
     *) fail 'backup archive contains a link or special file' ;;
   esac
 done <"$types_file"
+assert_staged_archive_unchanged
 
 has_db=0
 has_config=0
@@ -281,24 +378,38 @@ if [[ -n "$restore_dir_arg" ]]; then
   [[ "$restore_dir_arg" != *$'\n'* && "$restore_dir_arg" != *$'\r'* \
     && "$restore_dir_arg" != *$'\t'* && "$restore_dir_arg" != *,* ]] \
     || fail 'restore configuration path contains unsafe characters'
-  restore_dir_user_supplied=1
-  restore_parent="$(cd "$(dirname "$restore_dir_arg")" && pwd)" \
+  restore_parent="$(cd "$(dirname "$restore_dir_arg")" && pwd -P)" \
     || fail "restore parent directory does not exist: $(dirname "$restore_dir_arg")"
   restore_dir="${restore_parent}/$(basename "$restore_dir_arg")"
 else
-  restore_dir="$archive_dir/confdock-restore-$stamp-$random_suffix"
+  restore_parent="$archive_dir"
+  restore_dir="$restore_parent/confdock-restore-$stamp-$random_suffix"
 fi
+[[ -d "$restore_parent" && ! -L "$restore_parent" ]] \
+  || fail 'restore configuration parent is not a real directory'
+restore_parent_identity="$(path_identity "$restore_parent")" \
+  || fail 'could not record restore configuration parent identity'
 if [[ -e "$restore_dir" || -L "$restore_dir" ]]; then
   fail "restore config directory already exists: $restore_dir"
 fi
-mkdir -m 700 "$restore_dir"
 actual_host_uid="$(id -u)"
 actual_host_gid="$(id -g)"
 if [[ "$host_uid" != "$actual_host_uid" || "$host_gid" != "$actual_host_gid" ]]; then
   [[ "$actual_host_uid" == 0 ]] \
     || fail 'CONFDOCK_HOST_UID/GID differs from the invoking user; run as that user or root'
-  chown "$host_uid:$host_gid" "$restore_dir"
 fi
+# Create the configuration staging directory beside its final target. GNU
+# rename with `-T -n` can then publish the entire verified directory atomically
+# without ever overwriting an existing path.
+config_stage_dir="$(mktemp -d "$restore_parent/.confdock-restore-config.XXXXXX")"
+chmod 0700 "$config_stage_dir"
+if [[ "$host_uid" != "$actual_host_uid" || "$host_gid" != "$actual_host_gid" ]]; then
+  chown "$host_uid:$host_gid" "$config_stage_dir"
+fi
+[[ -d "$config_stage_dir" && ! -L "$config_stage_dir" ]] \
+  || fail 'could not create a private configuration staging directory'
+config_stage_identity="$(path_identity "$config_stage_dir")" \
+  || fail 'could not record configuration staging identity'
 volume_create=(docker volume create)
 volume_create+=(--label "com.confdock.restore.id=$restore_marker")
 if [[ -n "$restore_label_project" ]]; then
@@ -308,7 +419,11 @@ if [[ -n "$restore_label_project" ]]; then
   )
 fi
 if [[ -n "$restore_label_run" ]]; then
-  volume_create+=(--label "com.confdock.smoke.run=$restore_label_run")
+  volume_create+=(
+    --label "com.confdock.smoke.run=$restore_label_run"
+    --label 'com.confdock.smoke.kind=volume'
+    --label "com.confdock.smoke.resource=$restore_marker"
+  )
 fi
 "${volume_create[@]}" "$restore_volume" >/dev/null
 # Keep every successfully-created isolated volume for operator inspection and
@@ -351,8 +466,9 @@ fi
 # tmpfs, so a valid backup is not rejected merely because the data directory is
 # larger than an arbitrary temporary limit. Root is used only inside this
 # disposable helper to set the volume's required application ownership; no host
-# path other than restore_dir is modified, and the active volume is never
+# path other than the private config staging directory is modified, and the active volume is never
 # mounted.
+assert_staged_archive_unchanged
 docker run --rm "${helper_label_args[@]}" --platform linux/amd64 --user 0:0 --entrypoint /bin/sh \
   --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
   --tmpfs /var/lib/confdock:rw,noexec,nosuid,nodev,size=16m,mode=700 --network none \
@@ -362,7 +478,7 @@ docker run --rm "${helper_label_args[@]}" --platform linux/amd64 --user 0:0 --en
   --env "CONFDOCK_HOST_UID=$host_uid" --env "CONFDOCK_HOST_GID=$host_gid" \
   --mount "type=bind,source=$archive,destination=/input.tar.gz,readonly" \
   --mount "type=volume,source=$restore_volume,destination=/restore-data,volume-nocopy" \
-  --mount "type=bind,source=$restore_dir,destination=/restore-config" \
+  --mount "type=bind,source=$config_stage_dir,destination=/restore-config" \
   "$image_ref" -eu -c '
     test -d /restore-data
     test ! -L /restore-data
@@ -396,17 +512,17 @@ docker run --rm "${helper_label_args[@]}" --platform linux/amd64 --user 0:0 --en
     chmod 0644 /restore-config/config.toml
   '
 
+assert_staged_archive_unchanged
 assert_restore_volume_identity
 
-# The isolated volume is intentionally writable for this read-only SQL check:
-# SQLite WAL mode may need to update -shm lock bytes. No service is running,
-# and the URI below still forbids database writes.
+# Keep the restored database and its WAL/SHM sidecars byte-for-byte unchanged
+# during this pre-start integrity check.
 docker run --rm "${helper_label_args[@]}" --cap-drop ALL --security-opt no-new-privileges \
   --platform linux/amd64 --user 10001:10001 --read-only \
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
   --tmpfs /var/lib/confdock:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=700 --entrypoint /bin/sh \
   --network none \
-  --mount "type=volume,source=$restore_volume,destination=/check,volume-nocopy" \
+  --mount "type=volume,source=$restore_volume,destination=/check,readonly,volume-nocopy" \
   "$image_ref" -eu -c '
     test -d /check
     test "$(stat -c "%u:%g" /check)" = 10001:10001
@@ -417,30 +533,72 @@ docker run --rm "${helper_label_args[@]}" --cap-drop ALL --security-opt no-new-p
     if find /check \( ! -user 10001 -o ! -group 10001 \) -print -quit | grep -q .; then exit 1; fi
     if find /check -type d ! -perm 700 -print -quit | grep -q .; then exit 1; fi
     if find /check -type f ! -perm 600 -print -quit | grep -q .; then exit 1; fi
-    test "$(sqlite3 "file:/check/confdock.db?mode=ro" "PRAGMA integrity_check;")" = ok
+    test "$(sqlite3 -readonly "file:/check/confdock.db?mode=ro" "PRAGMA integrity_check;")" = ok
   '
 assert_restore_volume_identity
-[[ -f "$restore_dir/config.toml" && ! -L "$restore_dir/config.toml" ]] \
+[[ -f "$config_stage_dir/config.toml" && ! -L "$config_stage_dir/config.toml" ]] \
   || fail 'restored config.toml is missing or a symlink'
-[[ -d "$restore_dir" && ! -L "$restore_dir" ]] \
-  || fail 'restored configuration directory is missing or a symlink'
-config_dir_mode="$(stat -c '%a' "$restore_dir" 2>/dev/null || stat -f '%Lp' "$restore_dir")"
-config_dir_owner="$(stat -c '%u:%g' "$restore_dir" 2>/dev/null || stat -f '%u:%g' "$restore_dir")"
-[[ "$config_dir_mode" == 700 && "$config_dir_owner" == "$host_uid:$host_gid" ]] \
-  || fail 'restored configuration directory has unexpected permissions or ownership'
-config_mode="$(stat -c '%a' "$restore_dir/config.toml" 2>/dev/null || stat -f '%Lp' "$restore_dir/config.toml")"
-config_owner="$(stat -c '%u:%g' "$restore_dir/config.toml" 2>/dev/null || stat -f '%u:%g' "$restore_dir/config.toml")"
+config_stage_mode="$(stat -c '%a' "$config_stage_dir" 2>/dev/null || stat -f '%Lp' "$config_stage_dir")"
+[[ "$config_stage_mode" == 700 ]] \
+  || fail 'restored configuration staging directory has unexpected permissions'
+config_mode="$(stat -c '%a' "$config_stage_dir/config.toml" 2>/dev/null || stat -f '%Lp' "$config_stage_dir/config.toml")"
+config_owner="$(stat -c '%u:%g' "$config_stage_dir/config.toml" 2>/dev/null || stat -f '%u:%g' "$config_stage_dir/config.toml")"
 [[ "$config_mode" == 644 && "$config_owner" == "$host_uid:$host_gid" ]] \
   || fail 'restored config.toml has unexpected permissions or ownership'
 docker run --rm "${helper_label_args[@]}" --cap-drop ALL --security-opt no-new-privileges \
   --platform linux/amd64 --user 10001:10001 --read-only \
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
   --tmpfs /var/lib/confdock:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=700 --network none \
-  --mount "type=bind,source=$restore_dir/config.toml,destination=/etc/confdock/config.toml,readonly" \
+  --mount "type=bind,source=$config_stage_dir/config.toml,destination=/etc/confdock/config.toml,readonly" \
   "$image_ref" --config /etc/confdock/config.toml config check >/dev/null \
   || fail 'restored config.toml failed config check'
 
+assert_staged_archive_unchanged
 assert_restore_volume_identity
+
+assert_restore_destination_available() {
+  local current_parent_identity current_stage_identity current_mode current_owner
+  current_parent_identity="$(path_identity "$restore_parent" 2>/dev/null || true)"
+  current_stage_identity="$(path_identity "$config_stage_dir" 2>/dev/null || true)"
+  [[ "$current_parent_identity" == "$restore_parent_identity" \
+    && "$current_stage_identity" == "$config_stage_identity" \
+    && -d "$config_stage_dir" && ! -L "$config_stage_dir" ]] \
+    || fail 'restore configuration parent or staging identity changed before publication'
+  [[ ! -e "$restore_dir" && ! -L "$restore_dir" ]] \
+    || fail 'restore configuration target appeared before publication'
+  current_mode="$(stat -c '%a' "$config_stage_dir" 2>/dev/null || stat -f '%Lp' "$config_stage_dir")"
+  current_owner="$(stat -c '%u:%g' "$config_stage_dir" 2>/dev/null || stat -f '%u:%g' "$config_stage_dir")"
+  [[ "$current_mode" == 700 && "$current_owner" == "$host_uid:$host_gid" ]] \
+    || fail 'restore configuration staging permissions or ownership changed'
+  [[ "$(find "$config_stage_dir" -mindepth 1 -maxdepth 1 -print)" \
+    == "$config_stage_dir/config.toml" ]] \
+    || fail 'restore configuration staging contains unexpected entries'
+}
+
+assert_restore_destination_available
+staged_config_sha256="$(sha256sum "$config_stage_dir/config.toml" | awk '{print $1}')"
+[[ "$staged_config_sha256" =~ ^[0-9a-f]{64}$ ]] \
+  || fail 'could not fingerprint staged config.toml'
+# Both paths have the same verified parent. GNU `mv -T -n` maps to a no-replace
+# directory rename, so a target raced into place is never traversed or overwritten.
+mv -T -n "$config_stage_dir" "$restore_dir"
+[[ ! -e "$config_stage_dir" && ! -L "$config_stage_dir" ]] \
+  || fail 'restore configuration target appeared during atomic publication'
+restore_dir_reserved=1
+restore_dir_identity="$config_stage_identity"
+config_stage_dir=''
+config_stage_identity=''
+[[ "$(path_identity "$restore_dir")" == "$restore_dir_identity" \
+  && -f "$restore_dir/config.toml" && ! -L "$restore_dir/config.toml" ]] \
+  || fail 'published config.toml or its target directory changed identity'
+published_config_sha256="$(sha256sum "$restore_dir/config.toml" | awk '{print $1}')"
+published_config_mode="$(stat -c '%a' "$restore_dir/config.toml" 2>/dev/null || stat -f '%Lp' "$restore_dir/config.toml")"
+published_config_owner="$(stat -c '%u:%g' "$restore_dir/config.toml" 2>/dev/null || stat -f '%u:%g' "$restore_dir/config.toml")"
+[[ "$published_config_sha256" == "$staged_config_sha256" \
+  && "$published_config_mode" == 644 \
+  && "$published_config_owner" == "$host_uid:$host_gid" ]] \
+  || fail 'published config.toml differs from the validated staging file'
+assert_staged_archive_unchanged
 
 printf 'RESTORE_VOLUME_NAME=%s\n' "$restore_volume"
 printf 'RESTORE_CONFIG_PATH=%s\n' "$restore_dir/config.toml"

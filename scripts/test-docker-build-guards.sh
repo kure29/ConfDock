@@ -60,6 +60,39 @@ grep -F -- '--transform="s#^\\.\$#data#;s#^\\./#data/#"' \
   "$repo_root/scripts/backup-docker.sh" >/dev/null
 grep -F -- 'install -d -m 700' "$repo_root/scripts/backup-docker.sh" >/dev/null
 grep -F -- '--strip-components=1' "$repo_root/scripts/restore-docker.sh" >/dev/null
+grep -F 'staged_archive_sha256=' "$repo_root/scripts/restore-docker.sh" >/dev/null
+grep -F 'assert_staged_archive_unchanged' "$repo_root/scripts/restore-docker.sh" >/dev/null
+# shellcheck disable=SC2016 # Match literal variables in the implementation.
+grep -F 'mv -T -n "$config_stage_dir" "$restore_dir"' \
+  "$repo_root/scripts/restore-docker.sh" >/dev/null
+grep -F 'curl --config - -fsS' "$repo_root/scripts/smoke-docker.sh" >/dev/null
+grep -F 'curl --config - -fsS' "$repo_root/docs/deployment/docker.md" >/dev/null
+# shellcheck disable=SC2016 # Match the literal documented route.
+grep -F '`/sub/` 禁用访问日志' "$repo_root/docs/deployment/docker.md" >/dev/null
+grep -F 'PROC\t%s' "$repo_root/scripts/smoke-docker.sh" >/dev/null
+grep -F 'create_recovery_wal' "$repo_root/scripts/smoke-docker.sh" >/dev/null
+grep -F 'wal-restored-before-start.sha256' "$repo_root/scripts/smoke-docker.sh" >/dev/null
+grep -F 'resource-registry.tsv' "$repo_root/scripts/smoke-docker.sh" >/dev/null
+grep -F 'registered cleanup identity guards' "$repo_root/scripts/smoke-docker.sh" >/dev/null
+grep -F 'registered container was replaced; left untouched for manual inspection' \
+  "$repo_root/scripts/smoke-docker.sh" >/dev/null
+grep -F 'registered network was replaced; left untouched for manual inspection' \
+  "$repo_root/scripts/smoke-docker.sh" >/dev/null
+grep -F 'CONFDOCK_RESOURCE_REGISTRAR' "$repo_root/scripts/smoke-docker.sh" >/dev/null
+grep -F 'run_direct_helper' "$repo_root/scripts/smoke-docker.sh" >/dev/null
+grep -F 'run_compose_oneoff' "$repo_root/scripts/smoke-docker.sh" >/dev/null
+# shellcheck disable=SC2016 # Reject literal token variables on curl command lines.
+if grep -E 'curl[^#]*\$(token|CONFDOCK_SUB_TOKEN)' \
+  "$repo_root/scripts/smoke-docker.sh" >/dev/null; then
+  printf '%s\n' 'subscription token still appears in curl argv' >&2
+  exit 1
+fi
+# shellcheck disable=SC2016 # Reject the literal variable on curl command lines.
+if grep -E 'curl[^#]*\$CONFDOCK_SUB_TOKEN' \
+  "$repo_root/docs/deployment/docker.md" >/dev/null; then
+  printf '%s\n' 'documented subscription token still appears in curl argv' >&2
+  exit 1
+fi
 if grep -F "type=volume,source=\$volume_name" "$repo_root/scripts/backup-docker.sh" >/dev/null; then
   printf '%s\n' 'backup must not mount a volume by name (it can auto-create a volume)' >&2
   exit 1

@@ -64,6 +64,14 @@ jobs:
             scripts/smoke-single-binary.sh scripts/smoke-docker.sh \
             scripts/backup-docker.sh scripts/restore-docker.sh \
             scripts/test-docker-build-guards.sh
+          awk 'found { if ($0 == "RESOURCE_REGISTRAR") exit; print } /<<.RESOURCE_REGISTRAR./ { found=1 }' \
+            scripts/smoke-docker.sh | bash -n
+          awk 'found { if ($0 == "DOCKER_REGISTRY_WRAPPER") exit; print } /<<.DOCKER_REGISTRY_WRAPPER./ { found=1 }' \
+            scripts/smoke-docker.sh | bash -n
+          awk 'found { if ($0 == "RESOURCE_REGISTRAR") exit; print } /<<.RESOURCE_REGISTRAR./ { found=1 }' \
+            scripts/smoke-docker.sh | shellcheck -s bash -
+          awk 'found { if ($0 == "DOCKER_REGISTRY_WRAPPER") exit; print } /<<.DOCKER_REGISTRY_WRAPPER./ { found=1 }' \
+            scripts/smoke-docker.sh | shellcheck -s bash -
 
       - name: Test lockfile and toolchain guards
         run: |

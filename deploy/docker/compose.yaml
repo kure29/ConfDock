@@ -8,6 +8,8 @@ services:
     image: ${CONFDOCK_IMAGE:-confdock:local}
     labels:
       com.confdock.smoke.run: ${CONFDOCK_SMOKE_RUN:-none}
+      com.confdock.smoke.kind: ${CONFDOCK_SMOKE_KIND:-none}
+      com.confdock.smoke.resource: ${CONFDOCK_SMOKE_RESOURCE:-none}
     platform: linux/amd64
     init: true
     restart: unless-stopped
@@ -58,3 +60,5 @@ networks:
   default:
     labels:
       com.confdock.smoke.run: ${CONFDOCK_SMOKE_RUN:-none}
+      com.confdock.smoke.kind: ${CONFDOCK_SMOKE_NETWORK_KIND:-none}
+      com.confdock.smoke.resource: ${CONFDOCK_SMOKE_NETWORK_RESOURCE:-none}

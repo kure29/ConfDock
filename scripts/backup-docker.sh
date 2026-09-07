@@ -219,21 +219,18 @@ temporary_archive="$(mktemp "$backup_dir/.confdock-backup.XXXXXX")"
 archive_listing="$(mktemp "$backup_dir/.confdock-listing.XXXXXX")"
 archive_types="$(mktemp "$backup_dir/.confdock-types.XXXXXX")"
 
-# SQLite's WAL VFS may need to update its shared-memory lock bytes even for a
-# read-only SQL connection.  Run the integrity check as the application UID
-# through the already-validated source container's exact mounts (the source is
-# stopped and no other container may use the volume).  The volume is writable
-# only for this check; the SQL URI is still `mode=ro`, and the subsequent archive
-# helper uses a read-only `--volumes-from` mount.  Any sidecar created by SQLite
-# is therefore included in the archive.
+# Run the integrity check as the application UID through the already-validated
+# stopped container's exact mounts. The mount itself is read-only as well as the
+# SQLite connection, so this check cannot checkpoint, rewrite, or remove WAL/SHM
+# bytes that must be preserved by the following archive operation.
 integrity_status=0
 docker run --rm "${helper_label_args[@]}" --platform linux/amd64 --user 10001:10001 \
   --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
   --network none --cap-drop ALL --security-opt no-new-privileges \
-  --volumes-from "$container_id" --entrypoint /bin/sh \
+  --volumes-from "$container_id:ro" --entrypoint /bin/sh \
   "$image_ref" -eu -c \
   'test -s /var/lib/confdock/confdock.db && test ! -L /var/lib/confdock/confdock.db &&
-   test "$(sqlite3 "file:/var/lib/confdock/confdock.db?mode=ro" "PRAGMA integrity_check;")" = ok' \
+   test "$(sqlite3 -readonly "file:/var/lib/confdock/confdock.db?mode=ro" "PRAGMA integrity_check;")" = ok' \
   || integrity_status=$?
 assert_source_identity
 [[ "$integrity_status" == 0 ]] || fail 'SQLite integrity check failed before backup'

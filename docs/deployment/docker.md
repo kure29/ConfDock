@@ -250,6 +250,10 @@ test -f "$original_config"
 不会删除原卷或原备份；新建的隔离恢复卷会保留，直到你完成人工验证和切换决定。
 恢复配置文件由当前宿主用户拥有（模式 `0644`，仅含非密码运行设置）；数据卷中的
 数据库、WAL、SHM 和其他文件由容器用户 `10001:10001` 拥有并设为私有模式。
+输入归档会先复制到脚本独占的 `0700` staging 目录并设为 `0600`；成员检查、解包及
+前后 SHA-256 校验都只使用该私有副本。配置先恢复到目标父目录内的不可预测 staging
+目录，校验后以 no-replace 目录 rename 发布；现有目标、符号链接或中途出现的同名路径
+都不会被覆盖。
 
 使用新的 project name 启动隔离实例。project name 只影响容器/网络；物理卷由
 `CONFDOCK_VOLUME_NAME` 明确指定：
@@ -290,6 +294,7 @@ curl -fsS "http://127.0.0.1:${CONFDOCK_HOST_PORT:-8787}/healthz"
 
 ```bash
 set -Eeuo pipefail
+set +x
 read -r -s -p 'Administrator password: ' CONFDOCK_ADMIN_PASSWORD; printf '\n' >&2
 read -r -s -p 'Previously retained subscription token: ' CONFDOCK_SUB_TOKEN; printf '\n' >&2
 project_json="$(mktemp)"
@@ -317,8 +322,9 @@ curl -fsS -b "$restore_cookie" \
   -o "$served_revision_json"
 jq -e --arg rev "$served_revision_id" '.id == $rev' "$served_revision_json" >/dev/null
 jq -er '.source' "$served_revision_json" | base64 --decode >"$expected_subscription"
-curl -fsS -D "$subscription_headers" -o "$subscription_body" \
-  "http://127.0.0.1:${CONFDOCK_HOST_PORT:-8787}/sub/$CONFDOCK_SUB_TOKEN" >/dev/null
+printf 'url = "%s"\n' \
+  "http://127.0.0.1:${CONFDOCK_HOST_PORT:-8787}/sub/$CONFDOCK_SUB_TOKEN" | \
+  curl --config - -fsS -D "$subscription_headers" -o "$subscription_body" >/dev/null
 cmp "$expected_subscription" "$subscription_body"
 grep -Eiq '^content-type: application/octet-stream' "$subscription_headers"
 grep -Eiq '^cache-control: no-store' "$subscription_headers"
@@ -329,6 +335,10 @@ grep -Eiq '^x-content-type-options: nosniff' "$subscription_headers"
 Settings 可读和订阅原始字节完全一致；响应还必须保留 `Content-Type: application/octet-stream`、
 `Cache-Control: no-store`、`X-Content-Type-Options: nosniff`。不要在终端回显密码或 Token。
 仓库的 Docker Smoke 会自动执行同样的边界验证。
+
+订阅 Token 位于 URL path 中。除上述命令避免把它放进进程参数外，反向代理也应对
+`/sub/` 禁用访问日志，或至少对该路径完整脱敏；默认访问日志通常会记录请求 path，不能把
+日志文件当作非敏感数据。
 
 验证代码块中的命令如果失败，请先记下失败并继续到下方回滚代码块（交互式 Bash 可在
 验证阶段临时执行 `set +e`，避免 `set -e` 直接退出当前 Shell）。保持隔离实例停止，切回原卷和原配置：
