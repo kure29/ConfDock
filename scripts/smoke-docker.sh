@@ -816,43 +816,66 @@ append_identity() {
 }
 
 register_one() {
-  local type="$1" key="$2" canonical_id name project run_label kind created marker
+  local type="$1" key="$2" identity canonical_id name project run_label kind created marker
   case "$type" in
     container)
-      canonical_id="$("$docker_binary" inspect -f '{{.Id}}' "$key")"
-      name="$("$docker_binary" inspect -f '{{.Name}}' "$canonical_id")"
-      name="${name#/}"
-      project="$("$docker_binary" inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$canonical_id")"
-      run_label="$("$docker_binary" inspect -f '{{index .Config.Labels "com.confdock.smoke.run"}}' "$canonical_id")"
-      kind="$("$docker_binary" inspect -f '{{index .Config.Labels "com.confdock.smoke.kind"}}' "$canonical_id")"
-      marker="$("$docker_binary" inspect -f '{{index .Config.Labels "com.confdock.smoke.resource"}}' "$canonical_id")"
-      created="$("$docker_binary" inspect -f '{{.Created}}' "$canonical_id")"
+      identity="$("$docker_binary" inspect "$key" 2>/dev/null | jq -er '
+        .[0] | [.Id, (.Name | ltrimstr("/")),
+          .Config.Labels["com.docker.compose.project"],
+          .Config.Labels["com.confdock.smoke.run"],
+          .Config.Labels["com.confdock.smoke.kind"], .Created,
+          .Config.Labels["com.confdock.smoke.resource"]] | @tsv
+      ')" || return 1
+      IFS=$'\t' read -r canonical_id name project run_label kind created marker \
+        <<<"$identity"
       [[ "$canonical_id" =~ ^[0-9a-f]{64}$ ]]
       append_identity container "$canonical_id" "$name" "$project" \
         "$run_label" "$kind" "$created" "$marker"
       ;;
     network)
-      canonical_id="$("$docker_binary" network inspect -f '{{.Id}}' "$key")"
-      name="$("$docker_binary" network inspect -f '{{.Name}}' "$canonical_id")"
-      project="$("$docker_binary" network inspect -f '{{index .Labels "com.docker.compose.project"}}' "$canonical_id")"
-      run_label="$("$docker_binary" network inspect -f '{{index .Labels "com.confdock.smoke.run"}}' "$canonical_id")"
-      kind="$("$docker_binary" network inspect -f '{{index .Labels "com.confdock.smoke.kind"}}' "$canonical_id")"
-      marker="$("$docker_binary" network inspect -f '{{index .Labels "com.confdock.smoke.resource"}}' "$canonical_id")"
-      created="$("$docker_binary" network inspect -f '{{.Created}}' "$canonical_id")"
+      identity="$("$docker_binary" network inspect "$key" 2>/dev/null | jq -er '
+        .[0] | [.Id, .Name, .Labels["com.docker.compose.project"],
+          .Labels["com.confdock.smoke.run"],
+          .Labels["com.confdock.smoke.kind"], .Created,
+          .Labels["com.confdock.smoke.resource"]] | @tsv
+      ')" || return 1
+      IFS=$'\t' read -r canonical_id name project run_label kind created marker \
+        <<<"$identity"
       append_identity network "$canonical_id" "$name" "$project" \
         "$run_label" "$kind" "$created" "$marker"
       ;;
     volume)
-      name="$("$docker_binary" volume inspect -f '{{.Name}}' "$key")"
-      project="$("$docker_binary" volume inspect -f '{{index .Labels "com.docker.compose.project"}}' "$name")"
-      run_label="$("$docker_binary" volume inspect -f '{{index .Labels "com.confdock.smoke.run"}}' "$name")"
-      kind="$("$docker_binary" volume inspect -f '{{index .Labels "com.confdock.smoke.kind"}}' "$name")"
-      marker="$("$docker_binary" volume inspect -f '{{index .Labels "com.confdock.smoke.resource"}}' "$name")"
-      created="$("$docker_binary" volume inspect -f '{{.CreatedAt}}' "$name")"
+      identity="$("$docker_binary" volume inspect "$key" 2>/dev/null | jq -er '
+        .[0] | [.Name, .Labels["com.docker.compose.project"],
+          .Labels["com.confdock.smoke.run"],
+          .Labels["com.confdock.smoke.kind"], .CreatedAt,
+          .Labels["com.confdock.smoke.resource"]] | @tsv
+      ')" || return 1
+      IFS=$'\t' read -r name project run_label kind created marker <<<"$identity"
       append_identity volume - "$name" "$project" "$run_label" "$kind" "$created" "$marker"
       ;;
     *) exit 1 ;;
   esac
+}
+
+register_enumerated() {
+  local type="$1" key="$2" current
+  if register_one "$type" "$key"; then
+    return 0
+  fi
+  # Compose may remove an old incarnation between enumeration and inspect while
+  # force-recreating a service. A second complete list distinguishes that
+  # expected disappearance from an inspect or daemon failure. Query failures
+  # and objects that still exist both fail closed.
+  case "$type" in
+    container) current="$("$docker_binary" ps -aq --no-trunc)" || return 1 ;;
+    network) current="$("$docker_binary" network ls -q --no-trunc)" || return 1 ;;
+    volume) current="$("$docker_binary" volume ls -q)" || return 1 ;;
+    *) return 1 ;;
+  esac
+  if grep -Fx "$key" <<<"$current" >/dev/null; then
+    return 1
+  fi
 }
 
 remove_registered_container() {
@@ -883,21 +906,21 @@ elif [[ "$resource_type" == project ]]; then
     --filter "label=com.docker.compose.project=$project")"
   while IFS= read -r id; do
     [[ -n "$id" ]] || continue
-    register_one container "$id"
+    register_enumerated container "$id"
   done <<<"$container_ids"
   network_ids="$("$docker_binary" network ls -q --no-trunc \
     --filter "label=com.confdock.smoke.run=$smoke_run_value" \
     --filter "label=com.docker.compose.project=$project")"
   while IFS= read -r id; do
     [[ -n "$id" ]] || continue
-    register_one network "$id"
+    register_enumerated network "$id"
   done <<<"$network_ids"
   volume_names="$("$docker_binary" volume ls -q \
     --filter "label=com.confdock.smoke.run=$smoke_run_value" \
     --filter "label=com.docker.compose.project=$project")"
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
-    register_one volume "$name"
+    register_enumerated volume "$name"
   done <<<"$volume_names"
 else
   register_one "$resource_type" "$resource_key"
