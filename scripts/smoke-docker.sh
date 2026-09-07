@@ -443,7 +443,10 @@ compose=(docker compose --env-file /dev/null --project-name "$smoke_project" -f 
 
 cleanup_resources() {
   local registry_path="${1:-$resource_registry}"
-  cleanup_failed=0
+  local cleanup_failed=0 cleanup_type resource_type canonical_id resource_name
+  local project run_label kind_label created resource_marker current_ids
+  local replacement_ids replacement_count replacement_id current_identity
+  local expected_identity current_names
   # The registry is append-only. Old Compose incarnations that disappeared
   # naturally are skipped; a resource is removed only when every recorded
   # identity field still matches the live Docker object.
