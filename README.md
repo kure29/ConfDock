@@ -27,29 +27,19 @@ Mihomo、sing-box、Surge、Loon、Quantumult X 和 Shadowrocket。当前校验�
 
 ## 快速开始
 
-当前只验证 Linux x86-64 glibc Artifact。项目还没有正式 Release；请在 GitHub Actions 中手动运行 `workflow_dispatch`，下载临时的 `confdock-linux-x86_64` Artifact（保留 7 天）。解压内容为：
+ConfDock 1.0.0 的首选入口是经过 SHA-256 校验的 Docker Quick Start Bundle，Compose
+默认使用 `ghcr.io/kure29/confdock:1.0.0`，普通用户不需要编译源码。当前 Release
+Readiness 变更本身不会创建 Tag、Release 或 GHCR 镜像；首次手动发布后，管理员还需要在
+GitHub Package 设置中确认 Package 为 Public，否则匿名拉取会失败。
 
-```text
-confdock
-config.toml
-SHA256SUMS
-```
-
-```bash
-sha256sum -c SHA256SUMS
-./confdock config check --config ./config.toml
-./confdock admin init --config ./config.toml
-./confdock --config ./config.toml
-```
-
-`admin init` 需要交互式终端，会创建固定用户名 `admin`。systemd 或其他无 TTY 环境必须先完成初始化。首次部署请把 `public_url` 设置为真实 HTTPS origin；后端推荐监听 `127.0.0.1:8787`，外部通过 Nginx/Caddy HTTPS 访问。
-
-推荐先阅读 [二进制部署](docs/deployment/binary.md) 或 [Docker 部署](docs/deployment/docker.md)，再配置 [反向代理](docs/deployment/reverse-proxy.md)。
+当前只支持 Linux x86-64。请从 [Docker 五分钟快速开始](docs/deployment/docker-quick-start.md)
+开始；完整安全、备份、隔离恢复和升级流程见 [Docker 运维手册](docs/deployment/docker.md)。
+[单二进制部署](docs/deployment/binary.md) 继续受到支持。
 
 ## 当前状态与边界
 
 - 生产形态是独立 Rust 单二进制，内含 React/Vite 产物、WASM、SQLx migrations 和 Axum 路由；运行时不需要 Node.js 或文档站。
-- Docker 部署从源码构建并仅正式验证 Linux x86-64；当前没有 GHCR 镜像、正式 Release、Tag、自动备份、自动 Deploy、Rollback、Token Rotation、集群和多管理员。ARM64 未宣称已验证。
+- V1 发布基础设施只面向 Linux x86-64：手动审批的 Release Workflow 负责二进制、Docker Bundle、GHCR amd64 镜像、SBOM 和校验文件；普通 PR 只运行无发布权限的 dry-run。ARM64 未宣称已验证。
 - 稳定地址只返回 Served Revision；Save 不会自动 Publish。公开地址设置持久化在 `instance_settings.id=1`，不会改变服务监听地址。
 - 备份必须在停止服务后同时覆盖完整数据目录、SQLite WAL/SHM 和实际配置目录。
 
@@ -78,4 +68,6 @@ npm run build --prefix web
 npm run docs:build --prefix docs
 ```
 
-ConfDock 以 [Apache License 2.0](LICENSE) 发布。依赖范围与待完成的正式发行通知要求见 [第三方许可证清单](THIRD_PARTY_LICENSE_INVENTORY.md)。欢迎提交 Issue 和 Pull Request。
+ConfDock 以 [Apache License 2.0](LICENSE) 发布。正式分发使用可重复生成的
+[第三方 Notices](THIRD_PARTY_NOTICES.md)；开发阶段范围说明保留在
+[第三方许可证清单](THIRD_PARTY_LICENSE_INVENTORY.md)。欢迎提交 Issue 和 Pull Request。

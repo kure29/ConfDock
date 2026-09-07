@@ -1,10 +1,16 @@
 # Docker 部署
 
-本页提供 Debian/Linux 主机上从源码构建 ConfDock V1 的最小流程。当前没有正式
-Release，也没有 GHCR 镜像；Docker 方式必须在本地或 CI 从源码构建。正式验证范围是
-Linux x86_64，未宣称已验证 ARM64。二进制部署仍然受到支持；本项目不再提供管理菜单脚本。
-基础镜像和 APT 源按明确 Debian 版本选择，但本轮没有锁定 digest 或 snapshot；正式
-Release 前仍需单独完成供应链可重复构建工作，当前不承诺 bit-for-bit reproducible。
+本页是 Debian/Linux Host 上的完整 Docker 运维手册。普通用户应先阅读
+[Docker 五分钟快速开始](./docker-quick-start)，使用 GitHub Release 中经过 SHA-256
+验证的小型 Bundle 和预构建的 `ghcr.io/kure29/confdock:1.0.0`。生产 Compose 不包含
+`build:`，不会在服务器上意外编译源码。
+
+本 Release Readiness 变更本身只创建 Draft PR，不会创建 `v1.0.0` Tag、GitHub Release
+或 GHCR Package。首次发布完成后，仓库管理员仍必须在 GitHub Package 设置中人工确认
+**Package visibility: Public**；在公开前匿名 `docker pull` 会失败。
+
+正式验证范围只有 Linux x86_64；镜像和文档均不暗示支持 ARM64。二进制部署继续受到
+支持，本项目不提供 `confdock.sh`、管理菜单或 `curl | bash` 安装方式。
 
 Compose 使用 `debian:bookworm-slim` 作为容器用户空间（Debian 12）。它与 Debian 13
 Host 是独立层：容器使用 Host 的 Linux kernel，但不会把 Host 的发行版或用户混入镜像。
@@ -37,27 +43,22 @@ docker compose version
 docker ps
 ```
 
-当前用户必须有权访问 Docker daemon。Docker CI 使用最小的 `contents: read` 权限，不使用
-`pull_request_target`、长期 Secret、发布权限或 GHCR。
+当前用户必须有权访问 Docker daemon。PR 的 Release dry-run 和 Docker CI 只有
+`contents: read`，不使用 `pull_request_target`、长期 PAT 或发布权限。
 
 ## 首次启动
 
-以下命令从仓库根目录执行到 `deploy/docker`，因此 Compose 会读取该目录下的 `.env`：
+Release 后可使用 Docker Bundle；需要完整备份/恢复脚本时，也可检出与镜像相同的正式
+Tag。以下完整流程假设已进入经过 SHA-256 或 Git Tag 核对的 `deploy/docker` 目录：
 
 ```bash
 set -Eeuo pipefail
-git clone https://github.com/kure29/ConfDock.git
-cd ConfDock/deploy/docker
-cp .env.example .env
-chmod 0600 .env
-cp config.toml config.local.toml
-# 用系统中可用的任意编辑器修改 .env 和 config.local.toml；本流程不假定
-# $EDITOR 已设置或某个编辑器一定安装。
-chmod 0644 config.local.toml
-# Compose reads .env automatically.  Load the same non-secret assignments into
-# this shell as well because the volume-preparation and maintenance helpers use
-# the values directly.  Keep .env limited to the simple assignments shown
-# below; never add a password or token.
+test ! -e .env && test ! -L .env
+test ! -e config.local.toml && test ! -L config.local.toml
+install -m 0600 .env.example .env
+install -m 0644 config.toml config.local.toml
+${EDITOR:-vi} .env
+${EDITOR:-vi} config.local.toml
 set -a
 . ./.env
 set +a
@@ -71,7 +72,7 @@ export CONFDOCK_ENV_FILE="$PWD/.env"
 COMPOSE_PROJECT_NAME=confdock
 CONFDOCK_VOLUME_NAME=confdock-data
 CONFDOCK_HOST_PORT=8787
-CONFDOCK_IMAGE=confdock:local
+CONFDOCK_IMAGE=ghcr.io/kure29/confdock:1.0.0
 CONFDOCK_CONFIG_PATH=./config.local.toml
 ```
 
@@ -92,15 +93,15 @@ CONFDOCK_HOST_PORT=8788
 使用该实例前，将相同的 `CONFDOCK_VOLUME_NAME` 和 `CONFDOCK_HOST_PORT` 导出到当前
 Shell，或在每条 Compose 命令中显式传入它们；不要让 Shell 中残留另一实例的值。
 
-首次启动前只创建你在 `.env` 中明确指定的物理卷；如果卷已存在，先核对名称和用途，
-不要把生产卷名改成测试值：
+全新实例只创建 `.env` 中明确指定的物理卷。如果卷已存在，应停止并核对名称和用途，
+不能把未知卷当作空卷处理：
 
 ```bash
 if docker volume inspect "$CONFDOCK_VOLUME_NAME" >/dev/null 2>&1; then
-  echo "using existing Docker volume: $CONFDOCK_VOLUME_NAME"
-else
-  docker volume create "$CONFDOCK_VOLUME_NAME" >/dev/null
+  echo "卷已存在，停止并核对归属：$CONFDOCK_VOLUME_NAME" >&2
+  exit 1
 fi
+docker volume create "$CONFDOCK_VOLUME_NAME" >/dev/null
 docker volume inspect "$CONFDOCK_VOLUME_NAME" --format '{{.Name}}'
 ```
 
@@ -118,24 +119,13 @@ docker volume inspect "$CONFDOCK_VOLUME_NAME" --format '{{.Name}}'
 Compose 对配置使用只读 bind mount，并关闭了自动创建宿主路径；如果
 `config.local.toml` 不存在，Compose 会在启动前明确失败，不会把它悄悄创建成目录。
 
-构建、检查和初始化必须按以下顺序执行：
+拉取、准备空卷、检查和初始化必须按以下顺序执行：
 
 ```bash
 set -Eeuo pipefail
-export CONFDOCK_VCS_REF="$(git -C ../.. rev-parse HEAD 2>/dev/null || printf '%s' unknown)"
 docker volume inspect "$CONFDOCK_VOLUME_NAME" >/dev/null
-docker compose build --pull
-
-# External volumes do not inherit the image directory owner. Prepare only the
-# mountpoint metadata before the UID 10001 service opens SQLite.
-docker run --rm --platform linux/amd64 --user 0:0 --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
-  --network none --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --cap-add DAC_OVERRIDE \
-  --security-opt no-new-privileges --entrypoint /bin/sh \
-  --mount "type=volume,source=$CONFDOCK_VOLUME_NAME,destination=/var/lib/confdock,volume-nocopy" \
-  "$CONFDOCK_IMAGE" -eu -c \
-  'test -d /var/lib/confdock
-   chown 10001:10001 /var/lib/confdock
-   chmod 700 /var/lib/confdock'
+docker pull "$CONFDOCK_IMAGE"
+docker compose --profile setup run --rm --no-deps volume-init
 
 docker compose run --rm --no-deps confdock \
   --config /etc/confdock/config.toml config check
@@ -155,6 +145,31 @@ curl -fsS "http://127.0.0.1:${CONFDOCK_HOST_PORT:-8787}/healthz"
 
 `/healthz` 返回 `{"status":"ok"}` 才表示 HTTP 服务和 SQLite 都可用。Compose 的只读
 根文件系统只留下 `/tmp` tmpfs、配置只读挂载和完整的数据卷可写。
+
+`volume-init` 与服务使用相同镜像，但只有该一次性 setup profile 以 root 启动。它不发布
+端口、没有网络、根文件系统只读、仅增加 `CHOWN` 和只读检查所需的
+`DAC_READ_SEARCH`。它只会把全新空卷根目录设置为 `10001:10001`、`0700`；正确的空卷
+或既有 ConfDock 数据卷可幂等验证，未知非空卷会 fail closed 且不修改。普通
+`docker compose up -d` 不会自动运行它。
+
+## 高级：从源码构建
+
+源码构建保留为高级替代方案，不使用生产 Compose 的隐式 `build:`。从固定 Commit 的
+仓库根目录进入 `deploy/docker` 后执行：
+
+```bash
+set -Eeuo pipefail
+export CONFDOCK_IMAGE=confdock:local
+export CONFDOCK_VERSION="$(cat ../../VERSION)"
+export CONFDOCK_VCS_REF="$(git -C ../.. rev-parse HEAD)"
+export CONFDOCK_BUILD_DATE="$(date -u -d "@$(git -C ../.. show -s --format=%ct HEAD)" '+%Y-%m-%dT%H:%M:%SZ')"
+docker compose -f compose.yaml -f compose.build.yaml build --pull confdock
+docker compose --profile setup run --rm --no-deps volume-init
+```
+
+固定 Node/Rust/Debian Linux amd64 manifest digest、Debian Snapshot、明确 Runtime 包版本、
+Cargo/npm lockfile 和工具版本使供应链输入可审计。项目仍不宣称 bit-for-bit reproducible；
+只有在两次独立构建摘要实际相同后才能作该声明。
 
 ## 反向代理和配置重载
 
@@ -378,8 +393,8 @@ curl -fsS "http://127.0.0.1:${CONFDOCK_HOST_PORT:-8787}/healthz"
 ## 升级和回滚
 
 升级前先按上述流程停止服务并备份完整数据卷、WAL/SHM 和实际挂载的配置文件；`.env`
-（其中的卷名、项目名和端口）也应以 0600 权限另行保存。切换源码
-Commit 后重建 Linux x86_64 镜像，并强制重建容器：
+（其中的卷名、项目名和端口）也应以 0600 权限另行保存。将目标镜像设置为明确版本或
+Release 中记录的 Manifest Digest，拉取后强制重建容器。不要用 `latest` 做严格生产固定：
 
 ```bash
 set -Eeuo pipefail
@@ -390,15 +405,15 @@ set +a
 export CONFDOCK_ENV_FILE="$PWD/.env"
 docker compose stop
 ../../scripts/backup-docker.sh "$PWD/backups"
-git fetch origin --prune
-# Run this block in Bash; an exact commit can be supplied via
-# CONFDOCK_TARGET_COMMIT, otherwise the freshly fetched origin/main is used.
-target_commit="${CONFDOCK_TARGET_COMMIT:-$(git rev-parse origin/main)}"
-[[ "$target_commit" =~ ^[0-9a-fA-F]{7,64}$ ]]
-git cat-file -e "${target_commit}^{commit}"
-git switch --detach "$target_commit"
-export CONFDOCK_VCS_REF="$(git -C ../.. rev-parse HEAD 2>/dev/null || printf '%s' unknown)"
-docker compose build --pull
+# 先用编辑器把 .env 中的 CONFDOCK_IMAGE 持久修改为明确版本或 Release
+# 记录的 Manifest Digest，不能只在临时 Shell 中覆盖。
+target_image="${CONFDOCK_TARGET_IMAGE:?set the image reference you wrote to .env}"
+${EDITOR:-vi} .env
+set -a
+. ./.env
+set +a
+test "$CONFDOCK_IMAGE" = "$target_image"
+docker pull "$CONFDOCK_IMAGE"
 docker compose run --rm --no-deps confdock \
   --config /etc/confdock/config.toml config check
 docker compose up -d --force-recreate
@@ -407,14 +422,14 @@ docker compose logs --tail=100 confdock
 ```
 
 启动时可能运行 SQLx migration。若验证失败，先停止服务，恢复升级前的完整卷和配置，
-切回旧源码 Commit，重新 build，再 `up -d --force-recreate`。不要让旧二进制继续写入
-已经迁移过的新数据库。Docker Slice 不包含自动更新、Release、Tag、Deploy、GHCR 或
-自动备份。
+再以升级前记录的不可变镜像执行 `up -d --force-recreate`。不要让旧二进制继续写入已经
+迁移过的新数据库。项目不提供自动更新、自动部署或自动备份。
 
 若升级验证失败，先确认当前失败实例的 Compose project；下面的快捷命令只适用于升级未
 执行破坏性 Migration 的情况。若 Migration 已经运行，必须先用上面的隔离恢复流程把
 升级前归档恢复到新卷，再用旧 Commit 的镜像验证；绝不要让旧二进制直接写入可能已迁移的
-原卷。`old_commit` 必须是升级前实际运行并已备份的 Commit，而不是任意较新的分支指针：
+原卷。`CONFDOCK_OLD_IMAGE` 必须是升级前实际运行并已记录的版本或 Manifest Digest，
+不能是可移动的 `latest`：
 
 ```bash
 set -Eeuo pipefail
@@ -423,17 +438,19 @@ set -a
 . ./.env
 set +a
 export CONFDOCK_ENV_FILE="$PWD/.env"
-old_commit="${CONFDOCK_OLD_COMMIT:?set the backed-up old Commit SHA}"
-[[ "$old_commit" =~ ^[0-9a-fA-F]{7,64}$ ]]
-git cat-file -e "${old_commit}^{commit}"
 failed_project="${COMPOSE_PROJECT_NAME:?set the failed Compose project first}"
 docker compose --project-name "$failed_project" stop
 # If a migration ran, stop here and use the isolated archive restore above.
 # Only when schema compatibility is explicitly confirmed may the untouched
 # original volume be selected directly below.
-git switch --detach "$old_commit"
-export CONFDOCK_VCS_REF="$(git -C ../.. rev-parse HEAD 2>/dev/null || printf '%s' unknown)"
-docker compose build --pull
+old_image="${CONFDOCK_OLD_IMAGE:?set the previously recorded immutable image reference}"
+# 将 .env 中的 CONFDOCK_IMAGE 持久改回 old_image，重新加载后再核对。
+${EDITOR:-vi} .env
+set -a
+. ./.env
+set +a
+test "$CONFDOCK_IMAGE" = "$old_image"
+docker pull "$CONFDOCK_IMAGE"
 docker compose run --rm --no-deps confdock \
   --config /etc/confdock/config.toml config check
 docker compose up -d --force-recreate

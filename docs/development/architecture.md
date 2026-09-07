@@ -329,9 +329,11 @@ pointers already match is an idempotent success with `unchanged: true`.
 * **Slice 4:** Draft/Publish pointer separation. Management Project reads current
   bytes, `has_unpublished_changes` reports pointer divergence, and Publish moves
   only `served_revision_id` transactionally with optimistic pointer checks.
-* **Docker deployment slice:** source-built Linux x86_64 image, least-privilege
-  Compose contract, stable external volume, and tested isolated backup/restore.
-  This slice does not add application features, GHCR publishing, or automatic
-  updates.
+* **Docker deployment slice:** Linux x86_64 image, least-privilege Compose
+  contract, stable external volume, and tested isolated backup/restore.
+* **V1 release readiness:** versioned Linux x86_64 artifacts, formal generated
+  Notices, a GHCR-ready amd64 image, Docker Quick Start Bundle, SBOM, and a
+  manually approved release workflow. The readiness change itself publishes
+  nothing and does not add automatic updates.
 * **Later:** Rollback, optional native validators, and individually scoped
   adapters or conversion tools.

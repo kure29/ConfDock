@@ -17,7 +17,7 @@ vi.mock('../api', () => ({ api: mocks.api }))
 vi.mock('../state/ToastContext', () => ({ useToast: () => mocks.toast }))
 
 const service: ServiceInfo = {
-  version: '0.1.0',
+  version: '1.0.0',
   core: 'wasm',
   api: 'http',
   subscriptionBase: 'http://127.0.0.1:8787/sub',

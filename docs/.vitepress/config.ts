@@ -34,6 +34,7 @@ export default defineConfig({
       ],
       '/deployment/': [
         { text: '部署', items: [
+          { text: 'Docker 快速开始', link: '/deployment/docker-quick-start' },
           { text: '二进制部署', link: '/deployment/binary' },
           { text: 'Docker', link: '/deployment/docker' },
           { text: '配置文件', link: '/deployment/configuration' },
@@ -45,6 +46,7 @@ export default defineConfig({
         { text: '运维', items: [
           { text: '备份与恢复', link: '/operations/backup-and-restore' },
           { text: '升级', link: '/operations/upgrade' },
+          { text: 'V1 手动发布', link: '/operations/release' },
           { text: '故障排查', link: '/operations/troubleshooting' },
         ] },
       ],

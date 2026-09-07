@@ -16,7 +16,9 @@ unset COMPOSE_PROJECT_NAME COMPOSE_FILE COMPOSE_ENV_FILES COMPOSE_PATH_SEPARATOR
   CONFDOCK_RESTORE_SMOKE_RUN CONFDOCK_HOST_UID CONFDOCK_HOST_GID \
   CONFDOCK_SMOKE_RUN CONFDOCK_SMOKE_PROJECT CONFDOCK_BOOTSTRAP_PASSWORD \
   CONFDOCK_SMOKE_KIND CONFDOCK_SMOKE_RESOURCE CONFDOCK_SMOKE_NETWORK_KIND \
-  CONFDOCK_SMOKE_NETWORK_RESOURCE CONFDOCK_ADMIN_PASSWORD CONFDOCK_SUB_TOKEN
+  CONFDOCK_SMOKE_NETWORK_RESOURCE CONFDOCK_SMOKE_VOLUME_INIT_KIND \
+  CONFDOCK_SMOKE_VOLUME_INIT_RESOURCE CONFDOCK_ADMIN_PASSWORD CONFDOCK_SUB_TOKEN
+export CONFDOCK_IMAGE="$image"
 IFS=$'\n\t'
 export LC_ALL=C
 export COMPOSE_DISABLE_ENV_FILE=1
@@ -140,10 +142,13 @@ export CONFDOCK_SMOKE_RUN="$smoke_run"
 service_resource="confdock-service-$(new_suffix)"
 network_resource="confdock-network-$(new_suffix)"
 volume_resource="confdock-volume-$(new_suffix)"
+volume_init_resource="confdock-volume-init-$(new_suffix)"
 export CONFDOCK_SMOKE_KIND=service
 export CONFDOCK_SMOKE_RESOURCE="$service_resource"
 export CONFDOCK_SMOKE_NETWORK_KIND=network
 export CONFDOCK_SMOKE_NETWORK_RESOURCE="$network_resource"
+export CONFDOCK_SMOKE_VOLUME_INIT_KIND=volume-init
+export CONFDOCK_SMOKE_VOLUME_INIT_RESOURCE="$volume_init_resource"
 
 assert_run_label_unused() {
   if [[ -n "$(docker ps -aq --filter "label=com.confdock.smoke.run=$smoke_run")" \
@@ -210,7 +215,8 @@ choose_restore_volume() {
 
 assert_project_unused() {
   local project_name="$1"
-  local ignored_volume="${2:-}"
+  shift
+  local -a ignored_volumes=("$@")
 
   # `compose run` may create the project's default network (and, briefly, a
   # one-off container) before the long-running service starts.  Those
@@ -255,6 +261,7 @@ assert_project_unused() {
   done < <(printf '%s\n' "$network_ids" | awk 'NF && !seen[$0]++')
 
   local project_volumes volume_name volume_run volume_project volume_kind
+  local ignored_volume allowed_volume
   project_volumes="$(docker volume ls -q --filter "label=com.docker.compose.project=$project_name")" \
     || return 1
   while IFS= read -r volume_name; do
@@ -265,7 +272,14 @@ assert_project_unused() {
       "$volume_name" 2>/dev/null)" || return 1
     volume_kind="$(docker volume inspect -f '{{index .Labels "com.docker.compose.volume"}}' \
       "$volume_name" 2>/dev/null)" || return 1
-    [[ "$volume_name" == "$ignored_volume" && "$volume_run" == "$smoke_run" \
+    allowed_volume=0
+    for ignored_volume in "${ignored_volumes[@]}"; do
+      if [[ "$volume_name" == "$ignored_volume" ]]; then
+        allowed_volume=1
+        break
+      fi
+    done
+    [[ "$allowed_volume" == 1 && "$volume_run" == "$smoke_run" \
       && "$volume_project" == "$project_name" && "$volume_kind" == confdock-data ]] \
       || return 1
   done <<<"$project_volumes"
@@ -961,6 +975,31 @@ register_project() {
   "$registrar" project "$project"
 }
 
+validate_volume_init_container() {
+  local id="$1" service
+  service="$("$real_docker" inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$id")"
+  [[ "$service" == volume-init ]] || return 0
+  "$real_docker" inspect "$id" | jq -e --arg image "${CONFDOCK_IMAGE:?}" '
+    .[0].Config.Image == $image and
+    .[0].Config.User == "0:0" and
+    .[0].Config.Entrypoint == ["/usr/local/libexec/confdock-volume-init"] and
+    .[0].HostConfig.NetworkMode == "none" and
+    .[0].HostConfig.ReadonlyRootfs == true and
+    ((.[0].HostConfig.CapDrop // []) | map(sub("^CAP_"; "")) | index("ALL") != null) and
+    ((.[0].HostConfig.CapAdd // []) | map(sub("^CAP_"; "")) | sort) == ["CHOWN", "DAC_READ_SEARCH"] and
+    ((.[0].HostConfig.SecurityOpt // []) | index("no-new-privileges:true") != null) and
+    .[0].HostConfig.Privileged == false and
+    .[0].HostConfig.RestartPolicy.Name == "no" and
+    ((.[0].HostConfig.PortBindings // {}) | length == 0) and
+    ((.[0].HostConfig.Tmpfs // {}) | keys == ["/tmp"]) and
+    ((.[0].HostConfig.Tmpfs["/tmp"] // "") | contains("noexec,nosuid,nodev")) and
+    ((.[0].Mounts // []) | length == 1) and
+    (.[0].Mounts[0].Type == "volume") and
+    (.[0].Mounts[0].Destination == "/var/lib/confdock") and
+    (.[0].Mounts[0].RW == true)
+  ' >/dev/null
+}
+
 run_direct_helper() {
   local suffix marker name cid_dir cid_file child status=0 id='' registered=0 argument
   local -a arguments=()
@@ -1024,6 +1063,7 @@ run_compose_oneoff() {
     if [[ -n "$id" ]]; then
       "$registrar" container "$id"
       register_project "$project"
+      validate_volume_init_container "$id" || status=125
       registered=1
       break
     fi
@@ -1036,6 +1076,7 @@ run_compose_oneoff() {
     id="$("$real_docker" ps -aq --no-trunc --filter "name=^/${name}$")"
     if [[ -n "$id" ]]; then
       "$registrar" container "$id"
+      validate_volume_init_container "$id" || status=125
       registered=1
     fi
   fi
@@ -1122,22 +1163,79 @@ export CONFDOCK_SMOKE_RUNTIME="$runtime_dir"
 PATH="$docker_registry_wrapper_dir:$PATH"
 export PATH
 
-# External volumes do not receive the image directory's ownership through
-# Compose. Prepare the empty test volume explicitly before the non-root service
-# ever opens SQLite. The wrapper records the helper's canonical identity before
-# starting it, then removes that exact registered container after it exits.
+# The production setup profile prepares only an empty external volume root.
+# Run it twice to prove the operation is safe and idempotent before the
+# non-root service creates SQLite.
+printf '%s\n' 'docker smoke: volume-init empty and idempotent cases' >&2
+"${compose[@]}" --profile setup run --rm --no-deps volume-init \
+  || fail 'volume-init could not prepare an empty smoke volume'
+register_project_resources "$smoke_project"
+"${compose[@]}" --profile setup run --rm --no-deps volume-init \
+  || fail 'volume-init was not idempotent on an already prepared empty volume'
+register_project_resources "$smoke_project"
 docker run --rm "${smoke_helper_args[@]}" "${smoke_helper_security[@]}" \
-  --cap-add CHOWN --cap-add FOWNER --cap-add DAC_OVERRIDE \
-  --platform linux/amd64 --user 0:0 --read-only \
-  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
-  --network none \
+  --platform linux/amd64 --user 10001:10001 --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=4m --network none \
   --entrypoint /bin/sh \
   --mount "type=volume,source=$smoke_volume,destination=/var/lib/confdock,volume-nocopy" \
   "$image" -eu -c \
-  'test -d /var/lib/confdock
-   chown 10001:10001 /var/lib/confdock
-   chmod 700 /var/lib/confdock' \
-  || fail 'could not prepare the smoke volume ownership'
+  'test "$(stat -c "%u:%g" /var/lib/confdock)" = 10001:10001
+   test "$(stat -c "%a" /var/lib/confdock)" = 700
+   test -z "$(find /var/lib/confdock -mindepth 1 -maxdepth 1 -print -quit)"' \
+  || fail 'volume-init empty-volume result is incorrect'
+
+# A missing external volume must not be auto-created.
+missing_setup_volume="confdock-volume-init-missing-$(new_suffix)"
+if CONFDOCK_VOLUME_NAME="$missing_setup_volume" \
+  "${compose[@]}" --profile setup run --rm --no-deps volume-init \
+  >"$runtime_dir/volume-init-missing.out" 2>&1; then
+  fail 'volume-init accepted a missing external volume'
+fi
+register_project_resources "$smoke_project"
+if docker volume inspect "$missing_setup_volume" >/dev/null 2>&1; then
+  fail 'volume-init created a missing external volume'
+fi
+
+# A non-empty unknown volume must remain byte-for-byte and metadata unchanged.
+bad_setup_volume="confdock-volume-init-bad-$(new_suffix)"
+bad_setup_resource="confdock-volume-init-bad-resource-$(new_suffix)"
+docker volume create \
+  --label "com.confdock.smoke.run=$smoke_run" \
+  --label 'com.confdock.smoke.kind=volume' \
+  --label "com.confdock.smoke.resource=$bad_setup_resource" \
+  --label "com.docker.compose.project=$smoke_project" \
+  --label 'com.docker.compose.volume=confdock-data' \
+  "$bad_setup_volume" >/dev/null
+docker run --rm "${smoke_helper_args[@]}" "${smoke_helper_security[@]}" \
+  --platform linux/amd64 --user 0:0 --read-only --network none \
+  --entrypoint /bin/sh \
+  --mount "type=volume,source=$bad_setup_volume,destination=/var/lib/confdock,volume-nocopy" \
+  "$image" -eu -c 'printf unknown-volume > /var/lib/confdock/unexpected' \
+  || fail 'could not create the volume-init negative fixture'
+bad_setup_before="$runtime_dir/volume-init-bad-before"
+bad_setup_after="$runtime_dir/volume-init-bad-after"
+docker run --rm "${smoke_helper_args[@]}" "${smoke_helper_security[@]}" \
+  --platform linux/amd64 --user 0:0 --read-only --network none \
+  --entrypoint /bin/sh \
+  --mount "type=volume,source=$bad_setup_volume,destination=/var/lib/confdock,volume-nocopy" \
+  "$image" -eu -c \
+  'stat -c "%u:%g %a %n" /var/lib/confdock /var/lib/confdock/unexpected
+   sha256sum /var/lib/confdock/unexpected' >"$bad_setup_before"
+if CONFDOCK_VOLUME_NAME="$bad_setup_volume" \
+  "${compose[@]}" --profile setup run --rm --no-deps volume-init \
+  >"$runtime_dir/volume-init-bad.out" 2>&1; then
+  fail 'volume-init modified or accepted an unknown non-empty volume'
+fi
+register_project_resources "$smoke_project"
+docker run --rm "${smoke_helper_args[@]}" "${smoke_helper_security[@]}" \
+  --platform linux/amd64 --user 0:0 --read-only --network none \
+  --entrypoint /bin/sh \
+  --mount "type=volume,source=$bad_setup_volume,destination=/var/lib/confdock,volume-nocopy" \
+  "$image" -eu -c \
+  'stat -c "%u:%g %a %n" /var/lib/confdock /var/lib/confdock/unexpected
+   sha256sum /var/lib/confdock/unexpected' >"$bad_setup_after"
+cmp "$bad_setup_before" "$bad_setup_after" \
+  || fail 'volume-init changed an unknown non-empty volume'
 
 if [[ -n "$(docker ps --filter publish=8787 -q)" ]]; then
   fail 'host port 127.0.0.1:8787 is already in use'
@@ -1145,8 +1243,10 @@ fi
 
 printf '%s\n' 'docker smoke: compose contract' >&2
 compose_json="$runtime_dir/compose.json"
-"${compose[@]}" config --format json >"$compose_json"
-if ! jq -e --arg volume "$smoke_volume" --arg config "$CONFDOCK_CONFIG_PATH" '
+"${compose[@]}" --profile setup config --format json >"$compose_json"
+if ! jq -e --arg volume "$smoke_volume" --arg config "$CONFDOCK_CONFIG_PATH" --arg image "$image" '
+  .services.confdock.image == $image and
+  ((.services.confdock | has("build")) | not) and
   .services.confdock.user == "10001:10001" and
   .services.confdock.platform == "linux/amd64" and
   .services.confdock.read_only == true and
@@ -1171,13 +1271,35 @@ if ! jq -e --arg volume "$smoke_volume" --arg config "$CONFDOCK_CONFIG_PATH" '
   .volumes["confdock-data"].external == true and
   ((.services.confdock.volumes // []) | all(.target != "/var/run/docker.sock" and .source != "/var/run/docker.sock")) and
   ((.services.confdock.privileged // false) == false) and
-  ((.services.confdock.network_mode // "") != "host")
+  ((.services.confdock.network_mode // "") != "host") and
+  .services["volume-init"].image == $image and
+  .services["volume-init"].profiles == ["setup"] and
+  .services["volume-init"].platform == "linux/amd64" and
+  .services["volume-init"].user == "0:0" and
+  .services["volume-init"].network_mode == "none" and
+  .services["volume-init"].read_only == true and
+  .services["volume-init"].restart == "no" and
+  ((.services["volume-init"].ports // []) | length == 0) and
+  .services["volume-init"].entrypoint == ["/usr/local/libexec/confdock-volume-init"] and
+  .services["volume-init"].labels["com.confdock.smoke.kind"] == "volume-init" and
+  ((.services["volume-init"].tmpfs // []) | any(. == "/tmp:rw,noexec,nosuid,nodev,size=4m")) and
+  .services["volume-init"].cap_drop == ["ALL"] and
+  ((.services["volume-init"].cap_add // []) | sort) == ["CHOWN", "DAC_READ_SEARCH"] and
+  ((.services["volume-init"].security_opt // []) | index("no-new-privileges:true") != null) and
+  ((.services["volume-init"].privileged // false) == false) and
+  ((.services["volume-init"].volumes // []) | length == 1) and
+  (.services["volume-init"].volumes[0].type == "volume") and
+  (.services["volume-init"].volumes[0].source == "confdock-data") and
+  (.services["volume-init"].volumes[0].target == "/var/lib/confdock") and
+  ((.services["volume-init"].volumes[0].read_only // false) == false) and
+  (.services["volume-init"].volumes[0].volume.nocopy == true)
 ' "$compose_json" >/dev/null; then
   # Keep a failed contract diagnosable without dumping arbitrary environment
   # values or any service output that could contain credentials.
   jq '{service: (.services.confdock | {user, platform, read_only, init, restart,
       stop_grace_period, stop_signal, ports, tmpfs, cap_drop, cap_add,
       security_opt, healthcheck, volumes, privileged, network_mode}),
+      volume_init: .services["volume-init"],
       volume: .volumes["confdock-data"], network: .networks.default}' \
     "$compose_json" >&2 || true
   fail 'Compose contract assertion failed'
@@ -1186,6 +1308,7 @@ fi
 printf '%s\n' 'docker smoke: runtime image boundary' >&2
 test "$(docker image inspect -f '{{.Config.User}}' "$image")" = '10001:10001'
 test "$(docker image inspect -f '{{.Architecture}}' "$image")" = 'amd64'
+test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image")" = '1.0.0'
 docker run --rm "${smoke_helper_args[@]}" "${smoke_helper_security[@]}" --platform linux/amd64 \
   --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
   --tmpfs /var/lib/confdock:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=700 \
@@ -1194,6 +1317,13 @@ docker run --rm "${smoke_helper_args[@]}" "${smoke_helper_security[@]}" --platfo
   test "$(id -g)" = 10001
   test "$(stat -c "%u:%g" /var/lib/confdock)" = 10001:10001
   test -f /LICENSE
+  test -s /THIRD_PARTY_NOTICES.md
+  test -f /usr/share/doc/ca-certificates/copyright
+  test -f /usr/share/doc/curl/copyright
+  test -f /usr/share/doc/findutils/copyright
+  test -f /usr/share/doc/passwd/copyright
+  test -f /usr/share/doc/sqlite3/copyright
+  test -f /usr/share/doc/tar/copyright
   test -f /usr/local/bin/confdock
   command -v find >/dev/null
   command -v sha256sum >/dev/null
@@ -1368,6 +1498,29 @@ if run_admin_init_without_password "$runtime_dir/admin-repeat.out"; then
   fail 'repeat admin init unexpectedly passed'
 fi
 grep -F 'already initialized' "$runtime_dir/admin-repeat.out" >/dev/null
+
+printf '%s\n' 'docker smoke: volume-init validates non-empty ConfDock data without mutation' >&2
+nonempty_before="$runtime_dir/volume-init-nonempty-before.sha256"
+nonempty_after="$runtime_dir/volume-init-nonempty-after.sha256"
+docker run --rm "${smoke_helper_args[@]}" "${smoke_helper_security[@]}" \
+  --platform linux/amd64 --user 10001:10001 --read-only --network none \
+  --entrypoint /bin/sh \
+  --mount "type=volume,source=$smoke_volume,destination=/var/lib/confdock,readonly" \
+  "$image" -eu -c \
+  'find /var/lib/confdock -mindepth 1 -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum' \
+  >"$nonempty_before"
+"${compose[@]}" --profile setup run --rm --no-deps volume-init \
+  || fail 'volume-init rejected a valid non-empty ConfDock volume'
+register_project_resources "$smoke_project"
+docker run --rm "${smoke_helper_args[@]}" "${smoke_helper_security[@]}" \
+  --platform linux/amd64 --user 10001:10001 --read-only --network none \
+  --entrypoint /bin/sh \
+  --mount "type=volume,source=$smoke_volume,destination=/var/lib/confdock,readonly" \
+  "$image" -eu -c \
+  'find /var/lib/confdock -mindepth 1 -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum' \
+  >"$nonempty_after"
+cmp "$nonempty_before" "$nonempty_after" \
+  || fail 'volume-init changed a valid non-empty ConfDock volume'
 
 wait_healthy() {
   local _attempt status
@@ -1559,7 +1712,7 @@ assert_volume_manifest() {
 }
 
 printf '%s\n' 'docker smoke: start service' >&2
-assert_project_unused "$smoke_project" "$smoke_volume" \
+assert_project_unused "$smoke_project" "$smoke_volume" "$bad_setup_volume" \
   || fail 'smoke project became occupied before startup'
 reserved_volume_run="$(docker volume inspect -f '{{index .Labels "com.confdock.smoke.run"}}' "$smoke_volume" 2>/dev/null || true)"
 [[ "$reserved_volume_run" == "$smoke_run" ]] || fail 'smoke volume reservation was lost'

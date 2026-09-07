@@ -288,7 +288,7 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
 name = "confdock-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "serde_json",
  "yaml-rust2",
@@ -296,7 +296,7 @@ dependencies = [
 
 [[package]]
 name = "confdock-service"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "argon2",
  "axum",
@@ -326,14 +326,14 @@ dependencies = [
 
 [[package]]
 name = "confdock-validator"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "confdock-core",
 ]
 
 [[package]]
 name = "confdock-wasm"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "confdock-core",
  "serde",

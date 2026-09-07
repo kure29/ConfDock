@@ -225,7 +225,7 @@ async fn health_service_login_cookie_session_and_logout_contract() {
     assert_eq!(
         response_json(info).await,
         json!({
-            "version": "0.1.0",
+            "version": "1.0.0",
             "core": "wasm",
             "api": "http",
             "subscriptionBase": "http://127.0.0.1:8787/sub",

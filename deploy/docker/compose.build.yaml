@@ -1,0 +1,9 @@
+services:
+  confdock:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${CONFDOCK_VERSION:-1.0.0}
+        VCS_REF: ${CONFDOCK_VCS_REF:-unknown}
+        BUILD_DATE: ${CONFDOCK_BUILD_DATE:-unknown}

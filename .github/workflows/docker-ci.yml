@@ -6,6 +6,8 @@ on:
     paths:
       - 'Dockerfile'
       - 'LICENSE'
+      - 'THIRD_PARTY_NOTICES.md'
+      - 'VERSION'
       - '.dockerignore'
       - 'deploy/docker/**'
       - 'deploy/docker/.env.example'
@@ -27,6 +29,8 @@ on:
       - 'scripts/build-single-binary.sh'
       - 'scripts/package-single-binary.sh'
       - 'scripts/smoke-single-binary.sh'
+      - 'scripts/volume-init.sh'
+      - 'scripts/check-release-version.mjs'
       - 'crates/**'
       - 'web/**'
       - 'Cargo.toml'
@@ -46,24 +50,31 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
       - name: Check shell syntax and ShellCheck
         run: |
+          node scripts/test-release-contract.mjs
           bash -n scripts/build-single-binary.sh scripts/package-single-binary.sh \
             scripts/smoke-single-binary.sh scripts/smoke-docker.sh \
             scripts/backup-docker.sh scripts/restore-docker.sh \
-            scripts/test-docker-build-guards.sh
+            scripts/test-docker-build-guards.sh scripts/volume-init.sh \
+            scripts/package-docker-bundle.sh scripts/generate-image-sbom.sh \
+            scripts/verify-image-sbom.sh scripts/run-release-dry-run.sh \
+            scripts/validate-release-inputs.sh scripts/check-ghcr-immutable-tags.sh
           shellcheck scripts/build-single-binary.sh scripts/package-single-binary.sh \
             scripts/smoke-single-binary.sh scripts/smoke-docker.sh \
             scripts/backup-docker.sh scripts/restore-docker.sh \
-            scripts/test-docker-build-guards.sh
+            scripts/test-docker-build-guards.sh scripts/volume-init.sh \
+            scripts/package-docker-bundle.sh scripts/generate-image-sbom.sh \
+            scripts/verify-image-sbom.sh scripts/run-release-dry-run.sh \
+            scripts/validate-release-inputs.sh scripts/check-ghcr-immutable-tags.sh
           awk 'found { if ($0 == "RESOURCE_REGISTRAR") exit; print } /<<.RESOURCE_REGISTRAR./ { found=1 }' \
             scripts/smoke-docker.sh | bash -n
           awk 'found { if ($0 == "DOCKER_REGISTRY_WRAPPER") exit; print } /<<.DOCKER_REGISTRY_WRAPPER./ { found=1 }' \
@@ -105,17 +116,22 @@ jobs:
 
       - name: Build Linux x86_64 image
         run: |
+          version="$(<VERSION)"
           vcs_ref="$(git rev-parse HEAD)"
+          build_date="$(date -u -d "@$(git show -s --format=%ct HEAD)" '+%Y-%m-%dT%H:%M:%SZ')"
           docker buildx build \
             --platform linux/amd64 \
             --pull \
+            --build-arg VERSION="$version" \
             --build-arg VCS_REF="$vcs_ref" \
+            --build-arg BUILD_DATE="$build_date" \
             --tag confdock:ci \
             --load \
             .
 
       - name: Verify runtime image boundary
         run: |
+          version="$(<VERSION)"
           vcs_ref="$(git rev-parse HEAD)"
           test "$(docker image inspect -f '{{.Config.User}}' confdock:ci)" = '10001:10001'
           test "$(docker image inspect -f '{{.Architecture}}' confdock:ci)" = 'amd64'
@@ -124,6 +140,8 @@ jobs:
           test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.source"}}' confdock:ci)" = 'https://github.com/kure29/ConfDock'
           test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.licenses"}}' confdock:ci)" = 'Apache-2.0'
           test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' confdock:ci)" = "$vcs_ref"
+          test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' confdock:ci)" = "$version"
+          test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.created"}}' confdock:ci)" = "$(date -u -d "@$(git show -s --format=%ct HEAD)" '+%Y-%m-%dT%H:%M:%SZ')"
           test "$(docker image inspect -f '{{json .Config.Volumes}}' confdock:ci | jq -r 'has("/var/lib/confdock")')" = 'true'
           docker image inspect -f 'image_size_bytes={{.Size}}' confdock:ci
           image_env="$(docker image inspect -f '{{json .Config.Env}}' confdock:ci)"
@@ -144,6 +162,16 @@ jobs:
             test "$(id -g)" = 10001
             test "$(stat -c "%u:%g" /var/lib/confdock)" = 10001:10001
             test -f /LICENSE
+            test -s /THIRD_PARTY_NOTICES.md
+            for package in ca-certificates curl findutils passwd sqlite3 tar; do
+              test -f "/usr/share/doc/$package/copyright"
+            done
+            test "$(dpkg-query -W -f=\${Version} ca-certificates)" = "20250419~deb12u1"
+            test "$(dpkg-query -W -f=\${Version} curl)" = "7.88.1-10+deb12u15"
+            test "$(dpkg-query -W -f=\${Version} findutils)" = "4.9.0-4"
+            test "$(dpkg-query -W -f=\${Version} passwd)" = "1:4.13+dfsg1-1+deb12u2"
+            test "$(dpkg-query -W -f=\${Version} sqlite3)" = "3.40.1-2+deb12u2"
+            test "$(dpkg-query -W -f=\${Version} tar)" = "1.34+dfsg-1.2+deb12u1"
             command -v find >/dev/null
             command -v sha256sum >/dev/null
             command -v sqlite3 >/dev/null
@@ -167,7 +195,9 @@ jobs:
 
       - name: Validate Compose contract
         run: |
-          docker compose -f deploy/docker/compose.yaml config --quiet
+          docker compose -f deploy/docker/compose.yaml --profile setup config --quiet
+          CONFDOCK_IMAGE=confdock:ci docker compose -f deploy/docker/compose.yaml \
+            -f deploy/docker/compose.build.yaml --profile setup config --quiet
           git diff --check
 
       - name: Run source-free Docker smoke

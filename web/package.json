@@ -1,7 +1,7 @@
 {
   "name": "confdock-web",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "ConfDock 管理界面：单管理员、原生配置源码保真编辑",
   "scripts": {
