@@ -356,15 +356,16 @@ register_resource() {
 }
 
 register_container() {
-  local id="$1" canonical_id name project run_label kind created resource_marker
-  canonical_id="$(docker inspect -f '{{.Id}}' "$id")"
-  name="$(docker inspect -f '{{.Name}}' "$canonical_id")"
-  name="${name#/}"
-  project="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$canonical_id")"
-  run_label="$(docker inspect -f '{{index .Config.Labels "com.confdock.smoke.run"}}' "$canonical_id")"
-  kind="$(docker inspect -f '{{index .Config.Labels "com.confdock.smoke.kind"}}' "$canonical_id")"
-  resource_marker="$(docker inspect -f '{{index .Config.Labels "com.confdock.smoke.resource"}}' "$canonical_id")"
-  created="$(docker inspect -f '{{.Created}}' "$canonical_id")"
+  local id="$1" identity canonical_id name project run_label kind created resource_marker
+  identity="$(docker inspect "$id" | jq -er '
+    .[0] | [.Id, (.Name | ltrimstr("/")),
+      .Config.Labels["com.docker.compose.project"],
+      .Config.Labels["com.confdock.smoke.run"],
+      .Config.Labels["com.confdock.smoke.kind"], .Created,
+      .Config.Labels["com.confdock.smoke.resource"]] | @tsv
+  ')" || fail 'container identity could not be inspected for registration'
+  IFS=$'\t' read -r canonical_id name project run_label kind created resource_marker \
+    <<<"$identity"
   [[ "$canonical_id" =~ ^[0-9a-f]{64}$ && "$run_label" == "$smoke_run" ]] \
     || fail 'container identity could not be registered'
   register_resource container "$canonical_id" "$name" "$project" \
@@ -372,14 +373,15 @@ register_container() {
 }
 
 register_network() {
-  local id="$1" canonical_id name project run_label kind created resource_marker
-  canonical_id="$(docker network inspect -f '{{.Id}}' "$id")"
-  name="$(docker network inspect -f '{{.Name}}' "$canonical_id")"
-  project="$(docker network inspect -f '{{index .Labels "com.docker.compose.project"}}' "$canonical_id")"
-  run_label="$(docker network inspect -f '{{index .Labels "com.confdock.smoke.run"}}' "$canonical_id")"
-  kind="$(docker network inspect -f '{{index .Labels "com.confdock.smoke.kind"}}' "$canonical_id")"
-  resource_marker="$(docker network inspect -f '{{index .Labels "com.confdock.smoke.resource"}}' "$canonical_id")"
-  created="$(docker network inspect -f '{{.Created}}' "$canonical_id")"
+  local id="$1" identity canonical_id name project run_label kind created resource_marker
+  identity="$(docker network inspect "$id" | jq -er '
+    .[0] | [.Id, .Name, .Labels["com.docker.compose.project"],
+      .Labels["com.confdock.smoke.run"],
+      .Labels["com.confdock.smoke.kind"], .Created,
+      .Labels["com.confdock.smoke.resource"]] | @tsv
+  ')" || fail 'network identity could not be inspected for registration'
+  IFS=$'\t' read -r canonical_id name project run_label kind created resource_marker \
+    <<<"$identity"
   [[ -n "$canonical_id" && "$run_label" == "$smoke_run" ]] \
     || fail 'network identity could not be registered'
   register_resource network "$canonical_id" "$name" "$project" \
@@ -387,13 +389,15 @@ register_network() {
 }
 
 register_volume() {
-  local name="$1" inspected_name project run_label kind created resource_marker
-  inspected_name="$(docker volume inspect -f '{{.Name}}' "$name")"
-  project="$(docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}' "$name")"
-  run_label="$(docker volume inspect -f '{{index .Labels "com.confdock.smoke.run"}}' "$name")"
-  kind="$(docker volume inspect -f '{{index .Labels "com.confdock.smoke.kind"}}' "$name")"
-  resource_marker="$(docker volume inspect -f '{{index .Labels "com.confdock.smoke.resource"}}' "$name")"
-  created="$(docker volume inspect -f '{{.CreatedAt}}' "$name")"
+  local name="$1" identity inspected_name project run_label kind created resource_marker
+  identity="$(docker volume inspect "$name" | jq -er '
+    .[0] | [.Name, .Labels["com.docker.compose.project"],
+      .Labels["com.confdock.smoke.run"],
+      .Labels["com.confdock.smoke.kind"], .CreatedAt,
+      .Labels["com.confdock.smoke.resource"]] | @tsv
+  ')" || fail 'volume identity could not be inspected for registration'
+  IFS=$'\t' read -r inspected_name project run_label kind created resource_marker \
+    <<<"$identity"
   [[ "$inspected_name" == "$name" && "$run_label" == "$smoke_run" ]] \
     || fail 'volume identity could not be registered'
   register_resource volume - "$name" "$project" "$run_label" "$kind" "$created" "$resource_marker"
