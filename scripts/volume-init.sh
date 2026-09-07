@@ -53,8 +53,9 @@ find "$data_dir" -mindepth 1 -maxdepth 1 -print | while IFS= read -r entry; do
     confdock.db|confdock.db-wal|confdock.db-shm) ;;
     *) fail "non-empty volume contains an unexpected entry: $name" ;;
   esac
-  [ -f "$entry" ] && [ ! -L "$entry" ] \
-    || fail "non-empty volume entry is not a regular non-link file: $name"
+  if [ ! -f "$entry" ] || [ -L "$entry" ]; then
+    fail "non-empty volume entry is not a regular non-link file: $name"
+  fi
   [ "$(stat -c '%u:%g' "$entry")" = "$expected_owner" ] \
     || fail "non-empty volume entry has an unexpected owner: $name"
   permissions="$(stat -c '%a' "$entry")"
