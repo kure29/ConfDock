@@ -40,12 +40,29 @@ grep -F "[ \"\${TARGETPLATFORM}\" != \"linux/amd64\" ]" "$repo_root/Dockerfile" 
 grep -F 'support Linux amd64 only' "$repo_root/Dockerfile" >/dev/null
 grep -F 'Node.js 22.14.0 is required for this build' "$repo_root/scripts/build-single-binary.sh" >/dev/null
 grep -F 'external: true' "$repo_root/deploy/docker/compose.yaml" >/dev/null
+if grep -Eq '^[[:space:]]+build:' "$repo_root/deploy/docker/compose.yaml"; then
+  printf '%s\n' 'production Compose must not build source implicitly' >&2
+  exit 1
+fi
+grep -F 'ghcr.io/kure29/confdock:1.0.0' "$repo_root/deploy/docker/compose.yaml" >/dev/null
+grep -F 'compose.build.yaml' "$repo_root/docs/deployment/docker.md" >/dev/null
 grep -F "name: \"\${CONFDOCK_VOLUME_NAME:-confdock-data}\"" \
   "$repo_root/deploy/docker/compose.yaml" >/dev/null
 grep -F 'stop_grace_period: 30s' "$repo_root/deploy/docker/compose.yaml" >/dev/null
 grep -F "127.0.0.1:\${CONFDOCK_HOST_PORT:-8787}:8787" "$repo_root/deploy/docker/compose.yaml" >/dev/null
 grep -F 'nocopy: true' "$repo_root/deploy/docker/compose.yaml" >/dev/null
 grep -F 'create_host_path: false' "$repo_root/deploy/docker/compose.yaml" >/dev/null
+grep -F 'profiles: [setup]' "$repo_root/deploy/docker/compose.yaml" >/dev/null
+grep -F 'network_mode: none' "$repo_root/deploy/docker/compose.yaml" >/dev/null
+grep -F 'entrypoint: ["/usr/local/libexec/confdock-volume-init"]' \
+  "$repo_root/deploy/docker/compose.yaml" >/dev/null
+grep -F 'CONFDOCK_VOLUME_INIT_DIR' "$repo_root/scripts/volume-init.sh" >/dev/null
+grep -F 'non-empty volume contains an unexpected entry' "$repo_root/scripts/volume-init.sh" >/dev/null
+if grep -Eq '(^|[[:space:]])(chown|chmod)[[:space:]].*-[Rr]' \
+  "$repo_root/scripts/volume-init.sh"; then
+  printf '%s\n' 'volume-init must never recursively change an existing volume' >&2
+  exit 1
+fi
 grep -F 'unset COMPOSE_PROJECT_NAME COMPOSE_FILE COMPOSE_ENV_FILES COMPOSE_PATH_SEPARATOR' \
   "$repo_root/scripts/smoke-docker.sh" >/dev/null
 grep -F 'CONFDOCK_ENV_FILE' "$repo_root/scripts/smoke-docker.sh" >/dev/null
@@ -99,8 +116,31 @@ if grep -F "type=volume,source=\$volume_name" "$repo_root/scripts/backup-docker.
 fi
 grep -F 'USER 10001:10001' "$repo_root/Dockerfile" >/dev/null
 grep -F 'STOPSIGNAL SIGTERM' "$repo_root/Dockerfile" >/dev/null
-grep -F 'sqlite3 tar' "$repo_root/Dockerfile" >/dev/null
+grep -F 'sqlite3=' "$repo_root/Dockerfile" >/dev/null
+grep -F 'tar=' "$repo_root/Dockerfile" >/dev/null
 grep -F 'findutils' "$repo_root/Dockerfile" >/dev/null
+grep -F 'node:22.14.0-bookworm-slim@sha256:745403dc46b5ab4c998502b07a12cbf020cf2c30645427a68ec0718f02d647de' \
+  "$repo_root/Dockerfile" >/dev/null
+grep -F 'rust:1.88.0-bookworm@sha256:4727898c104ecd2e22d780925832502faee9fe4e70581b8572af081370b315a0' \
+  "$repo_root/Dockerfile" >/dev/null
+grep -F 'debian:bookworm-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867' \
+  "$repo_root/Dockerfile" >/dev/null
+grep -F 'snapshot.debian.org/archive/debian/20260824T000000Z' "$repo_root/Dockerfile" >/dev/null
+grep -F 'snapshot.debian.org/archive/debian-security/20260824T000000Z' "$repo_root/Dockerfile" >/dev/null
+for package_version in \
+  'ca-certificates=20250419~deb12u1' \
+  'curl=7.88.1-10+deb12u15' \
+  'findutils=4.9.0-4' \
+  'passwd=1:4.13+dfsg1-1+deb12u2' \
+  'sqlite3=3.40.1-2+deb12u2' \
+  'tar=1.34+dfsg-1.2+deb12u1'; do
+  grep -F "$package_version" "$repo_root/Dockerfile" >/dev/null
+done
+grep -F 'COPY THIRD_PARTY_NOTICES.md /THIRD_PARTY_NOTICES.md' "$repo_root/Dockerfile" >/dev/null
+# shellcheck disable=SC2016 # Dockerfile expansion is intentionally checked literally.
+grep -F 'org.opencontainers.image.version="${VERSION}"' "$repo_root/Dockerfile" >/dev/null
+# shellcheck disable=SC2016 # Dockerfile expansion is intentionally checked literally.
+grep -F 'org.opencontainers.image.created="${BUILD_DATE}"' "$repo_root/Dockerfile" >/dev/null
 if grep -Eiq '^[[:space:]]*(PASSWORD|TOKEN|SECRET|PRIVATE_KEY)[A-Za-z0-9_]*[[:space:]]*=' \
   "$repo_root/deploy/docker/.env.example"; then
   printf '%s\n' '.env.example contains a secret-like assignment' >&2

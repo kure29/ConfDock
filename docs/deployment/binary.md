@@ -12,22 +12,33 @@ Internet → Nginx/Caddy（HTTPS）→ 127.0.0.1:8787 → confdock → SQLite
 
 ## 安装归档
 
-手动运行仓库 Actions 的构建 Workflow，下载临时的 `confdock-linux-x86_64` Artifact。解压后会看到：
+正式 Release 下载文件名为 `confdock-v1.0.0-linux-x86_64.tar.gz`，并提供相邻的
+`.tar.gz.sha256`。先验证外层文件再解压；归档包含：
 
 ```text
 confdock
 config.toml
+LICENSE
+THIRD_PARTY_NOTICES.md
 SHA256SUMS
 ```
 
 ```bash
+sha256sum -c confdock-v1.0.0-linux-x86_64.tar.gz.sha256
+tar -xzf confdock-v1.0.0-linux-x86_64.tar.gz
 sha256sum -c SHA256SUMS
+file confdock
+file confdock | grep -Eq 'ELF 64-bit.*x86-64'
+sudo addgroup --system confdock
+sudo adduser --system --ingroup confdock --home /var/lib/confdock --no-create-home confdock
 sudo install -m 755 confdock /usr/local/bin/confdock
-sudo install -d -m 750 /etc/confdock
-sudo install -m 640 config.toml /etc/confdock/config.toml
+sudo install -d -o confdock -g confdock -m 700 /var/lib/confdock
+sudo install -d -o root -g confdock -m 750 /etc/confdock
+sudo install -o root -g confdock -m 640 config.toml /etc/confdock/config.toml
 ```
 
-当前没有正式 Release；Artifact 只保留有限时间，不能当作长期下载地址。归档不包含数据库、密码、Token 或源码。
+Release Readiness PR 本身不创建 Tag 或 Release；只有管理员手动完成受保护 Release
+Workflow 后，正式文件才会出现。归档不包含数据库、密码、Token 或源码，也不支持 ARM64。
 
 ## 初始化与启动
 

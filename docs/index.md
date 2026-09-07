@@ -7,8 +7,8 @@ hero:
   tagline: 自托管、保留原始字节的配置管理服务。Save 与 Publish 分离，让草稿先审阅再对外提供。
   actions:
     - theme: brand
-      text: 开始使用
-      link: /guide/getting-started
+      text: Docker 快速开始
+      link: /deployment/docker-quick-start
     - theme: alt
       text: 查看 GitHub
       link: https://github.com/kure29/ConfDock
@@ -25,5 +25,5 @@ features:
 ---
 
 <div class="home-note">
-  <strong>当前文档以简体中文为主。</strong> ConfDock 目前没有正式 Release；可从源码使用 <a href="/ConfDock/deployment/docker">Docker 部署</a>，或从仓库 Actions 手动构建临时二进制 Artifact。
+  <strong>当前文档以简体中文为主。</strong> ConfDock 1.0.0 发布后可使用经过 SHA-256 校验的 Docker Bundle 和 GHCR amd64 镜像；Release Readiness PR 本身不创建 Tag、Release 或镜像。
 </div>

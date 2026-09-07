@@ -1,25 +1,32 @@
 # 快速开始
 
-本页面向第一次运行 ConfDock 单二进制的用户。
+本页面介绍第一次使用 ConfDock 的应用流程。全新部署优先使用
+[Docker 五分钟快速开始](../deployment/docker-quick-start)；单二进制仍可按
+[二进制部署](../deployment/binary)安装。
 
 ## 获取当前构建
 
-ConfDock 当前**没有正式 Release**，也没有 ARM64 Artifact。当前只验证 Linux x86-64 glibc 构建。仓库的 GitHub Actions 可通过手动 `workflow_dispatch` 生成 `confdock-linux-x86_64` Artifact；Artifact 保留 7 天，普通 Push/PR 不会长期保存。构建归档包含：
+ConfDock 1.0.0 Release 只支持 Linux x86-64 glibc。二进制归档包含：
 
 ```text
 confdock
 config.toml
+LICENSE
+THIRD_PARTY_NOTICES.md
 SHA256SUMS
 ```
 
-解压后先校验摘要（示例中的文件名来自归档，不代表某个正式版本）：
+下载后先验证相邻的外层 `.sha256`，解压后再验证内部摘要：
 
 ```bash
+sha256sum -c confdock-v1.0.0-linux-x86_64.tar.gz.sha256
+tar -xzf confdock-v1.0.0-linux-x86_64.tar.gz
 sha256sum -c SHA256SUMS
 chmod 755 confdock
 ```
 
-不要从不存在的 Release 页面下载，也不要把临时 Artifact 当作长期发行渠道。
+Release Readiness PR 本身不会创建正式 Release；只有管理员手动运行受保护的 Release
+Workflow 后，上述资产才会存在。不要把普通 CI 的临时 Artifact 当作长期发行渠道。
 
 ## 检查配置并初始化管理员
 

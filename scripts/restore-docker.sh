@@ -516,7 +516,8 @@ assert_staged_archive_unchanged
 assert_restore_volume_identity
 
 # Keep the restored database and its WAL/SHM sidecars byte-for-byte unchanged
-# during this pre-start integrity check.
+# during this pre-start integrity check. SQLite runs on a tmpfs copy because a
+# read-only WAL database may legitimately need to create a new SHM file.
 docker run --rm "${helper_label_args[@]}" --cap-drop ALL --security-opt no-new-privileges \
   --platform linux/amd64 --user 10001:10001 --read-only \
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
@@ -533,7 +534,15 @@ docker run --rm "${helper_label_args[@]}" --cap-drop ALL --security-opt no-new-p
     if find /check \( ! -user 10001 -o ! -group 10001 \) -print -quit | grep -q .; then exit 1; fi
     if find /check -type d ! -perm 700 -print -quit | grep -q .; then exit 1; fi
     if find /check -type f ! -perm 600 -print -quit | grep -q .; then exit 1; fi
-    test "$(sqlite3 -readonly "file:/check/confdock.db?mode=ro" "PRAGMA integrity_check;")" = ok
+    scratch=/var/lib/confdock/integrity
+    mkdir -m 700 "$scratch"
+    for name in confdock.db confdock.db-wal confdock.db-shm; do
+      if test -e "/check/$name" || test -L "/check/$name"; then
+        test -f "/check/$name" && test ! -L "/check/$name"
+        cp -- "/check/$name" "$scratch/$name"
+      fi
+    done
+    test "$(sqlite3 "file:$scratch/confdock.db?mode=rw" "PRAGMA integrity_check;")" = ok
   '
 assert_restore_volume_identity
 [[ -f "$config_stage_dir/config.toml" && ! -L "$config_stage_dir/config.toml" ]] \

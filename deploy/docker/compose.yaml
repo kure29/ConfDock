@@ -1,11 +1,6 @@
 services:
   confdock:
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-      args:
-        VCS_REF: ${CONFDOCK_VCS_REF:-unknown}
-    image: ${CONFDOCK_IMAGE:-confdock:local}
+    image: ${CONFDOCK_IMAGE:-ghcr.io/kure29/confdock:1.0.0}
     labels:
       com.confdock.smoke.run: ${CONFDOCK_SMOKE_RUN:-none}
       com.confdock.smoke.kind: ${CONFDOCK_SMOKE_KIND:-none}
@@ -47,6 +42,36 @@ services:
       timeout: 3s
       start_period: 10s
       retries: 5
+
+  volume-init:
+    profiles: [setup]
+    image: ${CONFDOCK_IMAGE:-ghcr.io/kure29/confdock:1.0.0}
+    platform: linux/amd64
+    user: "0:0"
+    network_mode: none
+    restart: "no"
+    read_only: true
+    entrypoint: ["/usr/local/libexec/confdock-volume-init"]
+    volumes:
+      - type: volume
+        source: confdock-data
+        target: /var/lib/confdock
+        read_only: false
+        volume:
+          nocopy: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=4m
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      com.confdock.smoke.run: ${CONFDOCK_SMOKE_RUN:-none}
+      com.confdock.smoke.kind: ${CONFDOCK_SMOKE_VOLUME_INIT_KIND:-none}
+      com.confdock.smoke.resource: ${CONFDOCK_SMOKE_VOLUME_INIT_RESOURCE:-none}
 
 volumes:
   confdock-data:

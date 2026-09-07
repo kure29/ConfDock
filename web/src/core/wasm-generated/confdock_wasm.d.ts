@@ -21,16 +21,16 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_wasmconfigcore_free: (a: number, b: number) => void;
-    readonly wasmconfigcore_applyEdit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
-    readonly wasmconfigcore_descriptor: (a: number, b: number, c: number) => [number, number, number];
-    readonly wasmconfigcore_detect: (a: number, b: number, c: number) => [number, number, number];
-    readonly wasmconfigcore_documentInfo: (a: number, b: number, c: number) => [number, number, number];
-    readonly wasmconfigcore_editCapabilities: (a: number, b: number, c: number) => [number, number, number];
     readonly wasmconfigcore_new: () => number;
-    readonly wasmconfigcore_parse: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-    readonly wasmconfigcore_schema: (a: number, b: number, c: number) => [number, number, number];
     readonly wasmconfigcore_targets: (a: number) => [number, number, number];
+    readonly wasmconfigcore_descriptor: (a: number, b: number, c: number) => [number, number, number];
+    readonly wasmconfigcore_schema: (a: number, b: number, c: number) => [number, number, number];
+    readonly wasmconfigcore_editCapabilities: (a: number, b: number, c: number) => [number, number, number];
+    readonly wasmconfigcore_detect: (a: number, b: number, c: number) => [number, number, number];
     readonly wasmconfigcore_validate: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly wasmconfigcore_parse: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly wasmconfigcore_applyEdit: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
+    readonly wasmconfigcore_documentInfo: (a: number, b: number, c: number) => [number, number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;

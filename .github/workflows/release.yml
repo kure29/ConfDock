@@ -1,0 +1,242 @@
+name: Manual Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable SemVer without the v prefix (for example 1.0.0)
+        required: true
+        type: string
+      commit_sha:
+        description: Exact 40-character commit SHA selected from main
+        required: true
+        type: string
+      confirmation:
+        description: Type release-vVERSION (for example release-v1.0.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: confdock-manual-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate without publication permission
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact requested commit without credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate main, version, SHA, tag, Release, and clean checkout
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_SHA: ${{ inputs.commit_sha }}
+          RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+        run: ./scripts/validate-release-inputs.sh "$RELEASE_VERSION" "$RELEASE_SHA" "$RELEASE_CONFIRMATION"
+
+      - name: Set up exact Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.14.0
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            docs/package-lock.json
+
+      - name: Set up exact Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.88.0
+          target: wasm32-unknown-unknown
+          components: rustfmt, clippy
+
+      - name: Install exact wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.127 --locked
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Install exact Syft
+        uses: anchore/sbom-action/download-syft@f8bdd1d8ac5e901a77a92f111440fdb1b593736b # v0.20.6
+        with:
+          syft-version: v1.50.0
+
+      - name: Run complete release dry-run
+        run: ./scripts/run-release-dry-run.sh "$RUNNER_TEMP/confdock-release-validation" confdock:release-validation
+
+  publish:
+    name: Publish after protected-environment approval
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: release
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Check out the exact requested commit without stored credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Repeat fail-closed release preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_SHA: ${{ inputs.commit_sha }}
+          RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+        run: ./scripts/validate-release-inputs.sh "$RELEASE_VERSION" "$RELEASE_SHA" "$RELEASE_CONFIRMATION"
+
+      - name: Set up exact Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.14.0
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            docs/package-lock.json
+
+      - name: Set up exact Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          toolchain: 1.88.0
+          target: wasm32-unknown-unknown
+          components: rustfmt, clippy
+
+      - name: Install exact wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.127 --locked
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Install exact Syft
+        uses: anchore/sbom-action/download-syft@f8bdd1d8ac5e901a77a92f111440fdb1b593736b # v0.20.6
+        with:
+          syft-version: v1.50.0
+
+      - name: Rebuild and revalidate from the clean release checkout
+        run: ./scripts/run-release-dry-run.sh "$RUNNER_TEMP/confdock-release" confdock:release-candidate
+
+      - name: Log in with the short-lived GitHub token
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Publish immutable image, Git tag, and GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_SHA: ${{ inputs.commit_sha }}
+          GHCR_IMAGE: ghcr.io/kure29/confdock
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          output="$RUNNER_TEMP/confdock-release"
+          major="${RELEASE_VERSION%%.*}"
+          minor="${RELEASE_VERSION%.*}"
+          immutable_sha_tag="sha-${RELEASE_SHA}"
+          manifest_descriptor="$RUNNER_TEMP/confdock-image-manifest-descriptor.json"
+          registry_check_container=''
+          partial_state='none'
+          report_partial_state() {
+            status=$?
+            if [ -n "$registry_check_container" ]; then
+              docker rm -f "$registry_check_container" >/dev/null 2>&1 || true
+            fi
+            if [ "$status" -ne 0 ] && [ "$partial_state" != none ]; then
+              printf '::error::Release stopped after partial publication. Completed state: %s. Do not overwrite immutable tags; inspect GHCR, Git refs, and Releases before any manual recovery.\n' "$partial_state"
+            fi
+            exit "$status"
+          }
+          trap report_partial_state EXIT
+
+          ./scripts/check-ghcr-immutable-tags.sh "$GHCR_IMAGE" \
+            "$RELEASE_VERSION" "$immutable_sha_tag"
+
+          # Promote the exact local image already built, smoke-tested, used for
+          # the binary artifact, and scanned for the SBOM above. Do not perform
+          # a second potentially different build in the publication step.
+          local_image='confdock:release-candidate'
+          for tag in "$RELEASE_VERSION" "$immutable_sha_tag" "$major" "$minor" latest; do
+            docker tag "$local_image" "$GHCR_IMAGE:$tag"
+            docker push "$GHCR_IMAGE:$tag"
+            partial_state="GHCR tags through $GHCR_IMAGE:$tag"
+          done
+
+          docker buildx imagetools inspect --format '{{json .Manifest}}' \
+            "$GHCR_IMAGE:$RELEASE_VERSION" >"$manifest_descriptor"
+          manifest_digest="$(jq -er '
+            .digest
+            | select(type == "string")
+            | select(test("^sha256:[0-9a-f]{64}$"))
+          ' "$manifest_descriptor")"
+          [[ "$manifest_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          for tag in "$immutable_sha_tag" "$major" "$minor" latest; do
+            alias_digest="$(docker buildx imagetools inspect \
+              --format '{{json .Manifest}}' "$GHCR_IMAGE:$tag" \
+              | jq -er '.digest | select(type == "string")')"
+            test "$alias_digest" = "$manifest_digest"
+          done
+          docker buildx imagetools inspect "$GHCR_IMAGE@$manifest_digest"
+          docker pull "$GHCR_IMAGE@$manifest_digest"
+          test "$(docker image inspect -f '{{.Architecture}}' "$GHCR_IMAGE@$manifest_digest")" = amd64
+          test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$GHCR_IMAGE@$manifest_digest")" = "$RELEASE_VERSION"
+          test "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$GHCR_IMAGE@$manifest_digest")" = "$RELEASE_SHA"
+          registry_check_container="$(docker create "$GHCR_IMAGE@$manifest_digest" --version)"
+          docker cp "$registry_check_container:/usr/local/bin/confdock" \
+            "$RUNNER_TEMP/confdock-registry-binary"
+          docker rm "$registry_check_container" >/dev/null
+          registry_check_container=''
+          cmp "$RUNNER_TEMP/confdock-registry-binary" "$output/image-binary/confdock"
+
+          printf '%s@%s\n' "$GHCR_IMAGE" "$manifest_digest" \
+            >"$output/confdock-v${RELEASE_VERSION}-image-digest.txt"
+          chmod 0644 "$output/confdock-v${RELEASE_VERSION}-image-digest.txt"
+
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f "ref=refs/tags/v$RELEASE_VERSION" \
+            -f "sha=$RELEASE_SHA" >/dev/null
+          partial_state="$partial_state; Git tag v$RELEASE_VERSION"
+
+          cat >"$output/release-notes.md" <<EOF
+          ConfDock $RELEASE_VERSION is the first stable release.
+
+          - Commit: $RELEASE_SHA
+          - Container: $GHCR_IMAGE@$manifest_digest
+          - Platform: Linux amd64 only (ARM64 is not supported by this release)
+          - Verify each downloaded archive with its adjacent .sha256 file.
+
+          The GHCR package is not anonymous-pullable until an administrator manually confirms Package visibility: Public in GitHub Package settings. No server is deployed by this workflow.
+          EOF
+
+          gh release create "v$RELEASE_VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "ConfDock v$RELEASE_VERSION" \
+            --notes-file "$output/release-notes.md" \
+            "$output/binary/confdock-v${RELEASE_VERSION}-linux-x86_64.tar.gz" \
+            "$output/binary/confdock-v${RELEASE_VERSION}-linux-x86_64.tar.gz.sha256" \
+            "$output/docker/confdock-v${RELEASE_VERSION}-docker-amd64.tar.gz" \
+            "$output/docker/confdock-v${RELEASE_VERSION}-docker-amd64.tar.gz.sha256" \
+            "$output/confdock-v${RELEASE_VERSION}-linux-amd64.spdx.json" \
+            "$output/THIRD_PARTY_NOTICES.md" \
+            "$output/confdock-v${RELEASE_VERSION}-image-digest.txt"
+          partial_state='complete'
+          trap - EXIT
+          printf 'Release v%s published. GHCR visibility still requires manual administrator confirmation.\n' "$RELEASE_VERSION"

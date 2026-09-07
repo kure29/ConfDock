@@ -27,29 +27,21 @@ A Project maps to one Target and one Native Config. Revisions store the original
 
 ## Quick start
 
-Only the Linux x86-64 glibc artifact is currently verified. There is no formal Release yet. Run the GitHub Actions `workflow_dispatch` build manually and download the temporary `confdock-linux-x86_64` artifact (retained for 7 days). It contains:
+ConfDock 1.0.0 uses a SHA-256-verified Docker Quick Start Bundle and defaults to
+`ghcr.io/kure29/confdock:1.0.0`, so users do not compile source on the server.
+This Release Readiness change does not itself create a tag, Release, or GHCR
+image. After the first manual release, an administrator must still set the
+GitHub Package visibility to Public before anonymous pulls work.
 
-```text
-confdock
-config.toml
-SHA256SUMS
-```
-
-```bash
-sha256sum -c SHA256SUMS
-./confdock config check --config ./config.toml
-./confdock admin init --config ./config.toml
-./confdock --config ./config.toml
-```
-
-`admin init` requires an interactive terminal and creates the fixed `admin` user. Non-interactive systemd startup must initialize first. Set `public_url` to the real HTTPS origin; keep the backend on `127.0.0.1:8787` and terminate HTTPS with Nginx or Caddy.
-
-Start with [binary deployment](docs/deployment/binary.md) or [Docker deployment](docs/deployment/docker.md), then configure the [reverse proxy](docs/deployment/reverse-proxy.md).
+Only Linux x86-64 is supported. Start with the
+[Docker five-minute guide](docs/deployment/docker-quick-start.md), then read the
+[complete Docker operations guide](docs/deployment/docker.md). The
+[single-binary deployment](docs/deployment/binary.md) remains supported.
 
 ## Status and boundaries
 
 - Production is an independent Rust single binary embedding React/Vite assets, WASM, SQLx migrations, and Axum routes. Node.js and the docs site are not runtime dependencies.
-- Docker deployment now builds from source and is formally verified only on Linux x86-64. There is no GHCR image, formal Release, tag, automatic backup/deploy, rollback, token rotation, clustering, or multiple administrators; ARM64 is not claimed as verified.
+- V1 distribution infrastructure targets Linux x86-64 only. A manually approved workflow builds the binary, Docker Bundle, GHCR amd64 image, SBOM, and checksums; ordinary PRs only run a read-only release dry-run. ARM64 is not claimed as verified.
 - Stable URLs return only the Served Revision; Save never auto-publishes. The public origin is persisted in `instance_settings.id=1` and does not change the listener.
 - Back up only after stopping the service, including the complete data directory, SQLite WAL/SHM sidecars, and the actual configuration directory.
 
@@ -78,4 +70,7 @@ npm run build --prefix web
 npm run docs:build --prefix docs
 ```
 
-ConfDock is licensed under [Apache License 2.0](LICENSE). Dependency scope and the future release-notice requirement are tracked in [THIRD_PARTY_LICENSE_INVENTORY.md](THIRD_PARTY_LICENSE_INVENTORY.md). The full documentation is currently maintained in Simplified Chinese; this README is kept factually aligned with it.
+ConfDock is licensed under [Apache License 2.0](LICENSE). Distributions include
+the generated [third-party notices](THIRD_PARTY_NOTICES.md); development-scope
+notes remain in [THIRD_PARTY_LICENSE_INVENTORY.md](THIRD_PARTY_LICENSE_INVENTORY.md).
+The full documentation is currently maintained in Simplified Chinese.
