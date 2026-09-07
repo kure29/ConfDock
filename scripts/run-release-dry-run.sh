@@ -115,7 +115,14 @@ find "$output_dir" -type l -print -quit | grep -q . && {
   printf '%s\n' 'release dry-run output contains a symbolic link' >&2
   exit 1
 }
-if grep -ERiq '(BEGIN .*PRIVATE KEY|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|CONFDOCK_BOOTSTRAP_PASSWORD|CONFDOCK_ADMIN_PASSWORD)' "$output_dir"; then
+if grep -ERiq '(BEGIN .*PRIVATE KEY|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})' "$output_dir"; then
+  printf '%s\n' 'release dry-run output contains secret-like content' >&2
+  exit 1
+fi
+# The compiled CLI necessarily contains its supported environment-variable
+# names. Ignore binary files for this assignment check so names alone are not
+# confused with credential values embedded in release output.
+if grep -ERIqI 'CONFDOCK_(BOOTSTRAP|ADMIN)_PASSWORD.{0,4}[:=][[:space:]]*[^[:space:]$]' "$output_dir"; then
   printf '%s\n' 'release dry-run output contains secret-like content' >&2
   exit 1
 fi
