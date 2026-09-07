@@ -61,7 +61,13 @@ tar -czf "$archive" -C "$staging_dir" \
   sha256sum -c "$(basename "$archive_sha")"
 )
 
-tar -xzf "$archive" -C "$verify_dir"
+# The verification directory itself is private (mktemp under umask 077). Extract
+# with no permission mask so the following mode checks validate the tar headers,
+# rather than modes narrowed by this script's process-wide umask.
+(
+  umask 000
+  tar -xzf "$archive" -C "$verify_dir"
+)
 expected_entries=$'LICENSE\nSHA256SUMS\nTHIRD_PARTY_NOTICES.md\nconfdock\nconfig.toml'
 actual_entries="$(find "$verify_dir" -mindepth 1 -maxdepth 1 -exec basename {} \; | LC_ALL=C sort)"
 [[ "$actual_entries" == "$expected_entries" ]] || {

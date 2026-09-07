@@ -45,12 +45,12 @@ shellcheck scripts/*.sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo test -p confdock-service --features embedded-web
 
 npm run wasm:build --prefix web
 npm run typecheck --prefix web
 npm run test --prefix web
 npm run build --prefix web
+cargo test -p confdock-service --features embedded-web
 node scripts/check-web-bundle-attribution.mjs
 npm audit --prefix web
 npm audit --prefix web --omit=dev
