@@ -99,7 +99,9 @@ grep -F '<div id="root"></div>' "$runtime_dir/spa.html" >/dev/null
 for path in /api/not-found /sub/not-found /assets/missing.js /assets/missing.css /assets/missing.wasm; do
   status="$(curl -sS -o "$runtime_dir/missing.body" -w '%{http_code}' "$base_url$path")"
   test "$status" = "404"
-  ! grep -F '<div id="root"></div>' "$runtime_dir/missing.body" >/dev/null
+  if grep -F '<div id="root"></div>' "$runtime_dir/missing.body" >/dev/null; then
+    exit 1
+  fi
 done
 
 for method in POST PUT PATCH DELETE; do

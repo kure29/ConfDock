@@ -76,7 +76,15 @@ const buildEnv = {
     : {}),
 }
 
-run(cargo, ['build', '-p', 'confdock-wasm', '--target', 'wasm32-unknown-unknown', '--release'], {
+run(cargo, [
+  'build',
+  '-p',
+  'confdock-wasm',
+  '--target',
+  'wasm32-unknown-unknown',
+  '--release',
+  '--locked',
+], {
   env: buildEnv,
 })
 run(wasmBindgen, [

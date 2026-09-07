@@ -10,6 +10,9 @@
 *.sqlite
 *.sqlite3
 data/
+deploy/docker/config.local.toml
+deploy/docker/restore-config/
+backups/
 
 # web/ 前端
 web/node_modules/

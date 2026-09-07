@@ -44,12 +44,12 @@ sha256sum -c SHA256SUMS
 
 `admin init` 需要交互式终端，会创建固定用户名 `admin`。systemd 或其他无 TTY 环境必须先完成初始化。首次部署请把 `public_url` 设置为真实 HTTPS origin；后端推荐监听 `127.0.0.1:8787`，外部通过 Nginx/Caddy HTTPS 访问。
 
-推荐先阅读 [二进制部署](docs/deployment/binary.md) 和 [systemd 步骤](docs/deployment/systemd.md)，再配置 [反向代理](docs/deployment/reverse-proxy.md)。
+推荐先阅读 [二进制部署](docs/deployment/binary.md) 或 [Docker 部署](docs/deployment/docker.md)，再配置 [反向代理](docs/deployment/reverse-proxy.md)。
 
 ## 当前状态与边界
 
 - 生产形态是独立 Rust 单二进制，内含 React/Vite 产物、WASM、SQLx migrations 和 Axum 路由；运行时不需要 Node.js 或文档站。
-- Docker、ARM64 Artifact、Windows/macOS 安装器、正式 Release、Tag、自动备份、自动 Deploy、Rollback、Token Rotation、集群和多管理员均尚未实现。
+- Docker 部署从源码构建并仅正式验证 Linux x86-64；当前没有 GHCR 镜像、正式 Release、Tag、自动备份、自动 Deploy、Rollback、Token Rotation、集群和多管理员。ARM64 未宣称已验证。
 - 稳定地址只返回 Served Revision；Save 不会自动 Publish。公开地址设置持久化在 `instance_settings.id=1`，不会改变服务监听地址。
 - 备份必须在停止服务后同时覆盖完整数据目录、SQLite WAL/SHM 和实际配置目录。
 
@@ -61,6 +61,7 @@ sha256sum -c SHA256SUMS
 
 - [快速开始与核心概念](docs/guide/getting-started.md)
 - [二进制、配置、systemd 与反向代理](docs/deployment/binary.md)
+- [Docker 部署、备份、升级与故障排查](docs/deployment/docker.md)
 - [备份、恢复、升级与故障排查](docs/operations/backup-and-restore.md)
 - [CLI、API 与安全边界](docs/reference/cli.md)
 - [架构、ADR 与本地开发](docs/development/architecture.md)

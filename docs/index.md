@@ -25,5 +25,5 @@ features:
 ---
 
 <div class="home-note">
-  <strong>当前文档以简体中文为主。</strong> ConfDock 目前没有正式 Release；请从仓库的 Actions 手动构建并下载临时 Artifact。
+  <strong>当前文档以简体中文为主。</strong> ConfDock 目前没有正式 Release；可从源码使用 <a href="/ConfDock/deployment/docker">Docker 部署</a>，或从仓库 Actions 手动构建临时二进制 Artifact。
 </div>

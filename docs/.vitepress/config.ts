@@ -35,6 +35,7 @@ export default defineConfig({
       '/deployment/': [
         { text: '部署', items: [
           { text: '二进制部署', link: '/deployment/binary' },
+          { text: 'Docker', link: '/deployment/docker' },
           { text: '配置文件', link: '/deployment/configuration' },
           { text: 'systemd', link: '/deployment/systemd' },
           { text: '反向代理', link: '/deployment/reverse-proxy' },

@@ -18,4 +18,4 @@
 
 ## 尚未实现
 
-当前没有显式 Origin 检查/CSRF Token、多管理员、集群、多实例共享存储、自动备份、Native Validator、Token Rotation、Rollback、Docker、ARM64 Artifact 或正式 Release。这些不能在部署文档中描述成已完成能力；管理面应保持同源并置于可信 HTTPS 代理之后。
+当前没有显式 Origin 检查/CSRF Token、多管理员、集群、多实例共享存储、自动备份、Native Validator、Token Rotation、应用级 Rollback、ARM64 Artifact 或正式 Release。Docker 部署仅提供从源码构建的 Linux x86_64 Compose Slice，不包含 GHCR、自动更新或自动部署；这些边界不能描述成已完成能力。管理面应保持同源并置于可信 HTTPS 代理之后。
