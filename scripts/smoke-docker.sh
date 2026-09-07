@@ -1609,8 +1609,9 @@ stop_and_assert() {
 
 assert_sqlite_integrity() {
   local volume_name="$1" integrity
-  # Mount the volume read-only as well as opening SQLite read-only. This keeps a
-  # real recovery WAL/SHM byte-for-byte stable while checking integrity.
+  # Mount the source volume read-only, copy its SQLite set to tmpfs, and let
+  # SQLite operate only on the copy. A clean WAL shutdown may remove SHM; a
+  # direct read-only open would then fail when SQLite tries to recreate it.
   integrity="$(docker run --rm "${smoke_helper_args[@]}" "${smoke_helper_security[@]}" \
     --platform linux/amd64 --user 10001:10001 --read-only \
     --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
@@ -1620,7 +1621,15 @@ assert_sqlite_integrity() {
     'test -s /data/confdock.db
      test -z "$(find /data -type l -print -quit)"
      test -z "$(find /data ! -type f ! -type d -print -quit)"
-     sqlite3 -readonly "file:/data/confdock.db?mode=ro" "PRAGMA integrity_check;"' | tr -d '\r')" \
+     scratch=/var/lib/confdock/integrity
+     mkdir -m 700 "$scratch"
+     for name in confdock.db confdock.db-wal confdock.db-shm; do
+       if test -e "/data/$name" || test -L "/data/$name"; then
+         test -f "/data/$name" && test ! -L "/data/$name"
+         cp -- "/data/$name" "$scratch/$name"
+       fi
+     done
+     sqlite3 "file:$scratch/confdock.db?mode=rw" "PRAGMA integrity_check;"' | tr -d '\r')" \
     || fail 'SQLite integrity check could not run'
   [[ "$integrity" == ok ]] || fail 'SQLite integrity check failed'
 }

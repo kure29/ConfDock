@@ -220,17 +220,27 @@ archive_listing="$(mktemp "$backup_dir/.confdock-listing.XXXXXX")"
 archive_types="$(mktemp "$backup_dir/.confdock-types.XXXXXX")"
 
 # Run the integrity check as the application UID through the already-validated
-# stopped container's exact mounts. The mount itself is read-only as well as the
-# SQLite connection, so this check cannot checkpoint, rewrite, or remove WAL/SHM
-# bytes that must be preserved by the following archive operation.
+# stopped container's exact mounts. Copy the complete SQLite file set from the
+# read-only source into tmpfs and run SQLite only against that private copy.
+# SQLite may need to create a fresh SHM file after a clean shutdown; allowing
+# that only in tmpfs avoids both false failures and source checkpoints.
 integrity_status=0
 docker run --rm "${helper_label_args[@]}" --platform linux/amd64 --user 10001:10001 \
   --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
   --network none --cap-drop ALL --security-opt no-new-privileges \
   --volumes-from "$container_id:ro" --entrypoint /bin/sh \
   "$image_ref" -eu -c \
-  'test -s /var/lib/confdock/confdock.db && test ! -L /var/lib/confdock/confdock.db &&
-   test "$(sqlite3 -readonly "file:/var/lib/confdock/confdock.db?mode=ro" "PRAGMA integrity_check;")" = ok' \
+  'source=/var/lib/confdock
+   check=/tmp/integrity
+   test -s "$source/confdock.db" && test ! -L "$source/confdock.db"
+   mkdir -m 700 "$check"
+   for name in confdock.db confdock.db-wal confdock.db-shm; do
+     if test -e "$source/$name" || test -L "$source/$name"; then
+       test -f "$source/$name" && test ! -L "$source/$name"
+       cp -- "$source/$name" "$check/$name"
+     fi
+   done
+   test "$(sqlite3 "file:$check/confdock.db?mode=rw" "PRAGMA integrity_check;")" = ok' \
   || integrity_status=$?
 assert_source_identity
 [[ "$integrity_status" == 0 ]] || fail 'SQLite integrity check failed before backup'
