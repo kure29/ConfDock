@@ -226,12 +226,12 @@ archive_types="$(mktemp "$backup_dir/.confdock-types.XXXXXX")"
 # that only in tmpfs avoids both false failures and source checkpoints.
 integrity_status=0
 docker run --rm "${helper_label_args[@]}" --platform linux/amd64 --user 10001:10001 \
-  --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+  --read-only --tmpfs /integrity:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=700 \
   --network none --cap-drop ALL --security-opt no-new-privileges \
   --volumes-from "$container_id:ro" --entrypoint /bin/sh \
   "$image_ref" -eu -c \
   'source=/var/lib/confdock
-   check=/tmp/integrity
+   check=/integrity/check
    test -s "$source/confdock.db" && test ! -L "$source/confdock.db"
    mkdir -m 700 "$check"
    for name in confdock.db confdock.db-wal confdock.db-shm; do
