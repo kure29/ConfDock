@@ -11,8 +11,8 @@ import type { DocumentInfo, LineEnding, SourceEncoding, SourceSpan } from '../co
  *    byte offset directly as a string index silently points at the wrong
  *    character. Everything that crosses that boundary goes through here.
  *
- * 2. A `<textarea>` normalizes its value's newlines to LF, and drops nothing
- *    else. To honour ADR-001's "an unchanged document round-trips
+ * 2. Browser text controls and CodeMirror's document model normalize line
+ *    separators to LF. To honour ADR-001's "an unchanged document round-trips
  *    byte-for-byte", the original BOM and line-ending style are recorded when
  *    the document is decoded and re-applied when it is encoded.
  */
@@ -107,8 +107,8 @@ export function utf8Length(text: string): number {
 
 /**
  * Decode native bytes into the text an editor can hold, plus metadata for the
- * view. Newlines are normalized to LF because a textarea does that too; native
- * bytes must remain alongside this view for lossless editing.
+ * view. Newlines are normalized to LF before CodeMirror sees them; native bytes
+ * must remain alongside this view for lossless editing.
  */
 export function decodeToEditor(bytes: Uint8Array): {
   text: string
@@ -121,8 +121,8 @@ export function decodeToEditor(bytes: Uint8Array): {
 
 /**
  * Re-apply the original BOM and line-ending style for raw editing. A mixed
- * document cannot be represented by a textarea, so this function throws unless
- * unchanged original bytes are supplied.
+ * document cannot be represented by the normalized editor view, so this
+ * function throws unless unchanged original bytes are supplied.
  */
 export function encodeFromEditor(
   text: string,

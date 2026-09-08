@@ -5,85 +5,132 @@
 }
 
 .pane {
-  display: flex;
-  align-items: stretch;
   height: 60vh;
   min-height: 320px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
   overflow: hidden;
+  resize: vertical;
 }
 
 .pane:focus-within {
   border-color: var(--border-strong);
 }
 
-/* Padding is duplicated between .gutter and .textarea on purpose: the two
- * columns scroll as one, so their first line has to start at the same y. */
-.gutter {
-  flex-shrink: 0;
+.host,
+.host :global(.cm-editor) {
   height: 100%;
   min-height: 0;
-  padding: var(--space-3) var(--space-2) var(--space-3) var(--space-3);
-  border-right: 1px solid var(--border);
-  background: var(--bg-subtle);
+}
+
+.host :global(.cm-editor) {
+  background: transparent;
+  color: var(--fg);
+}
+
+.host :global(.cm-editor.cm-focused) {
+  outline: none;
+}
+
+.host :global(.cm-scroller) {
+  overflow: auto;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
+  line-height: var(--leading-code);
+  font-variant-ligatures: none;
+}
+
+.host :global(.cm-content) {
+  min-width: max-content;
+  padding: var(--space-3) 0;
+  caret-color: var(--fg);
+}
+
+.host :global(.cm-content:focus-visible) {
+  outline-offset: -2px;
+}
+
+.host :global(.cm-line) {
+  padding: 0 var(--space-3);
+}
+
+.host :global(.cm-gutters) {
+  border-right: 1px solid var(--border);
+  background: var(--bg-subtle);
   color: var(--fg-subtle);
+}
+
+.host :global(.cm-lineNumbers .cm-gutterElement) {
+  min-width: 4.5ch;
+  padding: 0 var(--space-2) 0 var(--space-1);
   text-align: right;
-  overflow: hidden;
-  user-select: none;
 }
 
-.number {
-  position: relative;
-  min-width: 2.5ch;
-  white-space: pre;
+.host :global(.cm-diagnostic-gutter .cm-gutterElement) {
+  width: 10px;
+  padding: 0;
 }
 
-.dot {
-  position: absolute;
-  left: -6px;
-  top: 50%;
+.host :global(.cd-diagnostic-dot) {
+  display: block;
   width: 5px;
   height: 5px;
-  margin-top: -2.5px;
+  margin: var(--space-2) auto 0;
   border-radius: 50%;
 }
 
-.dotError {
+.host :global(.cd-diagnostic-error) {
   background: var(--bad);
 }
 
-.dotWarning {
+.host :global(.cd-diagnostic-warning) {
   background: var(--warn);
 }
 
-.dotInfo {
+.host :global(.cd-diagnostic-info) {
   background: var(--fg-subtle);
 }
 
-.textarea {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  min-height: 0;
-  padding: var(--space-3);
-  background: transparent;
-  color: var(--fg);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  white-space: pre;
-  overflow: auto;
-  resize: vertical;
-  tab-size: 2;
+.host :global(.cm-selectionBackground),
+.host :global(.cm-focused .cm-selectionBackground) {
+  background: var(--accent-subtle) !important;
 }
 
-.textarea:focus {
-  /* The pane border already indicates focus; a ring inside the box would sit
-   * between the numbers and the code. */
-  outline: none;
+.host :global(.cm-cursor) {
+  border-left-color: var(--fg);
+}
+
+.host :global(.cd-syntax-comment) {
+  color: var(--syntax-comment);
+}
+
+.host :global(.cd-syntax-section) {
+  color: var(--syntax-section);
+  font-weight: var(--weight-medium);
+}
+
+.host :global(.cd-syntax-key) {
+  color: var(--syntax-key);
+  font-weight: var(--weight-medium);
+}
+
+.host :global(.cd-syntax-punctuation) {
+  color: var(--syntax-punctuation);
+}
+
+.host :global(.cd-syntax-string) {
+  color: var(--syntax-string);
+}
+
+.host :global(.cd-syntax-number) {
+  color: var(--syntax-number);
+}
+
+.host :global(.cd-syntax-boolean),
+.host :global(.cd-syntax-keyword) {
+  color: var(--syntax-boolean);
+  font-weight: var(--weight-medium);
 }
 
 .meta {
@@ -110,7 +157,7 @@
 }
 
 @media (pointer: coarse), (max-width: 640px) {
-  .textarea {
+  .host :global(.cm-scroller) {
     font-size: 16px;
   }
 }

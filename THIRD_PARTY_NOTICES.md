@@ -5,7 +5,7 @@ It is generated deterministically from the locked normal dependency graphs for `
 
 Generator: `scripts/generate-third-party-notices.mjs` version 1.0.0.
 Cargo.lock SHA-256: `3cd444b6a7d29c753cd76f886f78e0a7221bc0369028813bc12148b8c77eae5c`.
-web/package-lock.json SHA-256: `da3184b799f5a3f41fed67f525c02c99cbd91d107952ce559000c515428c1c50`.
+web/package-lock.json SHA-256: `637abb9c00d5ea51e3d64899cbf98373a7c3d46872e94f9e1b23aec88576e45b`.
 
 Every dual-license expression below has an explicit selected license. Unknown, missing, or unapproved expressions fail generation. Build/test dependencies that are not in either target-specific normal Cargo graph are excluded.
 The documentation tool graph is development-only and is deliberately excluded; its independent `docs/package-lock.json` SHA-256 is `9e1ae0ee3b16501723bca9d90de8a30b3eaaf55405f648ae28123faddbba8d36` and is audited separately.
@@ -211,15 +211,60 @@ The embedded production bundle retains upstream license comments. Its production
 | Cargo | `zerovec` | `0.11.8` | `Unicode-3.0` | `Unicode-3.0` |
 | Cargo | `zerovec-derive` | `0.11.6` | `Unicode-3.0` | `Unicode-3.0` |
 | Cargo | `zmij` | `1.0.23` | `MIT` | `MIT` |
+| npm | `@codemirror/autocomplete` | `6.20.3` | `MIT` | `MIT` |
+| npm | `@codemirror/commands` | `6.11.0` | `MIT` | `MIT` |
+| npm | `@codemirror/lang-json` | `6.0.2` | `MIT` | `MIT` |
+| npm | `@codemirror/lang-yaml` | `6.1.3` | `MIT` | `MIT` |
+| npm | `@codemirror/language` | `6.12.4` | `MIT` | `MIT` |
+| npm | `@codemirror/state` | `6.7.4` | `MIT` | `MIT` |
+| npm | `@codemirror/view` | `6.43.11` | `MIT` | `MIT` |
+| npm | `@lezer/common` | `1.5.2` | `MIT` | `MIT` |
+| npm | `@lezer/highlight` | `1.2.3` | `MIT` | `MIT` |
+| npm | `@lezer/json` | `1.0.3` | `MIT` | `MIT` |
+| npm | `@lezer/lr` | `1.4.10` | `MIT` | `MIT` |
+| npm | `@lezer/yaml` | `1.0.4` | `MIT` | `MIT` |
+| npm | `@marijn/find-cluster-break` | `1.0.4` | `MIT` | `MIT` |
 | npm | `cookie` | `1.1.1` | `MIT` | `MIT` |
+| npm | `crelt` | `1.0.7` | `MIT` | `MIT` |
 | npm | `react` | `19.2.8` | `MIT` | `MIT` |
 | npm | `react-dom` | `19.2.8` | `MIT` | `MIT` |
 | npm | `react-router` | `7.18.3` | `MIT` | `MIT` |
 | npm | `react-router-dom` | `7.18.3` | `MIT` | `MIT` |
 | npm | `scheduler` | `0.27.0` | `MIT` | `MIT` |
 | npm | `set-cookie-parser` | `2.7.2` | `MIT` | `MIT` |
+| npm | `style-mod` | `4.1.3` | `MIT` | `MIT` |
+| npm | `w3c-keyname` | `2.2.8` | `MIT` | `MIT` |
 
 ## License and attribution texts
+
+### SHA-256 05c6130cda97e7600ca91427a41e8a065efcf82365fc0293e7de80faec494c07
+
+Packages: `@codemirror/autocomplete@6.20.3`, `@codemirror/commands@6.11.0`, `@codemirror/lang-json@6.0.2`, `@codemirror/language@6.12.4`, `@codemirror/state@6.7.4`, `@codemirror/view@6.43.11`.
+Upstream file names: `LICENSE`.
+
+```text
+MIT License
+
+Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
 
 ### SHA-256 0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720
 
@@ -1027,6 +1072,33 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
+### SHA-256 23852ebf6aef7fadffc92514b3c5df163a8651f2c3ed0dbb494cb49d93bd5de5
+
+Packages: `crelt@1.0.7`.
+Upstream file names: `LICENSE`.
+
+```text
+Copyright (C) 2020 by Marijn Haverbeke <marijn@haverbeke.berlin>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
 ### SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 
 Packages: `allocator-api2@0.2.21`, `atomic-waker@1.1.2`, `displaydoc@0.2.7`, `event-listener@5.4.2`, `flume@0.11.1`, `itoa@1.0.18`, `once_cell@1.21.4`, `parking@2.2.1`, `pin-project-lite@0.2.17`, `proc-macro2@1.0.107`, `quote@1.0.47`, `serde@1.0.229`, `serde_core@1.0.229`, `serde_derive@1.0.229`, `serde_json@1.0.151`, `serde_path_to_error@0.1.20`, `syn@2.0.119`, `syn@3.0.4`, `thiserror-impl@2.0.20`, `thiserror@2.0.20`, `unicode-ident@1.0.24`, `zmij@1.0.23`.
@@ -1664,6 +1736,35 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+```
+
+### SHA-256 568902fb66eaf1f11750e966b33fd7b5d7c618e65af09f35ef843635bcf5f1ba
+
+Packages: `@lezer/common@1.5.2`, `@lezer/highlight@1.2.3`, `@lezer/lr@1.4.10`.
+Upstream file names: `LICENSE`.
+
+```text
+MIT License
+
+Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 ```
 
 ### SHA-256 5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab
@@ -2494,6 +2595,33 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+### SHA-256 869c30f368eb08735e779027b9f4bc9fea2f39624351856aebe42741f0bc0884
+
+Packages: `w3c-keyname@2.2.8`.
+Upstream file names: `LICENSE`.
+
+```text
+Copyright (C) 2016 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
 ### SHA-256 8764a597675778ddfd4e25f81b08a05dbcf089ac05662df7613fe67f150e3aa2
 
 Packages: `errno@0.3.14`.
@@ -2558,6 +2686,35 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+```
+
+### SHA-256 8ac9cfc9c82c397298c2139028d2474d8e0470f2092a97edddccf353bc5d4d36
+
+Packages: `@codemirror/lang-yaml@6.1.3`.
+Upstream file names: `LICENSE`.
+
+```text
+MIT License
+
+Copyright (C) 2024 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 ```
 
 ### SHA-256 8b43ce8accd61e9d370b5ca9e9c4f953279b5c239926c62315b40e24df51b726
@@ -2680,6 +2837,35 @@ Upstream file names: `LICENSE-MIT`.
 
 ```text
 Copyright (c) 2016 Pyfisch
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+### SHA-256 9360b00fdd091f05c783b568bdd46c679c41b72415599252de98949462ea1acb
+
+Packages: `@marijn/find-cluster-break@1.0.4`.
+Upstream file names: `LICENSE`.
+
+```text
+MIT License
+
+Copyright (C) 2024 by Marijn Haverbeke <marijn@haverbeke.berlin>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -3631,6 +3817,33 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
+### SHA-256 cb4474e26547397169061d3586c00022cda5330a1b64fa13e872319f3b63aff1
+
+Packages: `style-mod@4.1.3`.
+Upstream file names: `LICENSE`.
+
+```text
+Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
 ### SHA-256 cb5aedb296c5246d1f22e9099f925a65146f9f0d6b4eebba97fd27a6cdbbab2d
 
 Packages: `winnow@1.0.4`.
@@ -3694,6 +3907,35 @@ NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+### SHA-256 ced1a70e1b8e3c2e0eaa50da2ec89f6b97fd7e0b0267da8750c9ef6ce0874f0f
+
+Packages: `@lezer/yaml@1.0.4`.
+Upstream file names: `LICENSE`.
+
+```text
+MIT License
+
+Copyright (C) 2024 by Marijn Haverbeke <marijnh@gmail.com> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
 ### SHA-256 cfdb7491dfa8800a1d561957d6a072ad63a6305ffa48386d04eae8eac8d65e8a
 
 Packages: `nu-ansi-term@0.50.3`.
@@ -3755,6 +3997,35 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+```
+
+### SHA-256 d567c6343669d83c7cb0059da4ebdf6e2d1a44396542dd4fff0702c127504e71
+
+Packages: `@lezer/json@1.0.3`.
+Upstream file names: `LICENSE`.
+
+```text
+MIT License
+
+Copyright (C) 2020 by Marijn Haverbeke <marijn@haverbeke.berlin>, Arun Srinivasan <rulfzid@gmail.com>, and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 ```
 
 ### SHA-256 d5c22aa3118d240e877ad41c5d9fa232f9c77d757d4aac0c2f943afc0a95e0ef

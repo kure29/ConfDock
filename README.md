@@ -8,7 +8,8 @@ ConfDock 是一个自托管的配置管理服务：在浏览器中导入、编�
 
 ## 主要能力
 
-- 保留 BOM、行尾、注释、字段顺序和未知字段；结构化编辑只做明确的局部 Source Span Patch。
+- 原始编辑器按 Target 提供 YAML、JSON 或 INI 风格语法高亮，同时保留 BOM、行尾、注释、字段顺序和未知字段。
+- Web 主编辑区为「原始 / 检查 / 历史」；Rust/WASM 仍保留只做明确 Source Span Patch 的底层结构化编辑能力。
 - Revision 不可变，支持历史元数据、只读详情和有限 Diff。
 - Save 只推进 Current Revision；Publish 才推进 Served Revision，Stable URL 不会泄露草稿。
 - 单管理员、SQLite 持久化、高熵 Hosted Address Token；Token 明文只在创建成功时显示一次，数据库只保存 Hash。

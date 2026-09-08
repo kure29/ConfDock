@@ -8,7 +8,8 @@ ConfDock is a self-hosted configuration manager for native proxy-client files. I
 
 ## What works today
 
-- Byte-preserving edits keep BOMs, line endings, comments, ordering, and unknown fields. Structured edits are local Source Span patches.
+- The raw editor highlights YAML, JSON, or INI-style syntax by Target while byte-preserving edits keep BOMs, line endings, comments, ordering, and unknown fields.
+- The Web workspace exposes Raw, Check, and History. The Rust/WASM core retains its bounded structured-edit APIs for local Source Span patches.
 - Immutable Revisions provide history metadata, read-only details, and bounded diffs.
 - Save advances only `currentRevisionId`; Publish advances `servedRevisionId`. Stable URLs never expose an unpublished draft.
 - Single-administrator SQLite persistence and high-entropy Hosted Address tokens. Plaintext is returned once at creation; SQLite stores only a hash.

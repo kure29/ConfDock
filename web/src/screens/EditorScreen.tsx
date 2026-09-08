@@ -3,12 +3,10 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { core } from '../core'
 import type { SourceSpan } from '../core'
 import {
-  CapabilityNotice,
   DiagnosticList,
   RevisionHistory,
   ServedUrlDialog,
   SourceEditor,
-  StructuredFieldList,
   ValidationLevelBadge,
   diagnosticMarkers,
 } from '../components'
@@ -37,15 +35,11 @@ import type { TabItem } from '../ui/Tabs'
 import page from './page.module.css'
 import styles from './EditorScreen.module.css'
 
-type EditorTab = 'raw' | 'fields' | 'check' | 'history'
+type EditorTab = 'raw' | 'check' | 'history'
 
 /**
- * The editor. Three editable/check views plus a read-only history view, all
- * grounded in one native document, defaulting to the raw bytes.
- *
- * Raw comes first because the bytes are the source of truth (ADR-001): the
- * fields view is a convenience over the same bytes, not a separate model, and it
- * can only reach what `editCapabilities()` actually promises.
+ * The editor. Raw source, validation, and read-only history are all grounded in
+ * one native document, defaulting to the raw bytes (ADR-001).
  *
  * Saving validates and advances the current draft pointer. Publishing advances
  * the served pointer only after the administrator explicitly confirms it.
@@ -183,7 +177,6 @@ export function EditorScreen() {
     )
   }
 
-  const capabilities = core.editCapabilities(project.targetId)
   const targetCapabilities = core.descriptor(project.targetId)?.capabilities
   const statusCopy = VALIDATION_STATUS_COPY[validationStatus(validation)]
   const scopeCopy = validationScopeCopy(
@@ -196,7 +189,6 @@ export function EditorScreen() {
 
   const tabs: readonly TabItem<EditorTab>[] = [
     { id: 'raw', label: '原始' },
-    { id: 'fields', label: '字段' },
     {
       id: 'check',
       label: '检查',
@@ -271,25 +263,12 @@ export function EditorScreen() {
               key={project.id}
               text={text}
               onChange={editor.setText}
+              targetId={project.targetId}
               bytes={bytes}
               info={info}
               markers={markers}
               reveal={reveal}
             />
-          </TabPanel>
-        )}
-
-        {tab === 'fields' && (
-          <TabPanel id="fields">
-            <Panel flush footer={<CapabilityNotice capabilities={capabilities} />}>
-              <StructuredFieldList
-                targetId={project.targetId}
-                source={bytes}
-                parsed={editor.parsed}
-                onEdit={(path, replacement) => editor.applyEdit({ path, replacement })}
-                onOpenRaw={() => setTab('raw')}
-              />
-            </Panel>
           </TabPanel>
         )}
 
@@ -324,6 +303,7 @@ export function EditorScreen() {
             <Panel flush>
               <RevisionHistory
                 projectId={project.id}
+                targetId={project.targetId}
                 refreshKey={historyRefresh}
               />
             </Panel>

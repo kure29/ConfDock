@@ -28,6 +28,7 @@ function summary(id: string, revisionNo: number, current = false): RevisionSumma
 
 function viewProps(overrides: Partial<Parameters<typeof RevisionHistoryView>[0]> = {}) {
   return {
+    targetId: 'sing-box' as const,
     revisions: [summary('r2', 2, true), summary('r1', 1)],
     selectedId: null,
     detail: null,
@@ -70,7 +71,9 @@ function revisionDiff(): RevisionDiff {
 
 describe('RevisionHistory view states', () => {
   it('starts with an accessible loading status before the first page arrives', () => {
-    const markup = renderToStaticMarkup(<RevisionHistory projectId="p1" refreshKey={0} />)
+    const markup = renderToStaticMarkup(
+      <RevisionHistory projectId="p1" targetId="sing-box" refreshKey={0} />,
+    )
     expect(markup).toContain('role="status"')
     expect(markup).toContain('正在读取版本历史')
   })
@@ -136,8 +139,9 @@ describe('RevisionHistory view states', () => {
         {...viewProps({ selectedId: 'r2', detail: selected })}
       />,
     )
-    expect(markup).toContain('aria-label="历史版本源码（只读）"')
-    expect(markup).toContain('readOnly=""')
+    expect(markup).toContain('版本 2 的源码')
+    expect(markup).toContain('3 B')
+    expect(markup).not.toContain('<textarea')
   })
 
   it('offers parent comparison and keeps the initial revision explicitly non-comparable', () => {

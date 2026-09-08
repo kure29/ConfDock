@@ -36,6 +36,15 @@
   --accent-subtle: #eef2f8;
   --accent-border: #b9c8dd;
 
+  /* ---- Raw editor syntax (restrained blue-gray scale) ---- */
+  --syntax-comment: #68788b;
+  --syntax-section: #355b7d;
+  --syntax-key: #3f5f8a;
+  --syntax-punctuation: #71717a;
+  --syntax-string: #53677b;
+  --syntax-number: #416c7a;
+  --syntax-boolean: #596486;
+
   /* ---- Semantic (only two) ---- */
   --warn: #a16207;
   --warn-subtle: #fefce8;
@@ -107,6 +116,14 @@
     --accent-subtle: #182130;
     --accent-border: #354766;
 
+    --syntax-comment: #8d99a6;
+    --syntax-section: #9bbcdf;
+    --syntax-key: #88acd2;
+    --syntax-punctuation: #9a9aa2;
+    --syntax-string: #a6b3c2;
+    --syntax-number: #83b0be;
+    --syntax-boolean: #a5acd2;
+
     --warn: #d4a72c;
     --warn-subtle: #241f10;
     --warn-border: #4a4023;
@@ -138,6 +155,14 @@
   --accent-fg: #0e0f11;
   --accent-subtle: #182130;
   --accent-border: #354766;
+
+  --syntax-comment: #8d99a6;
+  --syntax-section: #9bbcdf;
+  --syntax-key: #88acd2;
+  --syntax-punctuation: #9a9aa2;
+  --syntax-string: #a6b3c2;
+  --syntax-number: #83b0be;
+  --syntax-boolean: #a5acd2;
 
   --warn: #d4a72c;
   --warn-subtle: #241f10;

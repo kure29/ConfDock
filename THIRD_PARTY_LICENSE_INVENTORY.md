@@ -39,8 +39,9 @@ records plus three ConfDock workspace crates. These counts describe lock and
 build inputs; they are not a substitute for a release notice or a claim that
 every record is linked into the final executable.
 
-The npm lockfile contains 152 installed package records: 141 MIT, 3
-Apache-2.0, 6 ISC, 1 BSD-3-Clause, and 1 CC-BY-4.0.
+The npm lockfile contains 207 installed package records: 185 MIT, 4
+Apache-2.0, 7 ISC, 3 BlueOak-1.0.0, 2 BSD-2-Clause, 2 BSD-3-Clause,
+2 MIT-0, 1 CC0-1.0, and 1 CC-BY-4.0.
 
 ## Rust runtime dependency inputs
 
@@ -100,10 +101,26 @@ the released runtime artifact.
 
 ## Web runtime dependency inputs
 
-The production dependency closure contains seven package records, all MIT:
+The production dependency closure contains 23 package records, all MIT:
 
 | Package | Locked version |
 | --- | ---: |
+| @codemirror/autocomplete | 6.20.3 |
+| @codemirror/commands | 6.11.0 |
+| @codemirror/lang-json | 6.0.2 |
+| @codemirror/lang-yaml | 6.1.3 |
+| @codemirror/language | 6.12.4 |
+| @codemirror/state | 6.7.4 |
+| @codemirror/view | 6.43.11 |
+| @lezer/common | 1.5.2 |
+| @lezer/highlight | 1.2.3 |
+| @lezer/json | 1.0.3 |
+| @lezer/lr | 1.4.10 |
+| @lezer/yaml | 1.0.4 |
+| @marijn/find-cluster-break | 1.0.4 |
+| crelt | 1.0.7 |
+| style-mod | 4.1.3 |
+| w3c-keyname | 2.2.8 |
 | react | 19.2.8 |
 | react-dom | 19.2.8 |
 | scheduler | 0.27.0 |
@@ -114,8 +131,9 @@ The production dependency closure contains seven package records, all MIT:
 
 ## Web build and test dependency inputs
 
-The other 145 npm lockfile records support development, typechecking, testing,
-or bundling. This includes `caniuse-lite` 1.0.30001810, which is marked as a
+The other 184 npm lockfile records support development, typechecking, testing,
+or bundling. This includes `jsdom` 30.0.1 for CodeMirror DOM regression tests
+and `caniuse-lite` 1.0.30001810, which is marked as a
 development dependency and publishes `CC-BY-4.0`. Its browser-compatibility
 data originates from caniuse.com. The current production bundle inspection did
 not identify `caniuse-lite` as a runtime module, but the Release Slice must
@@ -125,9 +143,8 @@ is distributed.
 ## Static third-party resources
 
 ConfDock currently distributes no third-party client logos or client icon
-image files. The client markers are original CSS text markers maintained by
-ConfDock. No third-party font or remote runtime image is required by those
-markers.
+image files. Target names are rendered as plain text. No third-party font or
+remote runtime image is required.
 
 ## Relationship to the release notices
 

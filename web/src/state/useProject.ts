@@ -4,24 +4,19 @@ import type { ApiError, Project, ProjectSummary, PublishResult, SaveResult } fro
 import { core } from '../core'
 import type {
   DocumentInfo,
-  EditError,
   LineEnding,
-  ParseError,
-  ParsedDocument,
   Result,
-  StructuredEdit,
   ValidationResult,
 } from '../core'
-import { err, ok } from '../core'
+import { err } from '../core'
 import { bytesEqual, decodeToEditor, encodeFromEditor } from '../lib/bytes'
 
 /**
  * Editor state for one project.
  *
  * The native bytes are the source of truth (ADR-001). Text is a decoded view;
- * raw edits re-encode only uniform LF/CRLF documents, while structured edits
- * patch `workingBytes` directly. This keeps mixed-line-ending documents
- * byte-stable until a supported structured edit changes one span.
+ * raw edits re-encode only uniform LF/CRLF documents. Mixed-line-ending
+ * documents stay byte-stable and read-only in the Web raw editor.
  */
 
 export type ProjectStatus = 'loading' | 'missing' | 'error' | 'ready'
@@ -30,7 +25,7 @@ export interface ProjectEditor {
   status: ProjectStatus
   project: Project | null
   loadError: ApiError | null
-  /** LF-normalized text held by the textarea. */
+  /** LF-normalized text held by the editor view. */
   text: string
   setText: (next: string) => void
   /** Encoding / line ending of the bytes currently in hand. */
@@ -42,8 +37,6 @@ export interface ProjectEditor {
   validation: ValidationResult
   /** True while `validation` still describes slightly older text. */
   validating: boolean
-  parsed: Result<ParsedDocument, ParseError>
-  applyEdit: (edit: StructuredEdit) => Result<void, EditError>
   saving: boolean
   save: () => Promise<Result<SaveResult, ApiError>>
   publishing: boolean
@@ -185,27 +178,6 @@ export function useProject(id: string): ProjectEditor {
         : core.validate(targetId, settled),
     [targetId, settled],
   )
-  const parsed = useMemo<Result<ParsedDocument, ParseError>>(
-    () =>
-      targetId === undefined
-        ? err<ParseError, ParsedDocument>({ diagnostics: [] })
-        : core.parse(targetId, settled),
-    [targetId, settled],
-  )
-
-  const applyEdit = useCallback(
-    (edit: StructuredEdit): Result<void, EditError> => {
-      if (!project) {
-        return err<EditError, void>({ kind: 'parseFailed', detail: 'project not loaded' })
-      }
-      const result = core.applyEdit(project.targetId, workingBytes, edit)
-      if (!result.ok) return err<EditError, void>(result.error)
-      setWorkingBytes(new Uint8Array(result.value))
-      return ok<void, EditError>(undefined)
-    },
-    [project, workingBytes],
-  )
-
   const mutationBusy = useCallback(
     (): Result<never, ApiError> =>
       err<ApiError, never>({
@@ -341,8 +313,6 @@ export function useProject(id: string): ProjectEditor {
     dirty,
     validation,
     validating: settled !== bytes,
-    parsed,
-    applyEdit,
     saving,
     save,
     publishing,

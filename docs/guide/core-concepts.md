@@ -30,7 +30,7 @@ Save 不会自动 Publish。只要两个指针不同，项目就有未发布变�
 
 ## 原始字节为何重要
 
-Revision 保存 SQLite BLOB，`/sub/:token` 直接返回该 BLOB，不转成 JSON 字符串、不重新序列化、不追加换行。BOM、LF/CRLF、尾部换行、注释、顺序和未知字段因此可以保持不变。结构化编辑只替换明确的 Source Span，无法安全定位时请使用 Raw Editor。
+Revision 保存 SQLite BLOB，`/sub/:token` 直接返回该 BLOB，不转成 JSON 字符串、不重新序列化、不追加换行。BOM、LF/CRLF、尾部换行、注释、顺序和未知字段因此可以保持不变。Web 的原始编辑器只在视图层增加语法高亮；暂时保留的 Rust/WASM 结构化接口也只替换明确的 Source Span，当前 Web 不提供字段页。
 
 ## 历史、Diff 与删除
 
