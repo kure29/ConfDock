@@ -16,9 +16,11 @@ feature with separate safety guarantees.
 
 ## Single source of truth
 
-The native source bytes are the only source of truth. Raw editing, structured
-editing, and a future schema editor are views over the same bytes. We do not
-persist a parallel GUI state, compiler state, or universal intent IR.
+The native source bytes are the only source of truth. The current Web workspace
+exposes Raw, Check, and History; its Target-selected syntax highlighting is only
+a view over the same bytes. Structured parsing and patch APIs remain available
+in Rust/WASM for future callers, but the Web no longer exposes a Fields tab. We
+do not persist a parallel GUI state, compiler state, or universal intent IR.
 
 `NativeDocument` records the original bytes, encoding, line-ending style, and
 trailing-newline state. A document that was not changed must round-trip
@@ -57,6 +59,8 @@ there is no separately maintained schema boolean. Likewise,
 safety constraints instead of claiming blanket structured-edit support. The
 integration test `capability_contracts_match_real_schema_and_validation`
 constrains the matrix's schema and validation claims against the registry.
+The matrix records retained core capabilities, not controls currently rendered
+by the Web workspace.
 
 ## Source-preserving editing
 

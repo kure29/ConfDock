@@ -2,7 +2,7 @@
 
 单管理员的 React 前端：导入一份**原生**客户端配置，改它，校验它，把它托管出去。
 
-界面刻意很小 —— **5 屏 + 1 个对话框**：登录 → 配置列表 → 新建 → 编辑器（原始 / 字段 / 检查 / 历史）→ 设置，加一个「托管地址」。
+界面刻意很小 —— **5 屏 + 1 个对话框**：登录 → 配置列表 → 新建 → 编辑器（原始 / 检查 / 历史）→ 设置，加一个「托管地址」。
 
 ---
 
@@ -26,12 +26,13 @@ npm run dev --prefix web # http://127.0.0.1:5173
 Vite 把 `/api` 和 `/sub` 同源代理到 `127.0.0.1:8787`。WASM 构建需要 Rust
 1.88.0、`wasm32-unknown-unknown` 和 `wasm-bindgen-cli 0.2.127`。
 
-运行时依赖为 `react` `react-dom` `react-router-dom`；开发依赖包括 `vite`
-`@vitejs/plugin-react` `typescript` 与 `vitest`。
+运行时依赖为 `react`、`react-dom`、`react-router-dom`，以及按模块固定版本的
+CodeMirror 6 编辑、语言和高亮包；开发依赖包括 `vite`、`@vitejs/plugin-react`、
+`typescript`、`vitest` 与用于真实 DOM 回归测试的 `jsdom`。
 `npm run typecheck`、`npm run test` 和 `npm run build` 会通过 npm lifecycle
 自动生成 WASM glue 与 `.wasm` 文件，因此不需要手工复制产物。
 生成目录是 `src/core/wasm-generated/`，其中 JS/WASM 产物不提交，只有声明文件保留在仓库。
-没有 UI 库、CSS 框架、状态库、图标库，也没有 CodeMirror / Monaco —— 字体全部走系统栈，**零网络请求**。
+没有 UI 库、CSS 框架、状态库、图标库或 Monaco。CodeMirror 只在本地执行编辑与语法高亮；字体全部走系统栈，高亮不会产生网络请求。
 
 首次进入数据库为空；使用 Bootstrap Password 登录后导入配置。项目、Revision、Session
 和 Stable Token 元数据都由 SQLite 持久化。localStorage 只用于主题偏好。
@@ -69,9 +70,9 @@ Vite 把 `/api` 和 `/sub` 同源代理到 `127.0.0.1:8787`。WASM 构建需要 
 | 头像菜单 / 成员 / 角色 / 通知中心 | 单管理员 |
 | 指标卡 / 可用性折线 / 请求数 | 一个人管几个配置，这些数字要么是编的，要么没有意义 |
 | 绿色 ✓ 校验通过 | 校验分 4 级，失败时报**实际到达的最深层**。`basic` 是「只做了编码和最保守的检查」，不是「通过」。徽章始终写出层级本名，`title` 里带定义和 caveat |
-| 组件里的 target 分支 | architecture.md L162：编辑器 shell 消费 Target Registry。`components/` 和 `screens/` 里没有一处 `if (targetId === 'mihomo')` |
+| 散落在组件里的 target 分支 | 编辑器 shell 消费 Target Registry；仅 `editorLanguage.ts` 集中维护 Target → 高亮语言映射 |
 
-最后一条是可验证的：`StructuredFieldList` 全部读 `core.schema()` / `core.editCapabilities()`。Mihomo 出现一行 integer 输入，是因为它的 schema 里有一个字段；Surge 出现扫描到的 `[General]` 键，是因为它的 scope 是 `existingSectionKeys`；sing-box 多一个 JSON Pointer 表单，是因为它的 scope 是 `existingJsonPointerValues`。新增一个 target 不需要动 React。
+最后一条是可验证的：Mihomo 映射到 YAML，sing-box 映射到 JSON，Surge、Loon、Quantumult X 和 Shadowrocket 映射到同一个容错的 INI 风格高亮器。该映射只选择视觉语言，不参与校验或序列化。Rust/WASM 的 `schema()`、`parse()`、`editCapabilities()` 与 `applyEdit()` 仍保留，但当前 Web 不渲染字段页。
 
 ---
 
@@ -95,7 +96,7 @@ src/
 `createHttpApi()` 连接真实 Axum/SQLite Service。服务端在创建与保存时再次直接调用
 `confdock-core`，不会信任浏览器校验结果。
 
-`lib/copy.ts` 是**所有面向用户的文案**的唯一出处，包括 4 个校验层级的定义和 `EditError` 的人话翻译。改文案改这一个文件。适配器返回的英文 `detail` / `safetyNotes` 一律**原文照登**（等宽字体），不翻译、不改写 —— 那是 Rust 侧的准确措辞。
+`lib/copy.ts` 是**共享面向用户文案**的唯一出处，包括 4 个校验层级的定义。当前 Web 不再显示结构化编辑的 `EditError` / `safetyNotes` 文案；对应 Rust/WASM DTO 和能力接口继续保留。
 
 ---
 
@@ -113,8 +114,9 @@ await initializeCore()
 root.render(<App />)
 ```
 
-`mockCore.ts` 与重复的 `registry.ts` 已删除；TargetPicker 和结构化编辑器全部从
-`core.targets()`、`core.schema()` 与 `core.editCapabilities()` 读取能力，Settings 只管理实例设置与外观。WASM 初始化失败时只显示
+`mockCore.ts` 与重复的 `registry.ts` 已删除；TargetPicker 从 `core.targets()` 读取能力，
+原始编辑器通过 Project 的 `TargetId` 选择高亮语言，Settings 只管理实例设置与外观。
+WASM 仍暴露结构化解析和 Source Span Patch 接口，但 Web 字段页已移除。WASM 初始化失败时只显示
 明确的启动错误，不会静默回退到 TypeScript 解析器。`isStrictJsonLiteral` 也不再存在于前端，
 最终值安全判断由 Rust adapter 执行。
 
@@ -189,8 +191,9 @@ BLOB，不转字符串、不重新序列化、不追加换行。保存使用 `ex
 ### Native Bytes V1 边界
 
 编辑器以 `Uint8Array` 原生字节为唯一状态，BOM、Unicode、纯 LF/CRLF 和尾换行均可
-无损往返。混合 LF/CRLF 文件初次加载不会变脏；原始编辑暂时只读并明确提示，结构化
-编辑直接做 Source Span 局部 Patch，不会静默把整份文件归一化。
+无损往返。CodeMirror 只接收 `decodeToEditor` 生成的 LF 视图，真实编辑再由
+`encodeFromEditor` 恢复原 BOM 和行尾偏好。混合 LF/CRLF 文件初次加载不会变脏，
+原始编辑暂时只读并明确提示；底层 Source Span Patch 接口仍保留但当前 Web 不提供字段页。
 
 ### Revision Diff V1
 
@@ -210,10 +213,10 @@ Token repointing 或 Native Validator。
 
 唯一的转换入口是 `lib/bytes.ts` 的 `spanToEditorRange()`（内部走一张前缀映射表），行列号再由 `lib/lines.ts` 的 `lineColumn()` / `linesInRange()` 在字符下标上换算。`DiagnosticList` 的行列号、`SourceEditor` 的行号槽色点、点击诊断后的选区，全部经过它。**不要**在别处自己算偏移。
 
-**2. BOM 与行尾必须原样带回。** textarea 里没有 BOM、行尾一律是 `\n`。`useProject` 以
-`workingBytes` 作为唯一编辑状态；`decodeToEditor` 只提供视图，纯 LF/CRLF 的原始编辑
+**2. BOM 与行尾必须原样带回。** CodeMirror 的视图文本不含 BOM，行尾统一为 `\n`。`useProject` 以
+`workingBytes` 作为唯一编辑状态；`decodeToEditor` 只提供该规范化视图，纯 LF/CRLF 的原始编辑
 通过 `encodeFromEditor` 写回 BOM 和行尾。混合行尾原始编辑只读，结构化编辑直接对
-原生 bytes 做 Source Span Patch。
+原生 bytes 做 Source Span Patch 的接口只保留在 Rust/WASM 底层。
 
 同理，**导入时不要把文件内容塞进 textarea**。`ImportPanel` 的 `ImportSource` 是个判别联合：拖进来的文件保留原始字节并只显示一行摘要，只有粘贴的文本才是可编辑的 —— 否则「未改动的保存必须逐字节往返」这条契约在文件进库之前就已经破了。
 
@@ -234,5 +237,6 @@ Token repointing 或 Native Validator。
 - 全流程键盘可达，焦点环可见
 - 对话框用原生 `<dialog>` + `showModal()` —— 焦点陷阱、背景 inert、Esc 关闭、top layer 都是白送的，也是这个项目不需要对话框依赖的原因
 - tabs 是真的 `role="tablist"` + `aria-selected` + `aria-controls`
+- 原始编辑区是有明确名称的多行 textbox；CodeMirror gutter 对辅助技术隐藏
 - 表单控件都有真 `<label for>`；提示与错误通过 `aria-describedby` 关联
 - 校验层级徽章不靠颜色单独传达信息，永远同时写出层级名称

@@ -10,16 +10,16 @@ ConfDock 不是代理内核，也不运行代理流量。它不管理客户端�
 
 ## 支持的 Target
 
-| Target | 文件 | 当前校验层级 | 结构化编辑边界 |
-| --- | --- | --- | --- |
-| Mihomo | YAML / YML | Static | 仅安全、唯一的顶层 `mixed-port` 十进制值 |
-| sing-box | JSON | Syntax | 仅唯一、已存在的 RFC 6901 JSON Pointer 值 |
-| Surge | CONF | Basic | 仅大小写敏感的 `[General]` 唯一键 |
-| Loon | CONF | Basic | 仅大小写敏感的 `[General]` 唯一键 |
-| Quantumult X | CONF | Basic | 仅大小写敏感的 `[general]` 唯一键 |
-| Shadowrocket | CONF | Basic | 仅大小写敏感的 `[General]` 唯一键 |
+| Target | 文件 | 原始编辑器高亮 | 当前校验层级 | 底层结构化编辑边界 |
+| --- | --- | --- | --- | --- |
+| Mihomo | YAML / YML | YAML | Static | 仅安全、唯一的顶层 `mixed-port` 十进制值 |
+| sing-box | JSON | JSON | Syntax | 仅唯一、已存在的 RFC 6901 JSON Pointer 值 |
+| Surge | CONF | INI 风格 | Basic | 仅大小写敏感的 `[General]` 唯一键 |
+| Loon | CONF | INI 风格 | Basic | 仅大小写敏感的 `[General]` 唯一键 |
+| Quantumult X | CONF | INI 风格 | Basic | 仅大小写敏感的 `[general]` 唯一键 |
+| Shadowrocket | CONF | INI 风格 | Basic | 仅大小写敏感的 `[General]` 唯一键 |
 
-所有 Target 都保留 Raw Editor。字段缺失、重复、边界不明确或语法过于复杂时，结构化编辑会拒绝猜测，让你继续使用原始编辑。
+Web 主编辑区域只提供「原始 / 检查 / 历史」三个视图，不再提供字段页。所有 Target 都使用 Raw Editor；高亮只改变视觉表现，不会格式化或重新序列化内容。上表最后一列描述的是暂时保留的 Rust/WASM 底层接口边界，不代表当前 Web 界面提供结构化字段编辑。
 
 ## 校验边界
 

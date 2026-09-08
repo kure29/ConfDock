@@ -15,7 +15,7 @@ hero:
 
 features:
   - title: 原始字节保真
-    details: 保留 BOM、行尾、注释、顺序和未知字段；结构化编辑只做明确的局部 Source Span Patch。
+    details: 原始编辑器按 Target 高亮 YAML、JSON 或 INI 风格语法，同时保留 BOM、行尾、注释、顺序和未知字段。
   - title: Revision 历史
     details: 每次保存变成不可变 Revision，可分页查看元数据并只读比较，不覆盖正在编辑的内容。
   - title: Draft / Publish 分离

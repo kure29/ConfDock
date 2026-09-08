@@ -1,11 +1,8 @@
 import type {
   DetectionConfidence,
   DiagnosticSeverity,
-  EditErrorKind,
   LineEnding,
-  SchemaValueType,
   SourceEncoding,
-  StructuredEditScope,
   ValidationLevel,
   ValidationResult,
 } from '../core/types'
@@ -111,71 +108,6 @@ export const SEVERITY_COPY: Record<DiagnosticSeverity, string> = {
 }
 
 // ---------------------------------------------------------------------------
-// Structured edit failures
-// ---------------------------------------------------------------------------
-
-export interface EditErrorCopy {
-  title: string
-  /** What the user can actually do about it. Every path leads back to 原始编辑,
-   * because that is the one editor that can always express the change. */
-  hint: string
-}
-
-export const EDIT_ERROR_COPY: Record<EditErrorKind, EditErrorCopy> = {
-  unsupportedEncoding: {
-    title: '不支持的编码',
-    hint: '只支持 UTF-8 文件。源文件未被改动。',
-  },
-  parseFailed: {
-    title: '无法安全解析文档',
-    hint: '先在「原始」里修好结构，再回到字段编辑。',
-  },
-  fieldNotFound: {
-    title: '文档里没有这个字段',
-    hint: '字段编辑只修改已存在的内容；需要新增请用「原始」。',
-  },
-  ambiguousField: {
-    title: '这个字段出现了多次，无法判断改哪一个',
-    hint: '在「原始」里删掉重复项，或直接在那里改目标那一处。',
-  },
-  unsafeValue: {
-    title: '这个值不能安全写入',
-    hint: '值不能为空、不能换行；JSON 目标需要一个合法的 JSON 字面量。',
-  },
-  unsupportedEdit: {
-    title: '这一处不在可编辑范围内',
-    hint: '这一处暂时不能在字段编辑中修改，请用「原始」编辑。',
-  },
-}
-
-// ---------------------------------------------------------------------------
-// Structured edit scope
-// ---------------------------------------------------------------------------
-
-/** Plain-language rendering of `StructuredEditScope`. Paired with the
- * adapter's own `safetyNotes`, which is always shown verbatim next to it. */
-export function describeScope(scope: StructuredEditScope): string {
-  switch (scope.kind) {
-    case 'exactPaths':
-      return `可以修改这些配置项：${scope.paths.join('、')}`
-    case 'existingJsonPointerValues':
-      return '可以修改配置中已经存在的内容'
-    case 'existingSectionKeys': {
-      const sections = scope.sections.map((section) => `[${section}]`).join('、')
-      const sensitivity = scope.caseSensitive ? '，名称需完全一致' : ''
-      return `可以修改 ${sections} 段内已有的内容${sensitivity}`
-    }
-  }
-}
-
-export const SCOPE_HEADING = '可编辑范围'
-
-/** Shown where a target exposes no schema at all. */
-export function noSchemaNotice(displayName: string): string {
-  return `${displayName} 暂不支持字段编辑。`
-}
-
-// ---------------------------------------------------------------------------
 // Document metadata
 // ---------------------------------------------------------------------------
 
@@ -194,7 +126,7 @@ export const LINE_ENDING_COPY: Record<LineEnding, string> = {
 
 /** The one case where a save cannot be byte-exact, so it is stated up front. */
 export const MIXED_LINE_ENDING_WARNING =
-  '这份文件的换行格式不一致，为避免改坏内容，原始编辑暂不可用。你仍可使用字段编辑。'
+  '这份文件的换行格式不一致，为避免改坏内容，原始编辑暂不可用；内容仍会按原始字节保留。'
 
 export const BOM_NOTICE = '文件开头的特殊标记会在保存时保留。'
 
@@ -215,21 +147,6 @@ export const CONFIDENCE_COPY: Record<DetectionConfidence, string> = {
 
 /** `detect` is advisory only (architecture.md). The picker says so. */
 export const DETECTION_NOTICE = '检测结果只是建议，最终以你选择的客户端为准。'
-
-// ---------------------------------------------------------------------------
-// Schema value types
-// ---------------------------------------------------------------------------
-
-export const VALUE_TYPE_COPY: Record<SchemaValueType, string> = {
-  string: '字符串',
-  integer: '整数',
-  boolean: '布尔',
-  number: '数字',
-  object: '对象',
-  array: '数组',
-  null: 'null',
-  any: '任意',
-}
 
 // ---------------------------------------------------------------------------
 // Draft / publish semantics (ADR-005)

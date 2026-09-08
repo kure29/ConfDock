@@ -25,14 +25,6 @@ const mocks = vi.hoisted(() => ({
       byteLength: source.byteLength,
     }),
     validate: () => ({ level: 'basic' as const, diagnostics: [] }),
-    parse: () => ({ ok: true as const, value: { info: undefined, fields: [] } }),
-    applyEdit: () => ({ ok: true as const, value: new Uint8Array() }),
-    editCapabilities: () => ({
-      rawEdit: true,
-      validationLevel: 'basic' as const,
-      nativeValidation: false,
-      sections: [],
-    }),
   },
 }))
 
@@ -46,12 +38,10 @@ vi.mock('./ToastContext', () => ({ useToast: () => mocks.toast }))
 vi.mock('../components', () => {
   const Passthrough = ({ children }: { children?: ReactNode }) => children ?? null
   return {
-    CapabilityNotice: Passthrough,
     DiagnosticList: Passthrough,
     RevisionHistory: Passthrough,
     ServedUrlDialog: () => null,
     SourceEditor: Passthrough,
-    StructuredFieldList: Passthrough,
     TargetBadge: () => null,
     ValidationLevelBadge: () => null,
     diagnosticMarkers: () => [],
@@ -403,6 +393,30 @@ describe('useProject rename and write交错', () => {
       .filter((children): children is string => typeof children === 'string')
     expect(spanText).toContain('Registry sing-box')
     expect(spanText).not.toContain('SB')
+    renderer.unmount()
+  })
+
+  it('exposes only 原始、检查、历史 and keeps all three tabs switchable', async () => {
+    const load = deferred<Result<Project, ApiError>>()
+    mocks.api.getProject.mockImplementationOnce(() => load.promise)
+    let renderer!: ReturnType<typeof create>
+    await act(async () => {
+      renderer = create(<EditorScreen />)
+    })
+    await resolve(load, result(project('p1')))
+
+    const tabs = () => renderer.root.findAllByProps({ role: 'tab' })
+    const labels = tabs().map((tab) => tab.props.children[0])
+    expect(labels).toEqual(['原始', '检查', '历史'])
+    expect(labels).not.toContain('字段')
+
+    for (const label of ['检查', '历史', '原始']) {
+      const tab = tabs().find((candidate) => candidate.props.children[0] === label)
+      expect(tab).toBeDefined()
+      await act(async () => tab?.props.onClick())
+      expect(tab?.props['aria-selected']).toBe(true)
+      expect(renderer.root.findByProps({ role: 'tabpanel' })).toBeDefined()
+    }
     renderer.unmount()
   })
 })

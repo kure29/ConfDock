@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import type { Revision, RevisionDiff, RevisionPage, RevisionSummary } from '../api'
+import type { TargetId } from '../core'
 import { decodeToEditor } from '../lib/bytes'
 import {
   REVISION_BYTES_LABEL,
@@ -47,11 +48,13 @@ const REVISION_PAGE_SIZE = 50
 
 interface RevisionHistoryProps {
   projectId: string
+  targetId: TargetId
   /** Increment after a save so unchanged saves refresh validation metadata too. */
   refreshKey: number
 }
 
 export interface RevisionHistoryViewProps {
+  targetId: TargetId
   revisions: RevisionSummary[]
   selectedId: string | null
   detail: Revision | null
@@ -211,6 +214,7 @@ export function isRevisionRequestCurrent(activeSerial: number, requestSerial: nu
  */
 export function RevisionHistory({
   projectId,
+  targetId,
   refreshKey,
 }: RevisionHistoryProps) {
   const [revisions, setRevisions] = useState<RevisionSummary[] | null>(null)
@@ -416,6 +420,7 @@ export function RevisionHistory({
 
   return (
     <RevisionHistoryView
+      targetId={targetId}
       revisions={revisions}
       selectedId={selectedId}
       detail={detail}
@@ -443,6 +448,7 @@ export function RevisionHistory({
  * requiring a browser DOM or coupling them to the HTTP client.
  */
 export function RevisionHistoryView({
+  targetId,
   revisions,
   selectedId,
   detail,
@@ -549,6 +555,7 @@ export function RevisionHistoryView({
             <p className={styles.message}>{REVISION_HISTORY_SELECT}</p>
           ) : (
             <RevisionDetail
+              targetId={targetId}
               revision={detail}
               diff={diff}
               diffLoading={diffLoading}
@@ -566,6 +573,7 @@ export function RevisionHistoryView({
 }
 
 function RevisionDetail({
+  targetId,
   revision,
   diff,
   diffLoading,
@@ -575,6 +583,7 @@ function RevisionDetail({
   onRetryDiff,
   onShowSource,
 }: {
+  targetId: TargetId
   revision: Revision
   diff: RevisionDiff | null
   diffLoading: boolean
@@ -669,6 +678,7 @@ function RevisionDetail({
             key={revision.id}
             text={decoded.text}
             onChange={() => undefined}
+            targetId={targetId}
             bytes={revision.source}
             info={decoded.info}
             readOnly

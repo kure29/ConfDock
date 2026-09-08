@@ -91,7 +91,7 @@ export const VALIDATION_LEVEL_ORDER: readonly ValidationLevel[] = [
 
 /**
  * Byte offsets into the native source — **not** JavaScript string indexes.
- * Convert with `lib/bytes.ts` before touching a textarea selection.
+ * Convert with `lib/bytes.ts` before touching an editor selection.
  */
 export interface SourceSpan {
   start: number

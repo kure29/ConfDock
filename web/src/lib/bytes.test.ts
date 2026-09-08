@@ -28,6 +28,24 @@ describe('native byte views', () => {
     expect(bytesEqual(encodeFromEditor(decoded.text, decoded.info), bytes)).toBe(true)
   })
 
+  it('preserves CRLF, blank lines, trailing spaces, Unicode, and missing final newline together', () => {
+    const original = new Uint8Array([
+      0xef,
+      0xbb,
+      0xbf,
+      ...encodeUtf8('第一行: true  \r\n\r\npath: /家庭网络/a-b\t'),
+    ])
+    const decoded = decodeToEditor(original)
+
+    expect(decoded.text).toBe('第一行: true  \n\npath: /家庭网络/a-b\t')
+    expect(decoded.info).toMatchObject({
+      encoding: 'utf8-bom',
+      lineEnding: 'crlf',
+      hasTrailingNewline: false,
+    })
+    expect(bytesEqual(encodeFromEditor(decoded.text, decoded.info), original)).toBe(true)
+  })
+
   it('retains a CRLF raw-edit preference across a temporary single line', () => {
     const original = encodeUtf8('first\r\nsecond\r\n')
     const info = documentInfo(original)
